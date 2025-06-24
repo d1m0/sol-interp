@@ -1,0 +1,8 @@
+node_modules
+.vscode
+.nyc_output
+dist
+coverage
+*.swp
+*.swn
+*.swo
