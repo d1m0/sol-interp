@@ -20,7 +20,9 @@
     },
     "dependencies": {
         "solc-typed-ast": "^18.2.5",
-	"sol-dbg": "^0.7.2"
+        "sol-dbg": "^0.7.2",
+        "@ethereumjs/util": "10.0.0",
+        "semver": "^7.6.3"
     },
     "devDependencies": {
         "@types/debug": "^4.1.12",
@@ -29,6 +31,7 @@
         "@types/jest": "^29.5.12",
         "@types/lru-cache": "^5.1.1",
         "@types/node": "^22.0.0",
+        "@types/semver": "^7.5.8",
         "@typescript-eslint/eslint-plugin": "^7.0.2",
         "@typescript-eslint/parser": "^7.0.2",
         "eslint": "^8.56.0",
