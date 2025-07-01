@@ -26,16 +26,16 @@ export interface SolMessage {
 }
 
 export interface InternalCallFrame {
-    callee: FunctionDefinition | VariableDeclaration
-    args: Value[]
+    callee: FunctionDefinition | VariableDeclaration;
+    args: Value[];
 }
 
 export interface State {
-    version: string
-    storage: Storage,
-    memory: Memory,
-    extCallStack: SolMessage[]
-    intCallStack: InternalCallFrame[]
-    localsStack: Map<string, Value>[]
-    scope: BaseScope | undefined
+    version: string;
+    storage: Storage;
+    memory: Memory;
+    extCallStack: SolMessage[];
+    intCallStack: InternalCallFrame[];
+    localsStack: Array<Map<string, Value>>;
+    scope: BaseScope | undefined;
 }

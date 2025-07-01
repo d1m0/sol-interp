@@ -1,20 +1,68 @@
 import { ArtifactManager, nyi } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { WorldInterface, State } from "./state";
+import { WorldInterface, State, SolMessage } from "./state";
 import { EvalStep, Trace } from "./step";
 import { InterpError, NoScope } from "./exceptions";
-import { lt } from "semver"
+import { lt } from "semver";
 import { NoneValue, Value } from "./value";
+import { Address } from "@ethereumjs/util";
+import { LocalsScope } from "./scope";
 
+enum ControlFlow {
+    Fallthrough = 0,
+    Break = 1,
+    Continue = 2,
+    Return = 3
+}
+
+/**
+ * Solidity Interpeter class. Includes the following entrypoint
+ *
+ * * evaluate a single expression
+ *      `eval(expr: sol.Expression, state: State): [Trace, Value]`
+ * * execute one statement
+ *      @todo
+ * * call an internal function
+ *      @todo
+ * * call an external method
+ */
 export class Interpreter {
     constructor(
         protected readonly world: WorldInterface,
         protected readonly artifactManager: ArtifactManager
-    ) {
+    ) { }
+
+    ///*********************EXTERNAL FUNCTION CALLS************************************
+    public create(msg: SolMessage, state: State): [Trace, Address] {
+        nyi(`create`);
     }
 
+    public call(msg: SolMessage, state: State): [Trace, Value[] | InterpError] {
+        nyi(`create`);
+    }
+
+    ///*********************MODIFIERS/INTERNAL FUNCTION CALLS**************************
+    public callInternal(
+        callee: sol.FunctionDefinition,
+        args: Value[],
+        state: State
+    ): [Trace, Value[]] {
+        sol.assert(args.length === callee.vParameters.vParameters.length, `Mismatch in number of args when calling {0}`, callee.name)
+        const scopeStore = new Map<string, Value>();
+        state.localsStack.push(scopeStore);
+        state.scope = new LocalsScope(callee, state, state.scope)
+    }
+    ///*********************STATEMENTS*************************************************
+    public exec(stmt: sol.Statement, state: State): ControlFlow {
+        nyi(`exec`);
+    }
+    ///*********************EXPRESSIONS************************************************
+    /**
+     * Evaluate a single expression in a given state. Return a trace of the
+     * evaluation and the resulting value.
+     */
     public eval(expr: sol.Expression, state: State): [Trace, Value] {
-        let trace: Trace
+        let trace: Trace;
         let res: Value;
 
         if (expr instanceof sol.Assignment) {
@@ -81,7 +129,6 @@ export class Interpreter {
             nyi(`Unknown logical operator ${operator}`);
         }
 
-
         if (sol.BINARY_OPERATOR_GROUPS.Equality.includes(operator)) {
             let isEqual: boolean;
 
@@ -105,7 +152,7 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Comparison.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint")
+            this.expect(typeof left === "bigint" && typeof right === "bigint");
             if (operator === "<") {
                 return left < right;
             }
@@ -126,7 +173,7 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Arithmetic.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint")
+            this.expect(typeof left === "bigint" && typeof right === "bigint");
             let res: bigint;
 
             if (operator === "+") {
@@ -156,7 +203,7 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint")
+            this.expect(typeof left === "bigint" && typeof right === "bigint");
 
             if (operator === "<<") {
                 return left << right;
@@ -188,7 +235,14 @@ export class Interpreter {
         const [lTrace, lVal] = this.eval(expr.vLeftExpression, state);
         const [rTrace, rVal] = this.eval(expr.vRightExpression, state);
 
-        const res = this.computeBinary(lVal, expr.operator, rVal, this.typeof(expr, state), expr.vUserFunction, this.isUnchecked(expr, state))
+        const res = this.computeBinary(
+            lVal,
+            expr.operator,
+            rVal,
+            this.typeof(expr, state),
+            expr.vUserFunction,
+            this.isUnchecked(expr, state)
+        );
 
         return [[...lTrace, ...rTrace], res];
     }
@@ -198,12 +252,18 @@ export class Interpreter {
 
         this.expect(typeof cVal === "boolean", `Condition expected a boolean`);
 
-        const [bTrace, bVal] = this.eval(cVal ? expr.vTrueExpression : expr.vFalseExpression, state);
+        const [bTrace, bVal] = this.eval(
+            cVal ? expr.vTrueExpression : expr.vFalseExpression,
+            state
+        );
 
         return [[...cTrace, bTrace], bVal];
     }
 
-    evalElementaryTypeNameExpression(expr: sol.ElementaryTypeNameExpression, state: State): [Trace, Value] {
+    evalElementaryTypeNameExpression(
+        expr: sol.ElementaryTypeNameExpression,
+        state: State
+    ): [Trace, Value] {
         nyi("");
     }
 
@@ -213,10 +273,10 @@ export class Interpreter {
 
     evalIdentifier(expr: sol.Identifier, state: State): [Trace, Value] {
         if (!state.scope) {
-            throw new NoScope()
+            throw new NoScope();
         }
 
-        return [[], state.scope.lookup(expr.name)]
+        return [[], state.scope.lookup(expr.name)];
     }
 
     evalIndexAccess(expr: sol.IndexAccess, state: State): [Trace, Value] {
@@ -245,8 +305,8 @@ export class Interpreter {
     }
 
     evalTupleExpression(expr: sol.TupleExpression, state: State): [Trace, Value] {
-        let trace: Trace = [];
-        let compVals: Value[] = [];
+        const trace: Trace = [];
+        const compVals: Value[] = [];
         for (const comp of expr.vComponents) {
             if (comp === null) {
                 compVals.push(new NoneValue());
@@ -270,7 +330,7 @@ export class Interpreter {
 
     expect(b: boolean, msg?: string): asserts b {
         if (!b) {
-            throw new InterpError(msg ? msg : ``)
+            throw new InterpError(msg ? msg : ``);
         }
     }
 
@@ -279,7 +339,7 @@ export class Interpreter {
      * we need to get the version of the current contract first
      */
     infer(s: State): sol.InferType {
-        return this.artifactManager.infer(s.version)
+        return this.artifactManager.infer(s.version);
     }
 
     typeof(e: sol.Expression, s: State): sol.TypeNode {
@@ -293,7 +353,7 @@ export class Interpreter {
         }
 
         // In Solidity after 0.8.0 only operations inside an unchecked block are unchecked.
-        return n.getClosestParentByType(sol.UncheckedBlock) !== undefined
+        return n.getClosestParentByType(sol.UncheckedBlock) !== undefined;
     }
 
     evalUnaryOperation(expr: sol.UnaryOperation, state: State): [Trace, Value] {
@@ -309,21 +369,24 @@ export class Interpreter {
         }
 
         // In all other cases the result is bigint
-        let res: bigint
+        let res: bigint;
 
         if (expr.operator === "-") {
             this.expect(typeof subVal === "bigint", `Unexpected value ${subVal} for unary -`);
-            res = -subVal
+            res = -subVal;
         } else if (expr.operator === "~") {
             this.expect(typeof subVal === "bigint", `Unexpected value ${subVal} for unary ~`);
-            res = ~subVal
+            res = ~subVal;
         } else {
             // @todo implement ++, --, delete
-            nyi(`Unary operator ${expr.operator}`)
+            nyi(`Unary operator ${expr.operator}`);
         }
 
         const t = this.infer(state).typeOf(expr);
-        this.expect(t instanceof sol.IntType || t instanceof sol.NumericLiteralType, `Unexpected unary expr type`)
+        this.expect(
+            t instanceof sol.IntType || t instanceof sol.NumericLiteralType,
+            `Unexpected unary expr type`
+        );
 
         // If this is a constant expression we have infinite precision - just return the raw value
         if (t instanceof sol.NumericLiteralType) {
@@ -346,5 +409,4 @@ export class Interpreter {
         // Throw internal exception
         nyi(`Exception on overflow`);
     }
-
 }

@@ -2,7 +2,7 @@
 import { Expression, Statement } from "solc-typed-ast";
 import { Value } from "./value";
 
-export abstract class BaseStep { }
+export abstract class BaseStep {}
 
 export type Trace = BaseStep[];
 

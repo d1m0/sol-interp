@@ -3,14 +3,18 @@ import { NotDefined } from "./exceptions";
 import { Value } from "./value";
 import { State } from "./state";
 import { ExpStructType, getContractLayoutType } from "sol-dbg";
-import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg/dist/debug/decoding/storage/view";
+import {
+    BaseStorageView,
+    makeStorageView,
+    StructStorageView
+} from "sol-dbg/dist/debug/decoding/storage/view";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
  * state does. They only know where identifiers live in the state.
- * 
+ *
  * At any point in the interpretation we have the following scope stack:
- * 
+ *
  * <block scope>
  * ...
  * <block scope>
@@ -18,25 +22,26 @@ import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg/dis
  * <state vars scope>
  * <globals scope>
  * <builtins scope>
- * 
- * Note that the block scope is the only one that can have multiples in the stack. All other scope types appear at most ones. 
+ *
+ * Note that the block scope is the only one that can have multiples in the stack. All other scope types appear at most ones.
  * (i.e. this is not a call stack!).
- *  
+ *
  * Since most builtin identifiers (except for this and super) can be shadowed, having them in the
  * builtins scope helps us faithfully model the langauge semantics.
- * 
+ *
  */
 export abstract class BaseScope {
     constructor(
         public readonly name: string,
         protected readonly knownIds: Set<string>,
         protected readonly state: State,
-        protected readonly _next: BaseScope | undefined) {
-        console.error(`Making scope ${name} with ids [${[...knownIds].join(",")}]`)
+        protected readonly _next: BaseScope | undefined
+    ) {
+        console.error(`Making scope ${name} with ids [${[...knownIds].join(",")}]`);
     }
 
-    abstract _lookup(name: string): Value | undefined
-    abstract _set(name: string, val: Value): void
+    abstract _lookup(name: string): Value | undefined;
+    abstract _set(name: string, val: Value): void;
 
     lookup(name: string): Value {
         let v;
@@ -68,12 +73,15 @@ export abstract class BaseScope {
     }
 }
 
-
-export type LocalsScopeNodeType = sol.UncheckedBlock | sol.Block | sol.FunctionDefinition | sol.ModifierDefinition
+export type LocalsScopeNodeType =
+    | sol.UncheckedBlock
+    | sol.Block
+    | sol.FunctionDefinition
+    | sol.ModifierDefinition;
 /**
  * Scope corresponding to the current top-level LocalsScope in State.
- * The relationship is fixed at construction, since we store a reference to the 
- * underlying map. So if we push more scopes 
+ * The relationship is fixed at construction, since we store a reference to the
+ * underlying map. So if we push more scopes
  */
 export class LocalsScope extends BaseScope {
     protected readonly defs: Map<string, Value>;
@@ -85,7 +93,7 @@ export class LocalsScope extends BaseScope {
             for (const stmt of node.vStatements) {
                 if (stmt instanceof sol.VariableDeclarationStatement) {
                     for (const decl of stmt.vDeclarations) {
-                        res.add(decl.name)
+                        res.add(decl.name);
                     }
                 }
             }
@@ -113,7 +121,7 @@ export class LocalsScope extends BaseScope {
         protected readonly state: State,
         protected readonly _next: BaseScope | undefined
     ) {
-        let name: string
+        let name: string;
         if (node instanceof sol.Block) {
             name = `<locals for ${node.print(0)}>`;
         } else if (node instanceof sol.FunctionDefinition) {
@@ -137,9 +145,9 @@ export class LocalsScope extends BaseScope {
 }
 
 export class ContractScope extends BaseScope {
-    private readonly layoutType: ExpStructType
+    private readonly layoutType: ExpStructType;
     private readonly layout: StructStorageView;
-    private fieldToView: Map<string, BaseStorageView<any, sol.TypeNode>>
+    private fieldToView: Map<string, BaseStorageView<any, sol.TypeNode>>;
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
@@ -147,8 +155,13 @@ export class ContractScope extends BaseScope {
         protected readonly state: State,
         protected readonly _next: BaseScope | undefined
     ) {
-        const [layoutType,] = getContractLayoutType(contract, infer)
-        super(`<contract ${contract.name}>`, new Set<string>(layoutType.fields.map((v) => v[0])), state, _next);
+        const [layoutType] = getContractLayoutType(contract, infer);
+        super(
+            `<contract ${contract.name}>`,
+            new Set<string>(layoutType.fields.map((v) => v[0])),
+            state,
+            _next
+        );
         this.layoutType = layoutType;
         this.layout = makeStorageView(this.layoutType, [0n, 32]) as StructStorageView;
         this.fieldToView = new Map(this.layout.fieldViews);
@@ -160,13 +173,16 @@ export class ContractScope extends BaseScope {
             return view;
         }
 
-        return view.decode(this.state.storage)
+        return view.decode(this.state.storage);
     }
 
     _set(name: string, v: Value): void {
         const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
 
-        sol.assert(!(view.type instanceof sol.PointerType), `Internal error: Cannot set pointer types in storage`);
+        sol.assert(
+            !(view.type instanceof sol.PointerType),
+            `Internal error: Cannot set pointer types in storage`
+        );
         this.state.storage = view.encode(v, this.state.storage);
     }
 }
