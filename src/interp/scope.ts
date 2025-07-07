@@ -1,6 +1,6 @@
 import * as sol from "solc-typed-ast";
 import { NotDefined } from "./exceptions";
-import { Value } from "./value";
+import { LValue, Value } from "./value";
 import { State } from "./state";
 import { ExpStructType, getContractLayoutType } from "sol-dbg";
 import {
@@ -8,6 +8,7 @@ import {
     makeStorageView,
     StructStorageView
 } from "sol-dbg/dist/debug/decoding/storage/view";
+import { lt } from "semver";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -35,12 +36,11 @@ export abstract class BaseScope {
         public readonly name: string,
         protected readonly knownIds: Set<string>,
         protected readonly state: State,
-        protected readonly _next: BaseScope | undefined
-    ) {
-        console.error(`Making scope ${name} with ids [${[...knownIds].join(",")}]`);
-    }
+        public readonly _next: BaseScope | undefined
+    ) {}
 
     abstract _lookup(name: string): Value | undefined;
+    abstract _lookupLocation(name: string): LValue | undefined;
     abstract _set(name: string, val: Value): void;
 
     lookup(name: string): Value {
@@ -50,6 +50,22 @@ export abstract class BaseScope {
             v = this._lookup(name);
         } else {
             v = this._next ? this._next.lookup(name) : undefined;
+        }
+
+        if (v === undefined) {
+            throw new NotDefined(name);
+        }
+
+        return v;
+    }
+
+    lookupLocation(name: string): LValue {
+        let v;
+
+        if (this.knownIds.has(name)) {
+            v = this._lookupLocation(name);
+        } else {
+            v = this._next ? this._next.lookupLocation(name) : undefined;
         }
 
         if (v === undefined) {
@@ -76,6 +92,9 @@ export abstract class BaseScope {
 export type LocalsScopeNodeType =
     | sol.UncheckedBlock
     | sol.Block
+    | sol.UncheckedBlock
+    // In Solidity >0.5.0 each VariableDeclarationStatement is its own scope from now, till the end of the defining block
+    | sol.VariableDeclarationStatement
     | sol.FunctionDefinition
     | sol.ModifierDefinition;
 /**
@@ -86,15 +105,33 @@ export type LocalsScopeNodeType =
 export class LocalsScope extends BaseScope {
     protected readonly defs: Map<string, Value>;
 
-    private static detectIds(node: LocalsScopeNodeType): Set<string> {
+    public static returnName(decl: sol.VariableDeclaration, idx: number): string {
+        return decl.name === "" ? `<ret_${idx}>` : decl.name;
+    }
+
+    private static detectIds(node: LocalsScopeNodeType, version: string): Set<string> {
         const res = new Set<string>();
 
-        if (node instanceof sol.Block) {
-            for (const stmt of node.vStatements) {
-                if (stmt instanceof sol.VariableDeclarationStatement) {
-                    for (const decl of stmt.vDeclarations) {
-                        res.add(decl.name);
+        if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
+            if (lt(version, "0.5.0")) {
+                // In Solidity 0.4.x all state vars have block-wide scope
+                for (const stmt of node.vStatements) {
+                    if (stmt instanceof sol.VariableDeclarationStatement) {
+                        for (const decl of stmt.vDeclarations) {
+                            res.add(decl.name);
+                        }
                     }
+                }
+            } else {
+                // Nothing to do
+            }
+        } else if (node instanceof sol.VariableDeclarationStatement) {
+            if (lt(version, "0.5.0")) {
+                // Nothing to do
+            } else {
+                // In solidity >= 0.5.0 each local variable has a scope starting at its declaration
+                for (const decl of node.vDeclarations) {
+                    res.add(decl.name);
                 }
             }
         } else if (node instanceof sol.FunctionDefinition) {
@@ -102,10 +139,8 @@ export class LocalsScope extends BaseScope {
                 res.add(decl.name);
             }
 
-            for (const decl of node.vReturnParameters.vParameters) {
-                if (decl.name !== "") {
-                    res.add(decl.name);
-                }
+            for (let i = 0; i < node.vReturnParameters.vParameters.length; i++) {
+                res.add(LocalsScope.returnName(node.vReturnParameters.vParameters[i], i));
             }
         } else if (node instanceof sol.ModifierDefinition) {
             for (const decl of node.vParameters.vParameters) {
@@ -117,26 +152,33 @@ export class LocalsScope extends BaseScope {
     }
 
     constructor(
-        protected readonly node: LocalsScopeNodeType,
-        protected readonly state: State,
-        protected readonly _next: BaseScope | undefined
+        public readonly node: LocalsScopeNodeType,
+        state: State,
+        _next: BaseScope | undefined
     ) {
         let name: string;
-        if (node instanceof sol.Block) {
-            name = `<locals for ${node.print(0)}>`;
+        if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
+            name = `<block ${node.print(0)}>`;
+        } else if (node instanceof sol.VariableDeclaration) {
+            name = `<local ${node.name}>`;
         } else if (node instanceof sol.FunctionDefinition) {
             name = `<arg/rets for ${node.print(0)}>`;
         } else {
             name = `<arg for ${node.print(0)}>`;
         }
 
-        super(name, LocalsScope.detectIds(node), state, _next);
+        super(name, LocalsScope.detectIds(node, state.version), state, _next);
+
         sol.assert(state.localsStack.length > 0, ``);
         this.defs = state.localsStack[state.localsStack.length - 1];
     }
 
     _lookup(name: string): Value | undefined {
         return this.defs.get(name);
+    }
+
+    _lookupLocation(name: string): LValue | undefined {
+        return this.defs.has(name) ? [this, name] : undefined;
     }
 
     _set(name: string, val: Value): void {
@@ -152,8 +194,8 @@ export class ContractScope extends BaseScope {
     constructor(
         protected readonly contract: sol.ContractDefinition,
         infer: sol.InferType,
-        protected readonly state: State,
-        protected readonly _next: BaseScope | undefined
+        state: State,
+        _next: BaseScope | undefined
     ) {
         const [layoutType] = getContractLayoutType(contract, infer);
         super(
@@ -174,6 +216,10 @@ export class ContractScope extends BaseScope {
         }
 
         return view.decode(this.state.storage);
+    }
+
+    _lookupLocation(name: string): LValue | undefined {
+        return this.fieldToView.get(name) as any;
     }
 
     _set(name: string, v: Value): void {

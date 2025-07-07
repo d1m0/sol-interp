@@ -3,6 +3,7 @@ import { Memory, Storage } from "sol-dbg";
 import { BaseScope } from "./scope";
 import { FunctionDefinition, VariableDeclaration } from "solc-typed-ast";
 import { Value } from "./value";
+import { Allocator } from "sol-dbg/dist/debug/decoding/memory/allocator";
 
 export interface CallResult {
     reverted: boolean;
@@ -34,6 +35,7 @@ export interface State {
     version: string;
     storage: Storage;
     memory: Memory;
+    allocator: Allocator;
     extCallStack: SolMessage[];
     intCallStack: InternalCallFrame[];
     localsStack: Array<Map<string, Value>>;

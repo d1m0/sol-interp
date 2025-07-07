@@ -1,5 +1,7 @@
 import { Value as BaseValue, Poison } from "sol-dbg/dist/debug/decoding/value";
-import { FunctionType, NamedDefinition } from "solc-typed-ast";
+import { StateArea, View } from "sol-dbg/dist/debug/decoding/view";
+import { FunctionType, NamedDefinition, TypeNode } from "solc-typed-ast";
+import { BaseScope } from "./scope";
 
 export abstract class BuiltinFunction {
     constructor(
@@ -36,3 +38,4 @@ export class NoneValue extends Poison {
 }
 
 export type Value = BaseValue | BuiltinFunction | UserDefinition | BuiltinStruct | Value[];
+export type LValue = View<StateArea, BaseValue, any, TypeNode> | [BaseScope, string]
