@@ -6,19 +6,14 @@ import { Assert } from "./exceptions";
 
 export const assertBuiltin = new BuiltinFunction(
     "assert",
-    new BuiltinFunctionType("assert", [types.bool, types.stringMemory], []),
+    new BuiltinFunctionType("assert", [types.bool], []),
     (state: State, args: Value[]): Value[] => {
-        if (
-            args.length < 1 ||
-            args.length > 2 ||
-            typeof args[0] !== "boolean" ||
-            (args.length == 2 && typeof args[1] !== "string")
-        ) {
+        if ( args.length != 1 || typeof args[0] !== "boolean" ) {
             sol.assert(false, `Unexpected args for assert: ${args}`);
         }
 
         if (!args[0]) {
-            throw new Assert(args.length === 2 ? (args[1] as string) : "");
+            throw new Assert("");
         }
 
         return [];

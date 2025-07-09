@@ -14,6 +14,7 @@ const samples: Array<[string, string, string, Array<[string, Value]>, Value[], V
     ["initial.sol", "Foo", "assrt", [], [false], Assert],
     ["assignments.sol", "Assignments", "simpleAssignment", [], [], []],
     ["assignments.sol", "Assignments", "multipleAssignmentsLong", [], [], []],
+    ["assignments.sol", "Assignments", "multipleAssignmentsShort", [], [], []],
     ["assignments.sol", "Assignments", "tupleDeclaration", [], [], []],
     ["assignments.sol", "Assignments", "tupleNested", [], [], []],
     ["assignments.sol", "Assignments", "tupleEvaluateAllInitialExpressions", [], [], [1337n]],

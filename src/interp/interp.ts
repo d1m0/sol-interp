@@ -384,14 +384,26 @@ export class Interpreter {
 
     evalAssignment(expr: sol.Assignment, state: State): [Trace, Value] {
         // @todo What is the order here?
-        const [ltrace, lvalue] = this.evalLV(expr.vLeftHandSide, state);
-        const [rtrace, rvalue] = this.eval(expr.vRightHandSide, state);
+        const [ltrace, lv] = this.evalLV(expr.vLeftHandSide, state);
+        let [rtrace, rvalue] = this.eval(expr.vRightHandSide, state);
 
         // @todo handle coercions
         // @todo handle memory to storage copy
         // @todo handle storage to storage copy assignments
+        // @todo after indexaccess is fixed, add a test of the shape a[i++] = i++; and (a[i++], a[i++]) = [1,2]; to see order of evaluation.
 
-        this.assign(lvalue, rvalue, state);
+        // Assignment with a combined binary operator
+        if (expr.operator.length > 1) {
+            const op = expr.operator.slice(0, -1);
+            const lVal = this.lvToValue(lv, state);
+            const lType = this.infer(state).typeOf(expr.vLeftHandSide);
+            // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
+
+            rvalue = this.computeBinary(expr, lVal, op, rvalue, lType, undefined, this.isUnchecked(expr, state));
+            this.assign(lv, rvalue, state);
+        } else {
+            this.assign(lv, rvalue, state);
+        }
 
         // @todo do we return lvalue or rvalue here?
         return [[...ltrace, ...rtrace], rvalue];
