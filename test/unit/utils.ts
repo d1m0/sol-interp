@@ -1,9 +1,10 @@
 import { ImmMap, nyi, Storage } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { BaseScope, ContractScope, LocalsScope } from "../../src/interp/scope";
+import { BaseScope, BuiltinsScope, ContractScope, LocalsScope } from "../../src/interp/scope";
 import { WorldInterface, CallResult, State } from "../../src/interp/state";
 import { Value } from "../../src/interp/value";
 import { DefaultAllocator } from "sol-dbg/dist/debug/decoding/memory/allocator";
+import { assertBuiltin, encodeConstants } from "../../src";
 
 export const worldMock: WorldInterface = {
     create: function (): Promise<CallResult> {
@@ -29,6 +30,8 @@ export function makeState(
     ...vals: Array<[string, Value]>
 ): State {
     const allocator = new DefaultAllocator();
+    const unit = loc.getClosestParentByType(sol.SourceUnit) as sol.SourceUnit;
+    const constantsMap = encodeConstants(unit, allocator)
     const res: State = {
         storage: ImmMap.fromEntries([]),
         memory: allocator.memory,
@@ -37,7 +40,8 @@ export function makeState(
         intCallStack: [],
         version: "0.8.29",
         scope: undefined,
-        localsStack: []
+        localsStack: [],
+        constantsMap
     };
 
     let nd: sol.ASTNode | undefined = loc;
@@ -55,7 +59,8 @@ export function makeState(
         nd = nd.parent;
     }
 
-    let scope: BaseScope | undefined;
+    // Builtins
+    let scope: BaseScope = new BuiltinsScope([["assert", assertBuiltin]], res, undefined);
     for (const nd of scopeNodes) {
         if (nd instanceof sol.ContractDefinition) {
             scope = new ContractScope(nd, infer, res, scope);

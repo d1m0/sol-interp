@@ -16,4 +16,8 @@ contract Foo {
         }
         return x + z; // x has value 2
     }
+
+    function assrt(bool flag) public {
+        assert(flag);
+    }
 }

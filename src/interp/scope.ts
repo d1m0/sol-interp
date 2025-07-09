@@ -97,6 +97,7 @@ export type LocalsScopeNodeType =
     | sol.VariableDeclarationStatement
     | sol.FunctionDefinition
     | sol.ModifierDefinition;
+
 /**
  * Scope corresponding to the current top-level LocalsScope in State.
  * The relationship is fixed at construction, since we store a reference to the
@@ -178,7 +179,7 @@ export class LocalsScope extends BaseScope {
     }
 
     _lookupLocation(name: string): LValue | undefined {
-        return this.defs.has(name) ? [this, name] : undefined;
+        return this.defs.has(name) ? { scope: this, name } : undefined;
     }
 
     _set(name: string, val: Value): void {
@@ -198,12 +199,42 @@ export class ContractScope extends BaseScope {
         _next: BaseScope | undefined
     ) {
         const [layoutType] = getContractLayoutType(contract, infer);
-        super(
-            `<contract ${contract.name}>`,
-            new Set<string>(layoutType.fields.map((v) => v[0])),
-            state,
-            _next
-        );
+        const defNames = new Set<string>(layoutType.fields.map((v) => v[0]));
+
+        // On top of state vars also add function, enum, struct, user defined value type, event and error names.
+        for (const base of contract.vLinearizedBaseContracts) {
+            for (const fun of contract.vFunctions) {
+                if (base == contract) {
+                    defNames.add(fun.name);
+                } else {
+                    if (fun.visibility !== sol.FunctionVisibility.Private) {
+                        defNames.add(fun.name);
+                    }
+                }
+            }
+
+            for (const enumDef of contract.vEnums) {
+                defNames.add(enumDef.name);
+            }
+
+            for (const structDef of contract.vStructs) {
+                defNames.add(structDef.name);
+            }
+
+            for (const event of contract.vEvents) {
+                defNames.add(event.name);
+            }
+
+            for (const error of contract.vErrors) {
+                defNames.add(error.name);
+            }
+
+            for (const typeDef of contract.vUserDefinedValueTypes) {
+                defNames.add(typeDef.name);
+            }
+        }
+
+        super(`<contract ${contract.name}>`, defNames, state, _next);
         this.layoutType = layoutType;
         this.layout = makeStorageView(this.layoutType, [0n, 32]) as StructStorageView;
         this.fieldToView = new Map(this.layout.fieldViews);
@@ -230,5 +261,26 @@ export class ContractScope extends BaseScope {
             `Internal error: Cannot set pointer types in storage`
         );
         this.state.storage = view.encode(v, this.state.storage);
+    }
+}
+
+export class BuiltinsScope extends BaseScope {
+    builtinsMap: Map<string, Value>;
+
+    constructor(builtins: Array<[string, Value]>, state: State, _next: BaseScope | undefined) {
+        super(`<builtins>`, new Set(builtins.map(([name]) => name)), state, _next);
+        this.builtinsMap = new Map(builtins);
+    }
+
+    _lookup(name: string): Value | undefined {
+        return this.builtinsMap.get(name);
+    }
+
+    _lookupLocation(name: string): LValue | undefined {
+        sol.assert(false, `Can't lookup a builtin's location`);
+    }
+
+    _set(): void {
+        sol.assert(false, `Can't set a builtin after initialization`);
     }
 }

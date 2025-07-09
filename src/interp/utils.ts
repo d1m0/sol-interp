@@ -1,6 +1,6 @@
 import { nyi, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { Value } from "./value";
+import { none, Value } from "./value";
 
 export function makeZeroValue(t: sol.TypeNode): Value {
     if (t instanceof sol.IntType) {
@@ -17,6 +17,10 @@ export function makeZeroValue(t: sol.TypeNode): Value {
 
     if (t instanceof sol.AddressType) {
         return ZERO_ADDRESS;
+    }
+
+    if (t instanceof sol.PointerType) {
+        return none;
     }
 
     nyi(`makeZeroValue(${t.pp()})`);

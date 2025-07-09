@@ -40,4 +40,5 @@ export interface State {
     intCallStack: InternalCallFrame[];
     localsStack: Array<Map<string, Value>>;
     scope: BaseScope | undefined;
+    constantsMap: Map<number, bigint>
 }
