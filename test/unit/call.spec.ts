@@ -2,9 +2,9 @@ import { ArtifactManager, PartialSolcOutput, View } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
-import { makeState, worldMock } from "./utils";
+import { getVersion, makeState, worldMock } from "./utils";
 import { Assert } from "../../src/interp/exceptions";
-import { hexToBytes } from "@ethereumjs/util";
+import {  hexToBytes } from "@ethereumjs/util";
 import { Value } from "../../src/interp/value";
 
 type ExceptionConstructors = typeof Assert;
@@ -26,6 +26,19 @@ const samples: Array<
     ["OoO.sol", "OoO", "tuples", [], [], [1n, 2n]],
     ["OoO.sol", "OoO", "tupleAssignments", [], [], []],
     ["OoO.sol", "OoO", "binOps", [], [], []],
+    ["ifs_v04.sol", "Ifs", "ifElseStatementNested", [], [], []],
+    ["ifs_v04.sol", "Ifs", "ifElseStatement", [], [], []],
+    ["ifs_v04.sol", "Ifs", "ifStatement", [], [], []],
+    ["ifs_v04.sol", "Ifs", "ifElseStatementWithExpressions", [], [], []],
+    ["ifs_v04.sol", "Ifs", "ifStatementWithExpression", [], [], []],
+    ["ifs_v04.sol", "Ifs", "ifStatementWithReturn", [], [], []],
+    ["ifs_v04.sol", "Ifs", "ifStatementWithThrow", [], [], []],
+    ["while_v04.sol", "While", "whileStatementWithBlock", [], [], []],
+    ["while_v04.sol", "While", "whileStatementWithExpression", [], [], []],
+    ["while_v04.sol", "While", "whileStatementWithLoopControlStatements", [], [], []],
+    ["while_v04.sol", "While", "doWhileStatementWithBlock", [], [], []],
+    ["while_v04.sol", "While", "doWhileStatementWithExpression", [], [], []],
+    ["while_v04.sol", "While", "doWhileStatementWithLoopControlStatements", [], [], []],
 ];
 
 describe("Simple function call tests", () => {
@@ -41,10 +54,11 @@ describe("Simple function call tests", () => {
             const file = fse.readFileSync(`test/samples/${fileName}`, {
                 encoding: "utf-8"
             });
+            const version = getVersion(file)
             const compileResult = await sol.compileSourceString(
                 fileName,
                 file,
-                "0.8.29",
+                version,
                 undefined,
                 undefined,
                 { viaIR: true }

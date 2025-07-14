@@ -156,19 +156,21 @@ export class Interpreter {
             [trace, res] = this.execVariableDeclarationStatement(stmt, state);
         } else if (stmt instanceof sol.Return) {
             [trace, res] = this.execReturn(stmt, state);
-            /*
+        } else if (stmt instanceof sol.IfStatement) {
+            [trace, res] = this.execIfStatement(stmt, state);
+        } else if (stmt instanceof sol.WhileStatement) {
+            [trace, res] = this.execWhileStatement(stmt, state);
         } else if (stmt instanceof sol.Break) {
             [trace, res] = this.execBreak(stmt, state);
         } else if (stmt instanceof sol.Continue) {
             [trace, res] = this.execContinue(stmt, state);
         } else if (stmt instanceof sol.DoWhileStatement) {
             [trace, res] = this.execDoWhileStatement(stmt, state);
+            /*
         } else if (stmt instanceof sol.EmitStatement) {
             [trace, res] = this.execEmitStatement(stmt, state);
         } else if (stmt instanceof sol.ForStatement) {
             [trace, res] = this.execForStatement(stmt, state);
-        } else if (stmt instanceof sol.IfStatement) {
-            [trace, res] = this.execIfStatement(stmt, state);
         } else if (stmt instanceof sol.InlineAssembly) {
             [trace, res] = this.execInlineAssembly(stmt, state);
         } else if (stmt instanceof sol.PlaceholderStatement) {
@@ -181,8 +183,6 @@ export class Interpreter {
             [trace, res] = this.execTryCatchClause(stmt, state);
         } else if (stmt instanceof sol.TryStatement) {
             [trace, res] = this.execTryStatement(stmt, state);
-        } else if (stmt instanceof sol.WhileStatement) {
-            [trace, res] = this.execWhileStatement(stmt, state);
             */
         } else {
             nyi(`Stmt ${stmt.constructor.name}`);
@@ -317,6 +317,85 @@ export class Interpreter {
         return [trace, ControlFlow.Return];
     }
 
+    private execIfStatement(stmt: sol.IfStatement, state: State): [Trace, ControlFlow] {
+        const [condTrace, condV] = this.eval(stmt.vCondition, state);
+        let bodyTrace: Trace = [];
+        let cflow: ControlFlow = ControlFlow.Fallthrough; 
+
+        if (condV) {
+            [bodyTrace, cflow] = this.exec(stmt.vTrueBody, state);
+        } else if (stmt.vFalseBody) {
+            [bodyTrace, cflow] = this.exec(stmt.vFalseBody, state);
+        }
+
+        return [[...condTrace, ...bodyTrace], cflow];
+    }
+
+    private execWhileStatement(stmt: sol.WhileStatement, state: State): [Trace, ControlFlow] {
+        let trace: Trace = [];
+
+        // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
+        while (true) {
+            const [condTrace, condVal] = this.eval(stmt.vCondition, state);
+            trace.push(...condTrace);
+            this.expect(typeof condVal === `boolean`)
+
+            if (!(condVal)) {
+                break;
+            }
+
+            const [bodyTrace, bodyCflow] = this.exec(stmt.vBody, state);
+            trace.push(...bodyTrace);
+
+            if (bodyCflow === ControlFlow.Return) {
+                return [trace, ControlFlow.Return];
+            }
+
+            if (bodyCflow === ControlFlow.Break) {
+                break;
+            }
+
+            // Nothing to do on continue.
+        }
+
+        return [trace, ControlFlow.Fallthrough]
+    }
+
+    private execBreak(stmt: sol.Break, state: State): [Trace, ControlFlow] {
+        return [[], ControlFlow.Break]
+    }
+
+    private execContinue(stmt: sol.Continue, state: State): [Trace, ControlFlow] {
+        return [[], ControlFlow.Continue]
+    }
+
+    private execDoWhileStatement(stmt: sol.DoWhileStatement, state: State): [Trace, ControlFlow] {
+        let trace: Trace = [];
+        let cond: boolean
+
+        // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
+        do {
+            // Execute body first
+            const [bodyTrace, bodyCflow] = this.exec(stmt.vBody, state);
+            trace.push(...bodyTrace);
+
+            if (bodyCflow === ControlFlow.Return) {
+                return [trace, ControlFlow.Return];
+            }
+
+            if (bodyCflow === ControlFlow.Break) {
+                break;
+            }
+
+            const [condTrace, condVal] = this.eval(stmt.vCondition, state);
+            trace.push(...condTrace);
+            this.expect(typeof condVal === `boolean`)
+
+            cond = condVal;
+        } while (cond);
+
+        return [trace, ControlFlow.Fallthrough]
+    }
     ///*********************EXPRESSIONS************************************************
     /**
      * Evaluate a single expression in a given state. Return a trace of the

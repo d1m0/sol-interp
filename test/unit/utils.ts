@@ -88,3 +88,10 @@ export function makeState(
 
     return res;
 }
+
+
+export function getVersion(source: string): string {
+    const version = source.match(/pragma solidity ([0-9\.]*);/)
+    sol.assert(version !== null, `No pragma found`)
+    return version[1];
+}
