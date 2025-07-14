@@ -21,4 +21,32 @@ contract OoO {
         x[i++][i++] = 1;
         assert(x[1][2] == 1 && x[2][1] == 0);
     }
+
+    function tuples() public returns (uint, uint) {
+        uint x = 1;
+
+        // If left-to-right should return 1, 2
+        (uint y, uint z) = (x++, x++);
+        return (y, z);
+    }
+    
+    function tupleAssignments() public {
+        uint[5] memory a;
+        uint x = 1;
+
+        // Expect rhs to evaluate first to (1,2)
+        // Then LHS to evaluate to a[3], a[4], and thus to get
+        // a === [0,0,0,1,2]
+        (a[x++], a[x++]) = (x++, x++);
+        assert(a[3] == 1 && a[4] == 2);
+    }
+
+    function binOps() public {
+        uint[6] memory a;
+        uint x = 0;
+        // If LHS evaluates first we get [0,0,1,0,0,2]
+        // If RHS evaluates first we get [0,0,0,2,0,1]
+        (a[x+=2] = 1) + (a[x+=3] = 2);
+        assert(a[3] == 2 && a[5] == 1); // RHS is first
+    }
 }

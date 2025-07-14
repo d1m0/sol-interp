@@ -671,8 +671,9 @@ export class Interpreter {
     }
 
     evalBinaryOperation(expr: sol.BinaryOperation, state: State): [Trace, Value] {
-        const [lTrace, lVal] = this.eval(expr.vLeftExpression, state);
+        // Note: RHS evaluates first.
         const [rTrace, rVal] = this.eval(expr.vRightExpression, state);
+        const [lTrace, lVal] = this.eval(expr.vLeftExpression, state);
 
         const res = this.computeBinary(
             expr,
@@ -684,7 +685,7 @@ export class Interpreter {
             this.isUnchecked(expr, state)
         );
 
-        return [[...lTrace, ...rTrace], res];
+        return [[...rTrace, ...lTrace], res];
     }
 
     evalConditional(expr: sol.Conditional, state: State): [Trace, Value] {

@@ -22,7 +22,10 @@ const samples: Array<
     ["assignments.sol", "Assignments", "tupleNested", [], [], []],
     ["assignments.sol", "Assignments", "tupleEvaluateAllInitialExpressions", [], [], [1337n]],
     ["OoO.sol", "OoO", "assignmentOOO", [], [], [hexToBytes("0x00000100000000000000"), 3n]],
-    ["OoO.sol", "OoO", "indexAccess", [], [], []]
+    ["OoO.sol", "OoO", "indexAccess", [], [], []],
+    ["OoO.sol", "OoO", "tuples", [], [], [1n, 2n]],
+    ["OoO.sol", "OoO", "tupleAssignments", [], [], []],
+    ["OoO.sol", "OoO", "binOps", [], [], []],
 ];
 
 describe("Simple function call tests", () => {
