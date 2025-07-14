@@ -1,0 +1,133 @@
+import {
+    View,
+    DecodingFailure,
+    EncodingError,
+    PrimitiveValue,
+    PointerView,
+    Value,
+    nyi,
+    isPointerView as baseIsPointerView,
+    ArrayLikeView,
+    isArrayLikeMemView,
+    isArrayLikeCalldataView,
+    isArrayLikeStorageView
+} from "sol-dbg";
+import { FixedBytesType, PointerType, TypeNode, types } from "solc-typed-ast";
+import { BaseScope } from "./scope";
+
+export abstract class BaseLocalView<V extends PrimitiveValue, T extends TypeNode> extends View<
+    null,
+    V,
+    [BaseScope, string],
+    T
+> {
+    decode(): V | DecodingFailure {
+        const [scope, name] = this.loc;
+        const res = scope._lookup(name);
+
+        if (res === undefined) {
+            return new DecodingFailure(`Couldn't find ${name} in ${scope.name}`);
+        }
+
+        return res as V;
+    }
+    encode(v: V): void {
+        const [scope, name] = this.loc;
+        scope._set(name, v);
+    }
+    pp(): string {
+        return `<local ${this.loc[1]}@${this.loc[0].name}>`;
+    }
+
+    get name(): string {
+        return this.loc[1];
+    }
+}
+
+export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, TypeNode> {}
+
+export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
+    constructor(
+        loc: [BaseScope, string],
+        private byteOffset: number
+    ) {
+        super(types.byte, loc);
+    }
+
+    decode(): bigint | DecodingFailure {
+        const [scope, name] = this.loc;
+        const word = scope._lookup(name);
+
+        if (!(word instanceof Uint8Array)) {
+            return new DecodingFailure(
+                `Expected an Uint8Array for ${name} in ${scope.name} not ${word}`
+            );
+        }
+
+        if (this.byteOffset < 0n || this.byteOffset >= word.length) {
+            return new DecodingFailure(`OoB index ${this.byteOffset} in ${name} in ${scope.name}`);
+        }
+
+        return BigInt(word[this.byteOffset]);
+    }
+
+    encode(v: bigint): void {
+        const [scope, name] = this.loc;
+        const word = scope._lookup(name);
+
+        if (!(word instanceof Uint8Array)) {
+            throw new EncodingError(
+                `Expected an Uint8Array for ${name} in ${scope.name} not ${word}`
+            );
+        }
+
+        if (this.byteOffset < 0n || this.byteOffset >= word.length) {
+            throw new EncodingError(`OoB index ${this.byteOffset} in ${name} in ${scope.name}`);
+        }
+
+        if (v < 0n || v >= 256) {
+            throw new EncodingError(`Value ${v} is not a byte`);
+        }
+
+        word[this.byteOffset] = Number(v);
+    }
+}
+
+export class PointerLocalView
+    extends BaseLocalView<View, PointerType>
+    implements PointerView<null, View<any, Value, any, TypeNode>>
+{
+    toView(): DecodingFailure | View<any, Value, any, TypeNode> {
+        const ptr = this.decode();
+        if (ptr instanceof View) {
+            return ptr;
+        }
+
+        nyi(`PointerLocalView.toView() for innter value ${ptr} ${ptr.constructor.name}`);
+    }
+}
+
+export class ArrayLikeLocalView
+    extends BaseLocalView<Uint8Array, FixedBytesType>
+    implements ArrayLikeView<any, SingleByteLocalView>
+{
+    size(): bigint {
+        return BigInt(this.type.size);
+    }
+
+    indexView(key: bigint, state: any): DecodingFailure | SingleByteLocalView {
+        if (key < 0n || key > this.type.size) {
+            return new DecodingFailure(`OoB access`);
+        }
+
+        return new SingleByteLocalView(this.loc, Number(key));
+    }
+}
+
+export function isPointerView(v: any): v is PointerView<any, View> {
+    return v instanceof PointerLocalView || baseIsPointerView(v);
+}
+
+export function isArrayLikeView(v: any): v is ArrayLikeView<any, View> {
+    return isArrayLikeMemView(v) || isArrayLikeCalldataView(v) || isArrayLikeStorageView(v) || v instanceof ArrayLikeLocalView
+}

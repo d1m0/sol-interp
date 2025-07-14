@@ -1,8 +1,15 @@
-import { Value as BaseValue, Poison } from "sol-dbg/dist/debug/decoding/value";
-import { StateArea, View } from "sol-dbg/dist/debug/decoding/view";
-import { BuiltinFunctionType, NamedDefinition, TypeNode } from "solc-typed-ast";
-import { BaseScope } from "./scope";
+import {
+    Value as BaseValue,
+    ExternalFunRef,
+    InternalFunRef,
+    Poison,
+    PrimitiveValue,
+    Slice
+} from "sol-dbg";
+import { StateArea, View } from "sol-dbg";
+import { BuiltinFunctionType, TypeNode } from "solc-typed-ast";
 import { State } from "./state";
+import { Address } from "@ethereumjs/util";
 
 export class BuiltinFunction {
     constructor(
@@ -34,18 +41,23 @@ export class NoneValue extends Poison {
 
 export const none = new NoneValue();
 
-export interface LocalScopeView {
-    scope: BaseScope,
-    name: string
-}
-
-export function isLocalScopeView(a: any): a is LocalScopeView {
-    return a instanceof Object && "scope" in a && "name" in a;
-}
-
-export type Value = BaseValue | BuiltinFunction | NamedDefinition | BuiltinStruct | Value[];
-export type LValue
-    = View<StateArea, BaseValue, any, TypeNode>
-    | LocalScopeView 
+export type Value = PrimitiveValue | BuiltinFunction | BuiltinStruct | Value[];
+export type LValue =
+    | View<StateArea, BaseValue, any, TypeNode>
     | null // empty components of tuple assignments
     | LValue[]; // Tuple assignments
+
+// @todo move to sol-dbg
+export function isPrimitiveValue(v: any): v is PrimitiveValue {
+    return (
+        typeof v === "bigint" ||
+        typeof v === "boolean" ||
+        v instanceof Uint8Array ||
+        v instanceof Address ||
+        v instanceof ExternalFunRef ||
+        v instanceof InternalFunRef ||
+        v instanceof Slice ||
+        v instanceof View ||
+        v instanceof Poison
+    );
+}

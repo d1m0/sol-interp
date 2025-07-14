@@ -1,16 +1,39 @@
-import { ArtifactManager, nyi, zip } from "sol-dbg";
+import {
+    ArtifactManager,
+    DecodingFailure,
+    IntMemView,
+    isArrayLikeCalldataView,
+    isArrayLikeMemView,
+    isArrayLikeStorageView,
+    nyi,
+    PointerCalldataView,
+    PointerMemView,
+    PointerStorageView,
+    PointerView,
+    Poison,
+    StateArea,
+    View,
+    zip,
+    Value as BaseValue
+} from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
 import { EvalStep, ExecStep, Trace } from "./step";
-import { InterpError, NoScope, Overflow } from "./exceptions";
+import { InterpError, NoScope, OOB, Overflow } from "./exceptions";
 import { gte, lt } from "semver";
-import { BuiltinFunction, isLocalScopeView, LValue, none, NoneValue, Value } from "./value";
+import { BuiltinFunction, isPrimitiveValue, LValue, none, NoneValue, Value } from "./value";
 import { Address } from "@ethereumjs/util";
 import { BaseScope, LocalsScope } from "./scope";
-import { makeZeroValue } from "./utils";
-import { BaseStorageView } from "sol-dbg/dist/debug/decoding/storage/view";
-import { BaseMemoryView } from "sol-dbg/dist/debug/decoding/memory/view";
-import { BaseCalldataView } from "sol-dbg/dist/debug/decoding/calldata/view";
+import { getMsg, isValueType, makeZeroValue } from "./utils";
+import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
+import {
+    BaseLocalView,
+    ArrayLikeLocalView,
+    isArrayLikeView,
+    isPointerView,
+    PointerLocalView,
+    PrimitiveLocalView
+} from "./view";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -18,6 +41,8 @@ enum ControlFlow {
     Continue = 2,
     Return = 3
 }
+
+const scratchWord = new Uint8Array(32);
 
 /**
  * Solidity Interpeter class. Includes the following entrypoint
@@ -93,7 +118,7 @@ export class Interpreter {
         const infer = this.infer(state);
         const formalReturns = callee.vReturnParameters.vParameters;
         const retVals = formalReturns.map((ret) =>
-            makeZeroValue(infer.variableDeclarationToTypeNode(ret))
+            makeZeroValue(infer.variableDeclarationToTypeNode(ret), state)
         );
 
         const argRetNames = [
@@ -187,12 +212,12 @@ export class Interpreter {
                     : [initVal];
         } else {
             varInitialVals = stmt.vDeclarations.map((d) =>
-                makeZeroValue(infer.variableDeclarationToTypeNode(d))
+                makeZeroValue(infer.variableDeclarationToTypeNode(d), state)
             );
         }
 
         if (gte(state.version, "0.5.0")) {
-            const vals: [string, Value][] = [];
+            const vals: Array<[string, Value]> = [];
 
             for (let i = 0, j = 0; i < stmt.assignments.length; i++) {
                 if (stmt.assignments[i] === null) {
@@ -203,7 +228,7 @@ export class Interpreter {
                 j++;
             }
 
-            this.pushScope( stmt, vals, state );
+            this.pushScope(stmt, vals, state);
         } else {
             for (let i = 0; i < stmt.vDeclarations.length; i++) {
                 const decl = stmt.vDeclarations[i];
@@ -329,10 +354,42 @@ export class Interpreter {
             nyi(`evalExpression(${expr.constructor.name})`);
         }
 
+        if (res instanceof View && isValueType(res.type)) {
+            res = this.lvToValue(res, state);
+        }
+
+        if (res instanceof Poison) {
+            throw new InterpError(`Eval-ed poison while evaluating ${expr.print()}: ${res}`);
+        }
+
         trace.push(new EvalStep(expr, res));
-        //console.error(`eval(${sol.pp(expr, state)}) -> ${res}`);
 
         return [trace, res];
+    }
+
+    deref<T extends StateArea>(
+        v: PointerView<T, View>,
+        state: State
+    ): View<any, BaseValue, any, sol.TypeNode> {
+        let res: View<any, BaseValue, any, sol.TypeNode> | DecodingFailure;
+
+        if (v instanceof PointerMemView) {
+            res = v.toView(state.memory);
+        } else if (v instanceof PointerCalldataView) {
+            res = v.toView(getMsg(state));
+        } else if (v instanceof PointerStorageView) {
+            res = v.toView();
+        } else if (v instanceof PointerLocalView) {
+            res = v.toView();
+        } else {
+            nyi(`Pointer view ${v.constructor.name}`);
+        }
+
+        if (res instanceof DecodingFailure) {
+            throw new InterpError(`Couldn't deref pointer view ${v}`);
+        }
+
+        return res;
     }
 
     evalLV(expr: sol.Expression, state: State): [Trace, LValue] {
@@ -341,14 +398,14 @@ export class Interpreter {
             const lv = state.scope.lookupLocation(expr.name);
             return [[new EvalStep(expr, lv)], lv];
         }
-        
+
         if (expr instanceof sol.TupleExpression) {
-            let trace: Trace = [];
-            let lvs: LValue[] = [];
-            for (let comp of expr.vOriginalComponents) {
+            const trace: Trace = [];
+            const lvs: LValue[] = [];
+            for (const comp of expr.vOriginalComponents) {
                 if (comp === null) {
                     lvs.push(null);
-                    continue
+                    continue;
                 }
 
                 const [compTrace, compVal] = this.evalLV(comp, state);
@@ -356,7 +413,56 @@ export class Interpreter {
                 lvs.push(compVal);
             }
 
-            return [trace, lvs];
+            trace.push(new EvalStep(expr, lvs));
+
+            return [trace, lvs.length === 1 ? lvs[0] : lvs];
+        }
+
+        if (expr instanceof sol.IndexAccess) {
+            this.expect(
+                expr.vIndexExpression !== undefined,
+                `Missing index expression in ${expr.print()}`
+            );
+
+            let [baseTrace, baseLV] = this.evalLV(expr.vBaseExpression, state);
+            // Note that the index expression of an LValue is not itself an LValue so we eval it.
+            const [idxTrace, indexVal] = this.eval(expr.vIndexExpression, state);
+
+            this.expect(
+                baseLV instanceof View,
+                `Expected IndexAccess LValue ${expr.print()} to evaluate to a view, not ${baseLV}`
+            );
+
+            // @todo replace with isPointerView
+            if (isPointerView(baseLV)) {
+                baseLV = this.deref(baseLV, state);
+            }
+
+            let res: LValue | DecodingFailure;
+
+            if (isArrayLikeView(baseLV)) {
+                this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
+
+                if (isArrayLikeMemView(baseLV)) {
+                    res = baseLV.indexView(indexVal, state.memory);
+                } else if (isArrayLikeCalldataView(baseLV)) {
+                    res = baseLV.indexView(indexVal, getMsg(state));
+                } else if (isArrayLikeStorageView(baseLV)) {
+                    res = baseLV.indexView(indexVal, state.storage);
+                } else if (baseLV instanceof ArrayLikeLocalView) {
+                    res = baseLV.indexView(indexVal, state.storage);
+                } else {
+                    nyi(`Unkown ArrayLikeView ${baseLV.constructor.name}`);
+                }
+            } else {
+                nyi(`Index access base ${baseLV}`);
+            }
+
+            if (res instanceof DecodingFailure) {
+                throw new InterpError(`Failed decoding index LValue in ${expr.print()}`);
+            }
+
+            return [[...baseTrace, ...idxTrace, new EvalStep(expr, res)], res];
         }
 
         nyi(`evalLV(${expr.print()})`);
@@ -368,24 +474,33 @@ export class Interpreter {
         } else if (lvalue instanceof BaseMemoryView) {
             lvalue.encode(rvalue, state.memory, state.allocator);
         } else if (lvalue instanceof Array) {
-            this.expect(rvalue instanceof Array && rvalue.length === lvalue.length, `Mismatch in tuple assignment`);
+            this.expect(
+                rvalue instanceof Array && rvalue.length === lvalue.length,
+                `Mismatch in tuple assignment`
+            );
 
             for (let i = 0; i < lvalue.length; i++) {
                 this.assign(lvalue[i], rvalue[i], state);
             }
-        } else if (isLocalScopeView(lvalue)) {
-            lvalue.scope.set(lvalue.name, rvalue);
+        } else if (lvalue instanceof BaseLocalView) {
+            this.expect(
+                isPrimitiveValue(rvalue),
+                `Unexpected value ${rvalue} in assignment to local ${lvalue.name}`
+            );
+            lvalue.encode(rvalue);
         } else if (lvalue === null) {
             // Nothing to do - missing component in the LHS of a tuple assignment.
         } else {
-            nyi(`LValue: ${lvalue}`)
+            nyi(`assign(${lvalue}, ${rvalue}, ${state})`);
         }
     }
 
     evalAssignment(expr: sol.Assignment, state: State): [Trace, Value] {
-        // @todo What is the order here?
+        let rtrace;
+        let rvalue;
+
+        [rtrace, rvalue] = this.eval(expr.vRightHandSide, state);
         const [ltrace, lv] = this.evalLV(expr.vLeftHandSide, state);
-        let [rtrace, rvalue] = this.eval(expr.vRightHandSide, state);
 
         // @todo handle coercions
         // @todo handle memory to storage copy
@@ -399,17 +514,30 @@ export class Interpreter {
             const lType = this.infer(state).typeOf(expr.vLeftHandSide);
             // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
 
-            rvalue = this.computeBinary(expr, lVal, op, rvalue, lType, undefined, this.isUnchecked(expr, state));
+            rvalue = this.computeBinary(
+                expr,
+                lVal,
+                op,
+                rvalue,
+                lType,
+                undefined,
+                this.isUnchecked(expr, state)
+            );
             this.assign(lv, rvalue, state);
         } else {
             this.assign(lv, rvalue, state);
         }
 
         // @todo do we return lvalue or rvalue here?
-        return [[...ltrace, ...rtrace], rvalue];
+        return [[...rtrace, ...ltrace], rvalue];
     }
 
-    private clamp(expr: sol.Expression, val: bigint, type: sol.TypeNode, unchecked: boolean): bigint {
+    private clamp(
+        expr: sol.Expression,
+        val: bigint,
+        type: sol.TypeNode,
+        unchecked: boolean
+    ): bigint {
         const clampedVal = type instanceof sol.IntType ? sol.clampIntToType(val, type) : val;
         const overflow = clampedVal !== val;
 
@@ -579,8 +707,38 @@ export class Interpreter {
         nyi("");
     }
 
+    /**
+     * Type conversion is complex and changes with language versions.
+     */
     evalTypeConversion(expr: sol.FunctionCall, state: State): [Trace, Value] {
-        nyi("");
+        const infer = this.infer(state);
+        this.expect(expr.vArguments.length === 1, `Type conversion expects a single argument`);
+        const calleeT = infer.typeOf(expr.vExpression);
+        this.expect(
+            calleeT instanceof sol.TypeNameType,
+            `Unexpected type for ${expr.vExpression.print()} in type conversion: ${calleeT.pp()}`
+        );
+
+        const fromT = infer.typeOf(expr.vArguments[0]);
+        const toT = calleeT.type;
+
+        const [fromTrace, fromV] = this.eval(expr.vArguments[0], state);
+
+        if (fromT instanceof sol.IntType && toT instanceof sol.FixedBytesType) {
+            this.expect(typeof fromV === "bigint", `Expected a bigint`);
+            this.expect(
+                fromT.nBits / 8 === toT.size,
+                `Unexpected cast from ${fromT.pp()} to ${toT.pp()}`
+            );
+
+            scratchWord.fill(0);
+            const view = new IntMemView(fromT, 0n);
+            view.encode(fromV, scratchWord);
+
+            return [fromTrace, scratchWord.slice(32 - toT.size, 32)];
+        }
+
+        nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
     }
 
     evalStructConstructorCall(expr: sol.FunctionCall, state: State): [Trace, Value] {
@@ -620,7 +778,7 @@ export class Interpreter {
             return this.evalNewCall(expr, state);
         }
 
-        let trace: Trace = [];
+        const trace: Trace = [];
         const [calleeTrace, callee] = this.eval(expr.vExpression, state);
         trace.push(...calleeTrace);
 
@@ -648,7 +806,56 @@ export class Interpreter {
     }
 
     evalIndexAccess(expr: sol.IndexAccess, state: State): [Trace, Value] {
-        nyi("");
+        this.expect(expr.vIndexExpression !== undefined, `Mising index expression in eval`);
+        const infer = this.infer(state);
+
+        const baseT = infer.typeOf(expr.vBaseExpression);
+
+        const baseRes = this.eval(expr.vBaseExpression, state);
+        const baseTrace = baseRes[0];
+        let baseVal = baseRes[1];
+
+        const [indexTrace, indexVal] = this.eval(expr.vIndexExpression, state);
+
+        let res: Value;
+
+        if (isPointerView(baseVal)) {
+            baseVal = this.deref(baseVal, state);
+        }
+
+        if (isArrayLikeView(baseVal)) {
+            this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
+            if (isArrayLikeMemView(baseVal)) {
+                res = baseVal.indexView(indexVal, state.memory);
+            } else if (isArrayLikeCalldataView(baseVal)) {
+                res = baseVal.indexView(indexVal, getMsg(state));
+            } else if (isArrayLikeStorageView(baseVal)) {
+                res = baseVal.indexView(indexVal, state.storage);
+            } else  {
+                nyi(`Array like view ${baseVal.constructor.name}`)
+            }
+        } else if (baseVal instanceof Uint8Array) {
+            this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
+            this.expect(
+                baseT instanceof sol.FixedBytesType,
+                `Expected a stack fixed byte var in base index`
+            );
+
+            if (indexVal < 0n || indexVal >= baseT.size) {
+                throw new OOB(expr);
+            }
+
+            res = BigInt(baseVal[Number(indexVal)]);
+        } else {
+            nyi(`Index access base ${baseVal}`);
+        }
+
+        if (res instanceof DecodingFailure) {
+            throw new OOB(expr);
+        }
+
+        // @todo add test for order of operations
+        return [[...baseTrace, ...indexTrace], res];
     }
 
     evalIndexRangeAccess(expr: sol.IndexRangeAccess, state: State): [Trace, Value] {
@@ -664,14 +871,11 @@ export class Interpreter {
             return [[], expr.value === "true"];
         }
 
-        if (expr.kind === sol.LiteralKind.String) {
-            const constantAddr = state.constantsMap.get(expr.id);
-            this.expect(constantAddr !== undefined, `No address for string literal`);
-            return [[], constantAddr]
-        }
+        this.expect(expr.kind === sol.LiteralKind.String || expr.kind === sol.LiteralKind.HexString || expr.kind === sol.LiteralKind.UnicodeString);
 
-        // @todo finish literals
-        nyi(`Literal ${expr.print()}`);
+        const view = state.constantsMap.get(expr.id);
+        this.expect(view !== undefined, `Missing string/bytes literal`);
+        return [[], view];
     }
 
     evalMemberAccess(expr: sol.MemberAccess, state: State): [Trace, Value] {
@@ -730,22 +934,22 @@ export class Interpreter {
         return n.getClosestParentByType(sol.UncheckedBlock) !== undefined;
     }
 
-    lvToValue(lv: LValue, state: State): Value {
+    public lvToValue(lv: LValue, state: State): Value {
         if (lv instanceof BaseStorageView) {
-            return lv.decode(state.storage)
+            return lv.decode(state.storage);
         } else if (lv instanceof BaseMemoryView) {
             return lv.decode(state.memory);
         } else if (lv instanceof BaseCalldataView) {
-            nyi(`lvToValue of calldata`)
+            return lv.decode(getMsg(state));
         } else if (lv instanceof Array) {
-            return lv.map((x) => this.lvToValue(x, state))
-        } else if (isLocalScopeView(lv)) {
-            return lv.scope.lookup(lv.name);
+            return lv.map((x) => this.lvToValue(x, state));
+        } else if (lv instanceof PrimitiveLocalView) {
+            return lv.decode();
         } else if (lv === null) {
             return none;
         }
 
-        nyi(`LValue: ${lv}`)
+        nyi(`LValue: ${lv}`);
     }
 
     evalUnaryOperation(expr: sol.UnaryOperation, state: State): [Trace, Value] {
@@ -761,7 +965,7 @@ export class Interpreter {
 
         // In all other cases the result is bigint
         let res: bigint;
-        let unchecked = this.isUnchecked(expr, state);
+        const unchecked = this.isUnchecked(expr, state);
         const t = this.infer(state).typeOf(expr);
 
         // Prefix/infix inc/dec require special handling as we need to
@@ -779,7 +983,7 @@ export class Interpreter {
 
             return [trace, res];
         }
-        
+
         const [trace, subVal] = this.eval(expr.vSubExpression, state);
 
         if (expr.operator === "-") {
@@ -792,7 +996,7 @@ export class Interpreter {
             // @todo implement ++, --, delete
             nyi(`Unary operator ${expr.operator}`);
         }
-        
+
         return [trace, this.clamp(expr, res, t, unchecked)];
     }
 }

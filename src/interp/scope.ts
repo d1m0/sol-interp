@@ -3,12 +3,9 @@ import { NotDefined } from "./exceptions";
 import { LValue, Value } from "./value";
 import { State } from "./state";
 import { ExpStructType, getContractLayoutType } from "sol-dbg";
-import {
-    BaseStorageView,
-    makeStorageView,
-    StructStorageView
-} from "sol-dbg/dist/debug/decoding/storage/view";
+import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
+import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -34,7 +31,7 @@ import { lt } from "semver";
 export abstract class BaseScope {
     constructor(
         public readonly name: string,
-        protected readonly knownIds: Set<string>,
+        protected readonly knownIds: Map<string, sol.TypeNode>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
     ) {}
@@ -110,8 +107,12 @@ export class LocalsScope extends BaseScope {
         return decl.name === "" ? `<ret_${idx}>` : decl.name;
     }
 
-    private static detectIds(node: LocalsScopeNodeType, version: string): Set<string> {
-        const res = new Set<string>();
+    private static detectIds(
+        node: LocalsScopeNodeType,
+        version: string
+    ): Map<string, sol.TypeNode> {
+        const infer = new sol.InferType(version);
+        const res = new Map<string, sol.TypeNode>();
 
         if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
             if (lt(version, "0.5.0")) {
@@ -119,7 +120,7 @@ export class LocalsScope extends BaseScope {
                 for (const stmt of node.vStatements) {
                     if (stmt instanceof sol.VariableDeclarationStatement) {
                         for (const decl of stmt.vDeclarations) {
-                            res.add(decl.name);
+                            res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
                         }
                     }
                 }
@@ -132,20 +133,21 @@ export class LocalsScope extends BaseScope {
             } else {
                 // In solidity >= 0.5.0 each local variable has a scope starting at its declaration
                 for (const decl of node.vDeclarations) {
-                    res.add(decl.name);
+                    res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
                 }
             }
         } else if (node instanceof sol.FunctionDefinition) {
             for (const decl of node.vParameters.vParameters) {
-                res.add(decl.name);
+                res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
             }
 
             for (let i = 0; i < node.vReturnParameters.vParameters.length; i++) {
-                res.add(LocalsScope.returnName(node.vReturnParameters.vParameters[i], i));
+                const decl = node.vReturnParameters.vParameters[i];
+                res.set(LocalsScope.returnName(decl, i), infer.variableDeclarationToTypeNode(decl));
             }
         } else if (node instanceof sol.ModifierDefinition) {
             for (const decl of node.vParameters.vParameters) {
-                res.add(decl.name);
+                res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
             }
         }
 
@@ -179,7 +181,20 @@ export class LocalsScope extends BaseScope {
     }
 
     _lookupLocation(name: string): LValue | undefined {
-        return this.defs.has(name) ? { scope: this, name } : undefined;
+        const t = this.knownIds.get(name);
+        if (t === undefined) {
+            return undefined;
+        }
+
+        if (t instanceof sol.PointerType) {
+            return new PointerLocalView(t, [this, name]);
+        }
+
+        if (t instanceof sol.FixedBytesType) {
+            return new ArrayLikeLocalView(t, [this, name]);
+        }
+
+        return new PrimitiveLocalView(t, [this, name]);
     }
 
     _set(name: string, val: Value): void {
@@ -199,42 +214,51 @@ export class ContractScope extends BaseScope {
         _next: BaseScope | undefined
     ) {
         const [layoutType] = getContractLayoutType(contract, infer);
-        const defNames = new Set<string>(layoutType.fields.map((v) => v[0]));
+        const defTypes = new Map<string, sol.TypeNode>(layoutType.fields);
 
         // On top of state vars also add function, enum, struct, user defined value type, event and error names.
         for (const base of contract.vLinearizedBaseContracts) {
             for (const fun of contract.vFunctions) {
                 if (base == contract) {
-                    defNames.add(fun.name);
+                    defTypes.set(fun.name, infer.funDefToType(fun));
                 } else {
                     if (fun.visibility !== sol.FunctionVisibility.Private) {
-                        defNames.add(fun.name);
+                        defTypes.set(fun.name, infer.funDefToType(fun));
                     }
                 }
             }
 
             for (const enumDef of contract.vEnums) {
-                defNames.add(enumDef.name);
+                defTypes.set(
+                    enumDef.name,
+                    new sol.TypeNameType(new sol.UserDefinedType(enumDef.name, enumDef))
+                );
             }
 
             for (const structDef of contract.vStructs) {
-                defNames.add(structDef.name);
+                defTypes.set(
+                    structDef.name,
+                    new sol.TypeNameType(new sol.UserDefinedType(structDef.name, structDef))
+                );
             }
 
             for (const event of contract.vEvents) {
-                defNames.add(event.name);
+                defTypes.set(event.name, infer.eventDefToType(event));
             }
 
             for (const error of contract.vErrors) {
-                defNames.add(error.name);
+                defTypes.set(error.name, infer.errDefToType(error));
             }
 
             for (const typeDef of contract.vUserDefinedValueTypes) {
-                defNames.add(typeDef.name);
+                defTypes.set(
+                    typeDef.name,
+                    new sol.TypeNameType(new sol.UserDefinedType(typeDef.name, typeDef))
+                );
             }
         }
 
-        super(`<contract ${contract.name}>`, defNames, state, _next);
+        super(`<contract ${contract.name}>`, defTypes, state, _next);
         this.layoutType = layoutType;
         this.layout = makeStorageView(this.layoutType, [0n, 32]) as StructStorageView;
         this.fieldToView = new Map(this.layout.fieldViews);
@@ -267,16 +291,20 @@ export class ContractScope extends BaseScope {
 export class BuiltinsScope extends BaseScope {
     builtinsMap: Map<string, Value>;
 
-    constructor(builtins: Array<[string, Value]>, state: State, _next: BaseScope | undefined) {
-        super(`<builtins>`, new Set(builtins.map(([name]) => name)), state, _next);
-        this.builtinsMap = new Map(builtins);
+    constructor(
+        builtins: Array<[string, sol.TypeNode, Value]>,
+        state: State,
+        _next: BaseScope | undefined
+    ) {
+        super(`<builtins>`, new Map(builtins.map((x) => [x[0], x[1]])), state, _next);
+        this.builtinsMap = new Map(builtins.map((x) => [x[0], x[2]]));
     }
 
     _lookup(name: string): Value | undefined {
         return this.builtinsMap.get(name);
     }
 
-    _lookupLocation(name: string): LValue | undefined {
+    _lookupLocation(): LValue | undefined {
         sol.assert(false, `Can't lookup a builtin's location`);
     }
 

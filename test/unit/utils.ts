@@ -31,7 +31,7 @@ export function makeState(
 ): State {
     const allocator = new DefaultAllocator();
     const unit = loc.getClosestParentByType(sol.SourceUnit) as sol.SourceUnit;
-    const constantsMap = encodeConstants(unit, allocator)
+    const constantsMap = encodeConstants(unit, allocator);
     const res: State = {
         storage: ImmMap.fromEntries([]),
         memory: allocator.memory,
@@ -60,7 +60,11 @@ export function makeState(
     }
 
     // Builtins
-    let scope: BaseScope = new BuiltinsScope([["assert", assertBuiltin]], res, undefined);
+    let scope: BaseScope = new BuiltinsScope(
+        [["assert", assertBuiltin.type, assertBuiltin]],
+        res,
+        undefined
+    );
     for (const nd of scopeNodes) {
         if (nd instanceof sol.ContractDefinition) {
             scope = new ContractScope(nd, infer, res, scope);

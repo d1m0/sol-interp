@@ -8,7 +8,7 @@ export const assertBuiltin = new BuiltinFunction(
     "assert",
     new BuiltinFunctionType("assert", [types.bool], []),
     (state: State, args: Value[]): Value[] => {
-        if ( args.length != 1 || typeof args[0] !== "boolean" ) {
+        if (args.length != 1 || typeof args[0] !== "boolean") {
             sol.assert(false, `Unexpected args for assert: ${args}`);
         }
 

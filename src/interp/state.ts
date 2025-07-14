@@ -1,9 +1,9 @@
 import { Address } from "@ethereumjs/util";
-import { Memory, Storage } from "sol-dbg";
+import { BaseMemoryView, Memory, Storage, Value as BaseValue } from "sol-dbg";
 import { BaseScope } from "./scope";
-import { FunctionDefinition, VariableDeclaration } from "solc-typed-ast";
+import { FunctionDefinition, TypeNode, VariableDeclaration } from "solc-typed-ast";
 import { Value } from "./value";
-import { Allocator } from "sol-dbg/dist/debug/decoding/memory/allocator";
+import { Allocator } from "sol-dbg";
 
 export interface CallResult {
     reverted: boolean;
@@ -40,5 +40,5 @@ export interface State {
     intCallStack: InternalCallFrame[];
     localsStack: Array<Map<string, Value>>;
     scope: BaseScope | undefined;
-    constantsMap: Map<number, bigint>
+    constantsMap: Map<number, BaseMemoryView<BaseValue, TypeNode>>;
 }

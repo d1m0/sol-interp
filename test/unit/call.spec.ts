@@ -1,13 +1,16 @@
-import { ArtifactManager, PartialSolcOutput } from "sol-dbg";
+import { ArtifactManager, PartialSolcOutput, View } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
-import { Value } from "sol-dbg/dist/debug/decoding/value";
 import * as fse from "fs-extra";
 import { makeState, worldMock } from "./utils";
 import { Assert } from "../../src/interp/exceptions";
+import { hexToBytes } from "@ethereumjs/util";
+import { Value } from "../../src/interp/value";
 
-type ExceptionConstructors = typeof Assert
-const samples: Array<[string, string, string, Array<[string, Value]>, Value[], Value[] | ExceptionConstructors]> = [
+type ExceptionConstructors = typeof Assert;
+const samples: Array<
+    [string, string, string, Array<[string, Value]>, Value[], Value[] | ExceptionConstructors]
+> = [
     ["initial.sol", "Foo", "sqr", [], [2n], [4n]],
     ["initial.sol", "Foo", "localVarScope", [], [], [5n]],
     ["initial.sol", "Foo", "assrt", [], [true], []],
@@ -18,6 +21,8 @@ const samples: Array<[string, string, string, Array<[string, Value]>, Value[], V
     ["assignments.sol", "Assignments", "tupleDeclaration", [], [], []],
     ["assignments.sol", "Assignments", "tupleNested", [], [], []],
     ["assignments.sol", "Assignments", "tupleEvaluateAllInitialExpressions", [], [], [1337n]],
+    ["OoO.sol", "OoO", "assignmentOOO", [], [], [hexToBytes("0x00000100000000000000"), 3n]],
+    ["OoO.sol", "OoO", "indexAccess", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
@@ -49,7 +54,7 @@ describe("Simple function call tests", () => {
         for (let i = 0; i < fileNames.length; i++) {
             unitMap.set(fileNames[i], artifactManager.artifacts()[i].units[0]);
         }
-    });
+    }, 10000);
 
     for (const [fileName, contract, funName, stateVals, args, expectedReturns] of samples) {
         it(`${fileName}:${contract}.${funName}(${args.map((arg) => String(arg)).join(", ")})`, () => {
@@ -60,10 +65,20 @@ describe("Simple function call tests", () => {
             const state = makeState(fun, infer, ...stateVals);
 
             if (expectedReturns instanceof Array) {
-                const [, returns] = interp.callInternal(fun, args, state);
-                expect(returns).toEqual(expectedReturns);
+                try {
+                    let [, returns] = interp.callInternal(fun, args, state);
+                    returns = returns.map((ret) =>
+                        ret instanceof View ? interp.lvToValue(ret, state) : ret
+                    );
+                    expect(returns).toEqual(expectedReturns);
+                } catch (e) {
+                    console.error(`Unexpected exception ${e}`);
+                    expect(false).toBeTruthy();
+                }
             } else {
-                expect(() => {interp.callInternal(fun, args, state)}).toThrow(expectedReturns);
+                expect(() => {
+                    interp.callInternal(fun, args, state);
+                }).toThrow(expectedReturns);
             }
         });
     }

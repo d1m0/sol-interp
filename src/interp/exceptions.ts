@@ -1,5 +1,5 @@
 import { bytesToHex } from "@ethereumjs/util";
-import * as sol from "solc-typed-ast"
+import * as sol from "solc-typed-ast";
 import { BaseScope } from "./scope";
 
 export class InterpError extends Error {}
@@ -25,6 +25,12 @@ export class AlreadyDefined extends InterpError {
 export class Revert extends InterpError {
     constructor(public readonly bytes: Uint8Array) {
         super(`Revert with bytes ${bytesToHex(bytes)}`);
+    }
+}
+
+export class OOB extends InterpError {
+    constructor(public readonly expr: sol.Expression) {
+        super(`Out-of-bounds access in ${expr.print()}`);
     }
 }
 

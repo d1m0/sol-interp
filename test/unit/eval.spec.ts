@@ -1,9 +1,9 @@
 import { ArtifactManager } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
-import { Value } from "sol-dbg/dist/debug/decoding/value";
 import * as fse from "fs-extra";
 import { makeState, worldMock } from "./utils";
+import { Value } from "../../src/interp/value";
 
 const samples: Array<[string, Array<[string, Value]>, Value]> = [
     ["//ContractDefinition/VariableDeclaration[@name='a']/*[2]", [], 1n],
