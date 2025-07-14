@@ -2,7 +2,7 @@ import { ArtifactManager } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
-import { makeState, worldMock } from "./utils";
+import { getVersion, makeState, worldMock } from "./utils";
 import { Value } from "../../src/interp/value";
 
 const samples: Array<[string, Array<[string, Value]>, Value]> = [
@@ -32,16 +32,17 @@ describe("Eval unit tests", () => {
     let artifactManager;
     let contract: sol.ContractDefinition;
     let interp: Interpreter;
-    const infer = new sol.InferType("0.8.29");
+    let version: string
 
     beforeAll(async () => {
         const file = fse.readFileSync("test/samples/expressions.sol", {
             encoding: "utf-8"
         });
+        version = getVersion(file);
         const compileResult = await sol.compileSourceString(
             "expressions.sol",
             file,
-            "0.8.29",
+            version,
             undefined,
             undefined,
             { viaIR: true }
@@ -54,7 +55,7 @@ describe("Eval unit tests", () => {
     for (const [path, defs, expValue] of samples) {
         it(path, () => {
             const expr = new sol.XPath(contract).query(path)[0] as sol.Expression;
-            const state = makeState(expr, infer, ...defs);
+            const state = makeState(expr, version, ...defs);
             expect(expr).toBeDefined();
             const [, v] = interp.eval(expr, state);
             expect(v).toEqual(expValue);

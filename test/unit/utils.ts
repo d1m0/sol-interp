@@ -26,9 +26,10 @@ export const worldMock: WorldInterface = {
 
 export function makeState(
     loc: sol.ASTNode,
-    infer: sol.InferType,
+    version: string,
     ...vals: Array<[string, Value]>
 ): State {
+    const infer = new sol.InferType(version);
     const allocator = new DefaultAllocator();
     const unit = loc.getClosestParentByType(sol.SourceUnit) as sol.SourceUnit;
     const constantsMap = encodeConstants(unit, allocator);
@@ -38,7 +39,7 @@ export function makeState(
         allocator,
         extCallStack: [],
         intCallStack: [],
-        version: "0.8.29",
+        version,
         scope: undefined,
         localsStack: [],
         constantsMap

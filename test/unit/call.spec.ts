@@ -39,14 +39,26 @@ const samples: Array<
     ["while_v04.sol", "While", "doWhileStatementWithBlock", [], [], []],
     ["while_v04.sol", "While", "doWhileStatementWithExpression", [], [], []],
     ["while_v04.sol", "While", "doWhileStatementWithLoopControlStatements", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementCompleteWithExpression", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementCompleteWithBlock", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementInitializationWithNoDeclaration", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementNoInitialization", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementNoLoopExpression", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementNoLoopCondition", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementLoopExpressionOnly", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementLoopConditionOnly", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementLoopInitializationOnly", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementEmpty", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementWithLoopControlStatements", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementwithTernaryInHeader", [], [], []],
 ];
 
 describe("Simple function call tests", () => {
     let artifactManager;
     let interp: Interpreter;
-    const infer = new sol.InferType("0.8.29");
     const fileNames = [...new Set<string>(samples.map(([name]) => name))];
     const unitMap = new Map<string, sol.SourceUnit>();
+    const versionMap = new Map<string, string>();
 
     beforeAll(async () => {
         const compileResults: PartialSolcOutput[] = [];
@@ -64,6 +76,7 @@ describe("Simple function call tests", () => {
                 { viaIR: true }
             );
             compileResults.push(compileResult.data);
+            versionMap.set(fileName, version);
         }
 
         artifactManager = new ArtifactManager(compileResults);
@@ -79,7 +92,7 @@ describe("Simple function call tests", () => {
             const fun = new sol.XPath(unit).query(
                 `//ContractDefinition[@name='${contract}']/FunctionDefinition[@name='${funName}']`
             )[0] as sol.FunctionDefinition;
-            const state = makeState(fun, infer, ...stateVals);
+            const state = makeState(fun, versionMap.get(fileName) as string, ...stateVals);
 
             if (expectedReturns instanceof Array) {
                 try {

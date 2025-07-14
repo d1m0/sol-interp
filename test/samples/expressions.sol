@@ -1,4 +1,4 @@
-pragma solidity "0.8.29";
+pragma solidity 0.8.29;
 
 contract LiteralArithmetic {
     // 3

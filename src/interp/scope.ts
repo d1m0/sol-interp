@@ -128,10 +128,11 @@ export class LocalsScope extends BaseScope {
                 // Nothing to do
             }
         } else if (node instanceof sol.VariableDeclarationStatement) {
-            if (lt(version, "0.5.0")) {
+            if (lt(version, "0.5.0") && !(node.parent instanceof sol.ForStatement)) {
                 // Nothing to do
             } else {
                 // In solidity >= 0.5.0 each local variable has a scope starting at its declaration
+                // Also if this is the initialization stmt of a for loop, its its own scope
                 for (const decl of node.vDeclarations) {
                     res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
                 }
@@ -159,18 +160,20 @@ export class LocalsScope extends BaseScope {
         state: State,
         _next: BaseScope | undefined
     ) {
+        let defs = LocalsScope.detectIds(node, state.version);
+
         let name: string;
         if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
             name = `<block ${node.print(0)}>`;
-        } else if (node instanceof sol.VariableDeclaration) {
-            name = `<local ${node.name}>`;
+        } else if (node instanceof sol.VariableDeclarationStatement) {
+            name = `<locals ${[...defs.keys()].join(", ")}>`;
         } else if (node instanceof sol.FunctionDefinition) {
             name = `<arg/rets for ${node.print(0)}>`;
         } else {
             name = `<arg for ${node.print(0)}>`;
         }
 
-        super(name, LocalsScope.detectIds(node, state.version), state, _next);
+        super(name, defs, state, _next);
 
         sol.assert(state.localsStack.length > 0, ``);
         this.defs = state.localsStack[state.localsStack.length - 1];

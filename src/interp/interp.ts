@@ -21,7 +21,7 @@ import { WorldInterface, State, SolMessage } from "./state";
 import { EvalStep, ExecStep, Trace } from "./step";
 import { InterpError, NoScope, OOB, Overflow } from "./exceptions";
 import { gte, lt } from "semver";
-import { BuiltinFunction, isPrimitiveValue, LValue, none, NoneValue, Value } from "./value";
+import { BuiltinFunction, isPrimitiveValue, LValue, none, Value } from "./value";
 import { Address } from "@ethereumjs/util";
 import { BaseScope, LocalsScope } from "./scope";
 import { getMsg, isValueType, makeZeroValue } from "./utils";
@@ -96,6 +96,7 @@ export class Interpreter {
     }
 
     private popScope(state: State): void {
+        this.expect(state.scope !== undefined, `Popping on empty scope`)
         state.scope = state.scope?._next;
     }
 
@@ -166,11 +167,11 @@ export class Interpreter {
             [trace, res] = this.execContinue(stmt, state);
         } else if (stmt instanceof sol.DoWhileStatement) {
             [trace, res] = this.execDoWhileStatement(stmt, state);
+        } else if (stmt instanceof sol.ForStatement) {
+            [trace, res] = this.execForStatement(stmt, state);
             /*
         } else if (stmt instanceof sol.EmitStatement) {
             [trace, res] = this.execEmitStatement(stmt, state);
-        } else if (stmt instanceof sol.ForStatement) {
-            [trace, res] = this.execForStatement(stmt, state);
         } else if (stmt instanceof sol.InlineAssembly) {
             [trace, res] = this.execInlineAssembly(stmt, state);
         } else if (stmt instanceof sol.PlaceholderStatement) {
@@ -216,7 +217,9 @@ export class Interpreter {
             );
         }
 
-        if (gte(state.version, "0.5.0")) {
+        // VariableDeclarationStatements are their own scope on solidity >0.5.0 and
+        // when theyre in the initialization of a for loop.
+        if (gte(state.version, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
             const vals: Array<[string, Value]> = [];
 
             for (let i = 0, j = 0; i < stmt.assignments.length; i++) {
@@ -235,10 +238,7 @@ export class Interpreter {
                 const val = varInitialVals[i];
 
                 sol.assert(state.scope !== undefined, `Missing scope`);
-
-                if (!(val instanceof NoneValue)) {
-                    state.scope.set(decl.name, val);
-                }
+                state.scope.set(decl.name, val);
             }
         }
 
@@ -395,6 +395,58 @@ export class Interpreter {
         } while (cond);
 
         return [trace, ControlFlow.Fallthrough]
+    }
+
+    private execForStatement(stmt: sol.ForStatement, state: State): [Trace, ControlFlow] {
+        let trace: Trace = [];
+
+        if (stmt.vInitializationExpression !== undefined) {
+            const [initTrace, initFlow] = this.exec(stmt.vInitializationExpression, state);
+            this.expect(initFlow === ControlFlow.Fallthrough);
+            trace.push(...initTrace);
+        }
+
+        while (true) {
+            let cond: boolean
+
+            if (stmt.vCondition) {
+                const [condTrace, condVal] = this.eval(stmt.vCondition, state);
+                trace.push(...condTrace);
+                this.expect(typeof condVal === `boolean`)
+                cond = condVal
+            } else {
+                cond = true;
+            }
+
+            if (!(cond)) {
+                break;
+            }
+
+            const [bodyTrace, bodyCflow] = this.exec(stmt.vBody, state);
+            trace.push(...bodyTrace);
+
+            if (bodyCflow === ControlFlow.Return) {
+                return [trace, ControlFlow.Return];
+            }
+
+            if (bodyCflow === ControlFlow.Break) {
+                break;
+            }
+
+            // Eval the loop expression
+            if (stmt.vLoopExpression !== undefined) {
+                const [loopExpTrace, loopFlow] = this.exec(stmt.vLoopExpression, state);
+                this.expect(loopFlow === ControlFlow.Fallthrough)
+                trace.push(...loopExpTrace);
+            }
+        }
+
+        // We added a scope for the for loop initialization statement. Pop it here.
+        if (state.scope instanceof LocalsScope && state.scope.node === stmt.vInitializationExpression) {
+            this.popScope(state);
+        }
+
+        return [trace, ControlFlow.Fallthrough];
     }
     ///*********************EXPRESSIONS************************************************
     /**
