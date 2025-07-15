@@ -1,8 +1,8 @@
 import * as sol from "solc-typed-ast";
 import { NotDefined } from "./exceptions";
-import { LValue, Value } from "./value";
+import { Value } from "./value";
 import { State } from "./state";
-import { ExpStructType, getContractLayoutType } from "sol-dbg";
+import { ExpStructType, getContractLayoutType, View } from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
@@ -37,7 +37,7 @@ export abstract class BaseScope {
     ) {}
 
     abstract _lookup(name: string): Value | undefined;
-    abstract _lookupLocation(name: string): LValue | undefined;
+    abstract _lookupLocation(name: string): View | undefined;
     abstract _set(name: string, val: Value): void;
 
     lookup(name: string): Value {
@@ -56,7 +56,7 @@ export abstract class BaseScope {
         return v;
     }
 
-    lookupLocation(name: string): LValue {
+    lookupLocation(name: string): View {
         let v;
 
         if (this.knownIds.has(name)) {
@@ -160,30 +160,28 @@ export class LocalsScope extends BaseScope {
         state: State,
         _next: BaseScope | undefined
     ) {
-        let defs = LocalsScope.detectIds(node, state.version);
+        const defTypesMap = LocalsScope.detectIds(node, state.version);
 
         let name: string;
         if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
             name = `<block ${node.print(0)}>`;
         } else if (node instanceof sol.VariableDeclarationStatement) {
-            name = `<locals ${[...defs.keys()].join(", ")}>`;
+            name = `<locals ${[...defTypesMap.keys()].join(", ")}>`;
         } else if (node instanceof sol.FunctionDefinition) {
             name = `<arg/rets for ${node.print(0)}>`;
         } else {
             name = `<arg for ${node.print(0)}>`;
         }
 
-        super(name, defs, state, _next);
-
-        sol.assert(state.localsStack.length > 0, ``);
-        this.defs = state.localsStack[state.localsStack.length - 1];
+        super(name, defTypesMap, state, _next);
+        this.defs = new Map();
     }
 
     _lookup(name: string): Value | undefined {
         return this.defs.get(name);
     }
 
-    _lookupLocation(name: string): LValue | undefined {
+    _lookupLocation(name: string): View | undefined {
         const t = this.knownIds.get(name);
         if (t === undefined) {
             return undefined;
@@ -276,17 +274,13 @@ export class ContractScope extends BaseScope {
         return view.decode(this.state.storage);
     }
 
-    _lookupLocation(name: string): LValue | undefined {
+    _lookupLocation(name: string): View | undefined {
         return this.fieldToView.get(name) as any;
     }
 
     _set(name: string, v: Value): void {
         const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
-
-        sol.assert(
-            !(view.type instanceof sol.PointerType),
-            `Internal error: Cannot set pointer types in storage`
-        );
+        console.error(`Encode ${v} in ${view.type.pp()}`);
         this.state.storage = view.encode(v, this.state.storage);
     }
 }
@@ -307,7 +301,7 @@ export class BuiltinsScope extends BaseScope {
         return this.builtinsMap.get(name);
     }
 
-    _lookupLocation(): LValue | undefined {
+    _lookupLocation(): View | undefined {
         sol.assert(false, `Can't lookup a builtin's location`);
     }
 

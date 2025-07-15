@@ -1,11 +1,9 @@
-import { ArtifactManager, PartialSolcOutput, View } from "sol-dbg";
+import { View, Value, zip } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
-import * as fse from "fs-extra";
-import { getVersion, makeState, worldMock } from "./utils";
+import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
 import { Assert } from "../../src/interp/exceptions";
-import {  hexToBytes } from "@ethereumjs/util";
-import { Value } from "../../src/interp/value";
+import { hexToBytes } from "@ethereumjs/util";
 
 type ExceptionConstructors = typeof Assert;
 const samples: Array<
@@ -50,53 +48,36 @@ const samples: Array<
     ["fors_v04.sol", "ForLoops", "forStatementLoopInitializationOnly", [], [], []],
     ["fors_v04.sol", "ForLoops", "forStatementEmpty", [], [], []],
     ["fors_v04.sol", "ForLoops", "forStatementWithLoopControlStatements", [], [], []],
-    ["fors_v04.sol", "ForLoops", "forStatementwithTernaryInHeader", [], [], []],
+    ["fors_v04.sol", "ForLoops", "forStatementwithTernaryInHeader", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
     let artifactManager;
     let interp: Interpreter;
+    let sampleMap: SampleMap;
+
     const fileNames = [...new Set<string>(samples.map(([name]) => name))];
-    const unitMap = new Map<string, sol.SourceUnit>();
-    const versionMap = new Map<string, string>();
 
     beforeAll(async () => {
-        const compileResults: PartialSolcOutput[] = [];
-        for (const fileName of fileNames) {
-            const file = fse.readFileSync(`test/samples/${fileName}`, {
-                encoding: "utf-8"
-            });
-            const version = getVersion(file)
-            const compileResult = await sol.compileSourceString(
-                fileName,
-                file,
-                version,
-                undefined,
-                undefined,
-                { viaIR: true }
-            );
-            compileResults.push(compileResult.data);
-            versionMap.set(fileName, version);
-        }
-
-        artifactManager = new ArtifactManager(compileResults);
+        [artifactManager, sampleMap] = await loadSamples(fileNames);
         interp = new Interpreter(worldMock, artifactManager);
-        for (let i = 0; i < fileNames.length; i++) {
-            unitMap.set(fileNames[i], artifactManager.artifacts()[i].units[0]);
-        }
     }, 10000);
 
-    for (const [fileName, contract, funName, stateVals, args, expectedReturns] of samples) {
-        it(`${fileName}:${contract}.${funName}(${args.map((arg) => String(arg)).join(", ")})`, () => {
-            const unit = unitMap.get(fileName) as sol.SourceUnit;
+    for (const [fileName, contract, funName, stateVals, argVals, expectedReturns] of samples) {
+        it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, () => {
+            const { unit, version } = sampleMap.get(fileName) as SampleInfo;
             const fun = new sol.XPath(unit).query(
                 `//ContractDefinition[@name='${contract}']/FunctionDefinition[@name='${funName}']`
             )[0] as sol.FunctionDefinition;
-            const state = makeState(fun, versionMap.get(fileName) as string, ...stateVals);
+            const state = makeState(fun, version, ...stateVals);
 
+            const args = zip(
+                fun.vParameters.vParameters.map((d) => d.name),
+                argVals
+            );
             if (expectedReturns instanceof Array) {
                 try {
-                    let [, returns] = interp.callInternal(fun, args, state);
+                    let [, returns] = interp.callInternal(fun, encodeMemArgs(args, state), state);
                     returns = returns.map((ret) =>
                         ret instanceof View ? interp.lvToValue(ret, state) : ret
                     );
@@ -107,7 +88,7 @@ describe("Simple function call tests", () => {
                 }
             } else {
                 expect(() => {
-                    interp.callInternal(fun, args, state);
+                    interp.callInternal(fun, encodeMemArgs(args, state), state);
                 }).toThrow(expectedReturns);
             }
         });

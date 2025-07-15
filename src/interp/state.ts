@@ -32,13 +32,13 @@ export interface InternalCallFrame {
 }
 
 export interface State {
+    //Solidity version of the current contract
     version: string;
     storage: Storage;
     memory: Memory;
     allocator: Allocator;
     extCallStack: SolMessage[];
     intCallStack: InternalCallFrame[];
-    localsStack: Array<Map<string, Value>>;
     scope: BaseScope | undefined;
     constantsMap: Map<number, BaseMemoryView<BaseValue, TypeNode>>;
 }

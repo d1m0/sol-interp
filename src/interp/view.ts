@@ -115,7 +115,7 @@ export class ArrayLikeLocalView
         return BigInt(this.type.size);
     }
 
-    indexView(key: bigint, state: any): DecodingFailure | SingleByteLocalView {
+    indexView(key: bigint): DecodingFailure | SingleByteLocalView {
         if (key < 0n || key > this.type.size) {
             return new DecodingFailure(`OoB access`);
         }
@@ -129,5 +129,10 @@ export function isPointerView(v: any): v is PointerView<any, View> {
 }
 
 export function isArrayLikeView(v: any): v is ArrayLikeView<any, View> {
-    return isArrayLikeMemView(v) || isArrayLikeCalldataView(v) || isArrayLikeStorageView(v) || v instanceof ArrayLikeLocalView
+    return (
+        isArrayLikeMemView(v) ||
+        isArrayLikeCalldataView(v) ||
+        isArrayLikeStorageView(v) ||
+        v instanceof ArrayLikeLocalView
+    );
 }

@@ -14,14 +14,17 @@ import {
     StateArea,
     View,
     zip,
-    Value as BaseValue
+    Value as BaseValue,
+    StructMemView,
+    StructCalldataView,
+    StructStorageView
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
 import { EvalStep, ExecStep, Trace } from "./step";
 import { InterpError, NoScope, OOB, Overflow } from "./exceptions";
 import { gte, lt } from "semver";
-import { BuiltinFunction, isPrimitiveValue, LValue, none, Value } from "./value";
+import { BuiltinFunction, BuiltinStruct, isPrimitiveValue, LValue, none, Value } from "./value";
 import { Address } from "@ethereumjs/util";
 import { BaseScope, LocalsScope } from "./scope";
 import { getMsg, isValueType, makeZeroValue } from "./utils";
@@ -59,7 +62,7 @@ export class Interpreter {
     constructor(
         protected readonly world: WorldInterface,
         protected readonly artifactManager: ArtifactManager
-    ) {}
+    ) { }
 
     ///*********************EXTERNAL FUNCTION CALLS************************************
     public create(msg: SolMessage, state: State): [Trace, Address] {
@@ -78,8 +81,6 @@ export class Interpreter {
             node instanceof sol.UncheckedBlock ||
             node instanceof sol.VariableDeclarationStatement
         ) {
-            const scopeStore = new Map<string, Value>();
-            state.localsStack.push(scopeStore);
             const newScope = new LocalsScope(node, state, state.scope);
 
             // Add arguments to store
@@ -96,7 +97,7 @@ export class Interpreter {
     }
 
     private popScope(state: State): void {
-        this.expect(state.scope !== undefined, `Popping on empty scope`)
+        this.expect(state.scope !== undefined, `Popping on empty scope`);
         state.scope = state.scope?._next;
     }
 
@@ -208,7 +209,7 @@ export class Interpreter {
             trace.push(...initVT);
             varInitialVals =
                 stmt.vInitialValue instanceof sol.TupleExpression &&
-                stmt.vInitialValue.vOriginalComponents.length > 1
+                    stmt.vInitialValue.vOriginalComponents.length > 1
                     ? (initVal as Value[])
                     : [initVal];
         } else {
@@ -304,8 +305,8 @@ export class Interpreter {
 
         sol.assert(
             fun !== undefined &&
-                (retVals.length === fun.vReturnParameters.vParameters.length ||
-                    retVals.length === 0),
+            (retVals.length === fun.vReturnParameters.vParameters.length ||
+                retVals.length === 0),
             `Mismatch in number of ret vals and formal returns`
         );
 
@@ -320,7 +321,7 @@ export class Interpreter {
     private execIfStatement(stmt: sol.IfStatement, state: State): [Trace, ControlFlow] {
         const [condTrace, condV] = this.eval(stmt.vCondition, state);
         let bodyTrace: Trace = [];
-        let cflow: ControlFlow = ControlFlow.Fallthrough; 
+        let cflow: ControlFlow = ControlFlow.Fallthrough;
 
         if (condV) {
             [bodyTrace, cflow] = this.exec(stmt.vTrueBody, state);
@@ -332,15 +333,15 @@ export class Interpreter {
     }
 
     private execWhileStatement(stmt: sol.WhileStatement, state: State): [Trace, ControlFlow] {
-        let trace: Trace = [];
+        const trace: Trace = [];
 
         // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
         while (true) {
             const [condTrace, condVal] = this.eval(stmt.vCondition, state);
             trace.push(...condTrace);
-            this.expect(typeof condVal === `boolean`)
+            this.expect(typeof condVal === `boolean`);
 
-            if (!(condVal)) {
+            if (!condVal) {
                 break;
             }
 
@@ -358,20 +359,20 @@ export class Interpreter {
             // Nothing to do on continue.
         }
 
-        return [trace, ControlFlow.Fallthrough]
+        return [trace, ControlFlow.Fallthrough];
     }
 
     private execBreak(stmt: sol.Break, state: State): [Trace, ControlFlow] {
-        return [[], ControlFlow.Break]
+        return [[], ControlFlow.Break];
     }
 
     private execContinue(stmt: sol.Continue, state: State): [Trace, ControlFlow] {
-        return [[], ControlFlow.Continue]
+        return [[], ControlFlow.Continue];
     }
 
     private execDoWhileStatement(stmt: sol.DoWhileStatement, state: State): [Trace, ControlFlow] {
-        let trace: Trace = [];
-        let cond: boolean
+        const trace: Trace = [];
+        let cond: boolean;
 
         // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
         do {
@@ -389,16 +390,16 @@ export class Interpreter {
 
             const [condTrace, condVal] = this.eval(stmt.vCondition, state);
             trace.push(...condTrace);
-            this.expect(typeof condVal === `boolean`)
+            this.expect(typeof condVal === `boolean`);
 
             cond = condVal;
         } while (cond);
 
-        return [trace, ControlFlow.Fallthrough]
+        return [trace, ControlFlow.Fallthrough];
     }
 
     private execForStatement(stmt: sol.ForStatement, state: State): [Trace, ControlFlow] {
-        let trace: Trace = [];
+        const trace: Trace = [];
 
         if (stmt.vInitializationExpression !== undefined) {
             const [initTrace, initFlow] = this.exec(stmt.vInitializationExpression, state);
@@ -407,18 +408,18 @@ export class Interpreter {
         }
 
         while (true) {
-            let cond: boolean
+            let cond: boolean;
 
             if (stmt.vCondition) {
                 const [condTrace, condVal] = this.eval(stmt.vCondition, state);
                 trace.push(...condTrace);
-                this.expect(typeof condVal === `boolean`)
-                cond = condVal
+                this.expect(typeof condVal === `boolean`);
+                cond = condVal;
             } else {
                 cond = true;
             }
 
-            if (!(cond)) {
+            if (!cond) {
                 break;
             }
 
@@ -436,13 +437,16 @@ export class Interpreter {
             // Eval the loop expression
             if (stmt.vLoopExpression !== undefined) {
                 const [loopExpTrace, loopFlow] = this.exec(stmt.vLoopExpression, state);
-                this.expect(loopFlow === ControlFlow.Fallthrough)
+                this.expect(loopFlow === ControlFlow.Fallthrough);
                 trace.push(...loopExpTrace);
             }
         }
 
         // We added a scope for the for loop initialization statement. Pop it here.
-        if (state.scope instanceof LocalsScope && state.scope.node === stmt.vInitializationExpression) {
+        if (
+            state.scope instanceof LocalsScope &&
+            state.scope.node === stmt.vInitializationExpression
+        ) {
             this.popScope(state);
         }
 
@@ -581,7 +585,7 @@ export class Interpreter {
                 } else if (isArrayLikeStorageView(baseLV)) {
                     res = baseLV.indexView(indexVal, state.storage);
                 } else if (baseLV instanceof ArrayLikeLocalView) {
-                    res = baseLV.indexView(indexVal, state.storage);
+                    res = baseLV.indexView(indexVal);
                 } else {
                     nyi(`Unkown ArrayLikeView ${baseLV.constructor.name}`);
                 }
@@ -870,6 +874,13 @@ export class Interpreter {
             return [fromTrace, scratchWord.slice(32 - toT.size, 32)];
         }
 
+        if (fromT instanceof sol.IntLiteralType && toT instanceof sol.IntType) {
+            this.expect(typeof fromV === "bigint", `Expected a bigint`);
+            // In Solidity <0.8.0 coercing int literals that didn't fit resulted in silent overflow.
+            // In >0.8.0 its a type error, so we shouldn't encouter it.
+            return [fromTrace, this.clamp(expr, fromV, toT, lt(state.version, "0.8.0"))]
+        }
+
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
     }
 
@@ -963,8 +974,8 @@ export class Interpreter {
                 res = baseVal.indexView(indexVal, getMsg(state));
             } else if (isArrayLikeStorageView(baseVal)) {
                 res = baseVal.indexView(indexVal, state.storage);
-            } else  {
-                nyi(`Array like view ${baseVal.constructor.name}`)
+            } else {
+                nyi(`Array like view ${baseVal.constructor.name}`);
             }
         } else if (baseVal instanceof Uint8Array) {
             this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
@@ -1003,7 +1014,11 @@ export class Interpreter {
             return [[], expr.value === "true"];
         }
 
-        this.expect(expr.kind === sol.LiteralKind.String || expr.kind === sol.LiteralKind.HexString || expr.kind === sol.LiteralKind.UnicodeString);
+        this.expect(
+            expr.kind === sol.LiteralKind.String ||
+            expr.kind === sol.LiteralKind.HexString ||
+            expr.kind === sol.LiteralKind.UnicodeString
+        );
 
         const view = state.constantsMap.get(expr.id);
         this.expect(view !== undefined, `Missing string/bytes literal`);
@@ -1011,7 +1026,35 @@ export class Interpreter {
     }
 
     evalMemberAccess(expr: sol.MemberAccess, state: State): [Trace, Value] {
-        nyi("");
+        let baseTrace: Trace;
+        let baseVal: Value;
+
+        [baseTrace, baseVal] = this.eval(expr.vExpression, state);
+
+        if (isPointerView(baseVal)) {
+            baseVal = this.deref(baseVal, state);
+        }
+
+        if (
+            baseVal instanceof StructMemView ||
+            baseVal instanceof StructCalldataView ||
+            baseVal instanceof StructStorageView
+        ) {
+            const fieldView = baseVal.fieldView(expr.memberName);
+            this.expect(
+                !(fieldView instanceof DecodingFailure),
+                `Unknown field ${expr.memberName}`
+            );
+            return [baseTrace, fieldView];
+        }
+
+        if (baseVal instanceof BuiltinStruct) {
+            const field = baseVal.fields.filter(([name]) => name === expr.memberName);
+            this.expect(field.length === 1, `Unknown field ${expr.memberName}`);
+            return [baseTrace, field[0][1]];
+        }
+
+        nyi(`Member access of ${expr.memberName} in ${baseVal}`);
     }
 
     evalTupleExpression(expr: sol.TupleExpression, state: State): [Trace, Value] {
