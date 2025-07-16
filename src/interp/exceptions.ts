@@ -2,7 +2,7 @@ import { bytesToHex } from "@ethereumjs/util";
 import * as sol from "solc-typed-ast";
 import { BaseScope } from "./scope";
 
-export class InterpError extends Error {}
+export class InterpError extends Error { }
 
 export class NoScope extends InterpError {
     constructor() {

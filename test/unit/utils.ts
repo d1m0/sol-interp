@@ -142,7 +142,7 @@ export type SampleMap = Map<string, SampleInfo>;
 
 export async function loadSamples(names: string[]): Promise<[ArtifactManager, SampleMap]> {
     const res: SampleMap = new Map();
-    const compileResults: [PartialSolcOutput, string][] = [];
+    const compileResults: Array<[PartialSolcOutput, string]> = [];
     for (const fileName of names) {
         const file = fse.readFileSync(`test/samples/${fileName}`, {
             encoding: "utf-8"

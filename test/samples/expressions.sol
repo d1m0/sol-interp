@@ -28,11 +28,14 @@ contract Expressions {
     uint[4] arr;
     S s;
     S1 s1;
+
     function foo() public {
         arr[3];
         s.x;
         s.b;
         s1.s[0].x;
+        [1,2,3];
+        [[1,2],[3,4]];
         return;
     }
 }

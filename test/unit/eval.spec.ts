@@ -92,6 +92,21 @@ const samples: Array<[string, string, Array<[string, Value]>, Value]> = [
         "//ContractDefinition/FunctionDefinition[@name='main']/Block[1]/ExpressionStatement[2]/*[1]",
         [],
         0n
+    ],
+    [
+        "expressions.sol",
+        "//ContractDefinition/FunctionDefinition[@name='foo']/Block[1]/ExpressionStatement[5]/*[1]",
+        [],
+        [1n, 2n, 3n]
+    ],
+    [
+        "expressions.sol",
+        "//ContractDefinition/FunctionDefinition[@name='foo']/Block[1]/ExpressionStatement[6]/*[1]",
+        [],
+        [
+            [1n, 2n],
+            [3n, 4n]
+        ]
     ]
 ];
 

@@ -1,9 +1,9 @@
-import { makeMemoryView, nyi, PointerMemView, ZERO_ADDRESS } from "sol-dbg";
+import { bigIntToNum, ExpStructType, makeMemoryView, nyi, PointerMemView, PrimitiveValue, Struct, ZERO_ADDRESS, Value as BaseValue, BaseMemoryView } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { none, Value } from "./value";
+import { none } from "./value";
 import { SolMessage, State } from "./state";
 
-export function makeZeroValue(t: sol.TypeNode, state: State): Value {
+export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
     if (t instanceof sol.IntType) {
         return 0n;
     }
@@ -22,12 +22,35 @@ export function makeZeroValue(t: sol.TypeNode, state: State): Value {
 
     if (t instanceof sol.PointerType) {
         if (t.location === sol.DataLocation.Memory) {
-            // Reference types in memory with statically known size get auto-allocated
-            const staticSize = PointerMemView.staticTypeAllocSize(t);
-            if (staticSize !== undefined) {
-                const address = state.allocator.alloc(staticSize);
-                return makeMemoryView(t.to, address);
+            let zeroValue: BaseValue
+
+            if (t.to instanceof sol.ArrayType) {
+                const len = t.to.size !== undefined ? bigIntToNum(t.to.size) : 0;
+                zeroValue = []
+
+                for (let i = 0; i < len; i++) {
+                    zeroValue.push(makeZeroValue(t.to.elementT, state))
+                }
+
+            } else if (t.to instanceof sol.BytesType) {
+                zeroValue = new Uint8Array()
+            } else if (t.to instanceof sol.StringType) {
+                zeroValue = ""
+            } else if (t.to instanceof ExpStructType) {
+                const fieldVals: [string, PrimitiveValue][] = [];
+                for (const [fieldName, fieldT] of t.to.fields) {
+                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)])
+                }
+                zeroValue = new Struct(fieldVals);
+            } else {
+                nyi(`makeZeroValue of memory pointer type ${t.pp()}`)
             }
+
+            let addr = state.allocator.alloc(PointerMemView.allocSize(zeroValue, t.to))
+            const res = makeMemoryView(t.to, addr)
+            res.encode(zeroValue, state.memory, state.allocator)
+
+            return res;
         }
 
         // In all other pointer case initialize with poison

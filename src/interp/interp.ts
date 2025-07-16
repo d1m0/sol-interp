@@ -17,7 +17,9 @@ import {
     Value as BaseValue,
     StructMemView,
     StructCalldataView,
-    StructStorageView
+    StructStorageView,
+    simplifyType,
+    makeMemoryView,
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -37,6 +39,7 @@ import {
     PointerLocalView,
     PrimitiveLocalView
 } from "./view";
+import { ppLValue } from "./pp";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -89,6 +92,7 @@ export class Interpreter {
             }
 
             state.scope = newScope;
+            // console.error(`Push scope ${newScope.name} with vals ${vals.map(([n, v]) => `${n}: ${ppValue(v)}`).join(", ")}`)
 
             return;
         }
@@ -119,8 +123,10 @@ export class Interpreter {
         // Zero-init return values if they are named
         const infer = this.infer(state);
         const formalReturns = callee.vReturnParameters.vParameters;
-        const retVals = formalReturns.map((ret) =>
-            makeZeroValue(infer.variableDeclarationToTypeNode(ret), state)
+        const retVals = formalReturns.map((ret) => {
+            const type = simplifyType(infer.variableDeclarationToTypeNode(ret), infer, undefined)
+            return makeZeroValue(type, state)
+        }
         );
 
         const argRetNames = [
@@ -147,6 +153,7 @@ export class Interpreter {
 
     ///*********************STATEMENTS*************************************************
     public exec(stmt: sol.Statement, state: State): [Trace, ControlFlow] {
+        // console.error(`exec: ${printNode(stmt)} mem: ${ppMem(state.memory)}`)
         let trace: Trace;
         let res: ControlFlow;
 
@@ -209,38 +216,30 @@ export class Interpreter {
             trace.push(...initVT);
             varInitialVals =
                 stmt.vInitialValue instanceof sol.TupleExpression &&
-                    stmt.vInitialValue.vOriginalComponents.length > 1
+                    (stmt.vInitialValue.vOriginalComponents.length > 1 && !stmt.vInitialValue.isInlineArray)
                     ? (initVal as Value[])
                     : [initVal];
         } else {
-            varInitialVals = stmt.vDeclarations.map((d) =>
-                makeZeroValue(infer.variableDeclarationToTypeNode(d), state)
-            );
+            varInitialVals = stmt.vDeclarations.map((d) => {
+                const type = simplifyType(infer.variableDeclarationToTypeNode(d), infer, undefined)
+                return makeZeroValue(type, state)
+            });
         }
 
         // VariableDeclarationStatements are their own scope on solidity >0.5.0 and
         // when theyre in the initialization of a for loop.
         if (gte(state.version, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
-            const vals: Array<[string, Value]> = [];
+            this.pushScope(stmt, stmt.vDeclarations.map((d) => [d.name, none]), state);
+        }
 
-            for (let i = 0, j = 0; i < stmt.assignments.length; i++) {
-                if (stmt.assignments[i] === null) {
-                    continue;
-                }
-
-                vals.push([stmt.vDeclarations[j].name, varInitialVals[i]]);
-                j++;
+        sol.assert(state.scope !== undefined, `Missing scope`);
+        for (let i = 0, j = 0; i < stmt.assignments.length; i++) {
+            if (stmt.assignments[i] === null) {
+                continue;
             }
 
-            this.pushScope(stmt, vals, state);
-        } else {
-            for (let i = 0; i < stmt.vDeclarations.length; i++) {
-                const decl = stmt.vDeclarations[i];
-                const val = varInitialVals[i];
-
-                sol.assert(state.scope !== undefined, `Missing scope`);
-                state.scope.set(decl.name, val);
-            }
+            this.assign(state.scope.lookupLocation(stmt.vDeclarations[j].name), varInitialVals[i], state)
+            j++;
         }
 
         return [trace, ControlFlow.Fallthrough];
@@ -261,7 +260,22 @@ export class Interpreter {
         const trace: Trace = [];
         let flow: ControlFlow = ControlFlow.Fallthrough;
 
-        this.pushScope(block, [], state);
+        let localVals: [string, Value][] = [];
+
+        // For Solidity <0.5.0 block locals are live for the whole block. So 0-init them at the start of the block
+        if (lt(state.version, "0.5.0")) {
+            const infer = this.infer(state);
+
+            for (const stmt of block.vStatements) {
+                if (stmt instanceof sol.VariableDeclarationStatement) {
+                    for (const decl of stmt.vDeclarations) {
+                        const type = simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined);
+                        localVals.push([decl.name, makeZeroValue(type, state)])
+                    }
+                }
+            }
+        }
+        this.pushScope(block, localVals, state);
 
         for (const stmt of block.vStatements) {
             let stmtTrace;
@@ -497,6 +511,7 @@ export class Interpreter {
             throw new InterpError(`Eval-ed poison while evaluating ${expr.print()}: ${res}`);
         }
 
+        // console.error(`eval(${printNode(expr)})->${ppValue(res)}`)
         trace.push(new EvalStep(expr, res));
 
         return [trace, res];
@@ -568,7 +583,6 @@ export class Interpreter {
                 `Expected IndexAccess LValue ${expr.print()} to evaluate to a view, not ${baseLV}`
             );
 
-            // @todo replace with isPointerView
             if (isPointerView(baseLV)) {
                 baseLV = this.deref(baseLV, state);
             }
@@ -590,12 +604,13 @@ export class Interpreter {
                     nyi(`Unkown ArrayLikeView ${baseLV.constructor.name}`);
                 }
             } else {
-                nyi(`Index access base ${baseLV}`);
+                nyi(`Index access base ${ppLValue(baseLV)}`);
             }
 
             if (res instanceof DecodingFailure) {
                 throw new InterpError(`Failed decoding index LValue in ${expr.print()}`);
             }
+
 
             return [[...baseTrace, ...idxTrace, new EvalStep(expr, res)], res];
         }
@@ -604,6 +619,55 @@ export class Interpreter {
     }
 
     assign(lvalue: LValue, rvalue: Value, state: State): void {
+        // console.error(`Assigning ${ppValue(rvalue)}->${ppLValue(lvalue)}`)
+        // The following ref-type assignments result in a copy of the underlying complex value
+        // - storage-to-storage
+        // - memory-to-storage
+        // - storage-to-memory
+        // - calldata-to-memory
+        // - calldata-to-storage
+        // - array literal-to-storage/memory
+        if (
+            (lvalue instanceof BaseStorageView && rvalue instanceof BaseStorageView) ||
+            (lvalue instanceof BaseStorageView && rvalue instanceof BaseMemoryView) ||
+            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseStorageView) ||
+            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseCalldataView) ||
+            (lvalue instanceof BaseStorageView && rvalue instanceof BaseCalldataView) ||
+            ((lvalue instanceof BaseStorageView || lvalue instanceof BaseMemoryView) &&
+                rvalue instanceof Array)
+        ) {
+            const complexRVal = rvalue instanceof View ? this.lvToValue(rvalue, state) as BaseValue : rvalue as BaseValue;
+
+            if (lvalue instanceof BaseMemoryView) {
+                lvalue.encode(complexRVal, state.memory, state.allocator);
+            } else {
+                (lvalue as BaseStorageView<BaseValue, sol.TypeNode>).encode(complexRVal, state.storage);
+            }
+
+            return;
+        }
+
+        if (lvalue instanceof PointerLocalView) {
+            // Assignment of a pointer of the same type - just assign
+            if (rvalue instanceof View && lvalue.type.pp() === rvalue.type.pp()) {
+                lvalue.encode(rvalue);
+            } else {
+                if (lvalue.type.location === sol.DataLocation.Memory) {
+                    // Assignment to a memory 
+                    // @todo replace with encodeInMem
+                    const complexRVal = rvalue instanceof View ? this.lvToValue(rvalue, state) as BaseValue : rvalue as BaseValue[];
+                    const ptr = state.allocator.alloc(PointerMemView.allocSize(complexRVal, lvalue.type.to));
+                    const view = makeMemoryView(lvalue.type.to, ptr);
+                    view.encode(complexRVal, state.memory, state.allocator);
+                    lvalue.encode(view)
+                } else {
+                    nyi(`Assigning ${rvalue} to ${lvalue.pp()}`)
+                }
+            }
+            return;
+        }
+
+        // In all other cases we are either assigning a primitive value, or assigning memory-to-memory (which aliases).
         if (lvalue instanceof BaseStorageView) {
             state.storage = lvalue.encode(rvalue, state.storage);
         } else if (lvalue instanceof BaseMemoryView) {
@@ -878,7 +942,7 @@ export class Interpreter {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
             // In Solidity <0.8.0 coercing int literals that didn't fit resulted in silent overflow.
             // In >0.8.0 its a type error, so we shouldn't encouter it.
-            return [fromTrace, this.clamp(expr, fromV, toT, lt(state.version, "0.8.0"))]
+            return [fromTrace, this.clamp(expr, fromV, toT, lt(state.version, "0.8.0"))];
         }
 
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
