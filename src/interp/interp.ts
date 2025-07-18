@@ -949,8 +949,6 @@ export class Interpreter {
     evalConditional(expr: sol.Conditional, state: State): Value {
         const cVal = this.evalT(expr.vCondition, Boolean, state);
 
-        this.expect(typeof cVal === "boolean", `Condition expected a boolean`);
-
         return this.eval(
             cVal ? expr.vTrueExpression : expr.vFalseExpression,
             state
@@ -1324,7 +1322,9 @@ export class Interpreter {
             const subExprLoc = this.evalLV(expr.vSubExpression, state);
             const subVal = this.lvToValue(subExprLoc, state);
             this.expect(typeof subVal === "bigint", `Unexpected value ${subVal} for unary ~`);
-            this.expect(state.scope !== undefined, `Need scope for ${expr.operator}`);
+            if (state.scope === undefined) {
+                this.fail(NoScope, `Need scope for ${expr.operator}`)
+            }
 
             const newVal = expr.operator === "++" ? subVal + 1n : subVal - 1n;
             this.assign(subExprLoc, newVal, state);
