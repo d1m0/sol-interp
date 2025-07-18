@@ -20,6 +20,8 @@ import {
     StructStorageView,
     simplifyType,
     makeMemoryView,
+    PrimitiveValue,
+    ExpStructType,
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -29,7 +31,7 @@ import { gte, lt } from "semver";
 import { BuiltinFunction, BuiltinStruct, isPrimitiveValue, LValue, none, Value } from "./value";
 import { Address } from "@ethereumjs/util";
 import { BaseScope, LocalsScope } from "./scope";
-import { getMsg, isValueType, makeZeroValue } from "./utils";
+import { getMsg, isStructView, isValueType, makeZeroValue, printNode, } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
     BaseLocalView,
@@ -39,7 +41,7 @@ import {
     PointerLocalView,
     PrimitiveLocalView
 } from "./view";
-import { ppLValue } from "./pp";
+import { ppLValue, ppMem, } from "./pp";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -153,7 +155,7 @@ export class Interpreter {
 
     ///*********************STATEMENTS*************************************************
     public exec(stmt: sol.Statement, state: State): [Trace, ControlFlow] {
-        // console.error(`exec: ${printNode(stmt)} mem: ${ppMem(state.memory)}`)
+        console.error(`exec: ${printNode(stmt)} mem: ${ppMem(state.memory)}`)
         let trace: Trace;
         let res: ControlFlow;
 
@@ -503,10 +505,6 @@ export class Interpreter {
             nyi(`evalExpression(${expr.constructor.name})`);
         }
 
-        if (res instanceof View && isValueType(res.type)) {
-            res = this.lvToValue(res, state);
-        }
-
         if (res instanceof Poison) {
             throw new InterpError(`Eval-ed poison while evaluating ${expr.print()}: ${res}`);
         }
@@ -615,6 +613,30 @@ export class Interpreter {
             return [[...baseTrace, ...idxTrace, new EvalStep(expr, res)], res];
         }
 
+        if (expr instanceof sol.MemberAccess) {
+            let [baseTrace, baseLV] = this.evalLV(expr.vExpression, state);
+            this.expect(
+                baseLV instanceof View,
+                `Expected IndexAccess LValue ${expr.print()} to evaluate to a view, not ${baseLV}`
+            );
+
+            if (isPointerView(baseLV)) {
+                baseLV = this.deref(baseLV, state);
+            }
+
+            if (isStructView(baseLV)) {
+                const fieldView = baseLV.fieldView(expr.memberName);
+                this.expect(
+                    fieldView instanceof View,
+                    `No field ${expr.memberName} found on base ${baseLV.pp()}`
+                );
+
+                baseTrace.push(new EvalStep(expr, fieldView))
+                return [baseTrace, fieldView]
+            }
+
+            nyi(``)
+        }
         nyi(`evalLV(${expr.print()})`);
     }
 
@@ -636,7 +658,7 @@ export class Interpreter {
             ((lvalue instanceof BaseStorageView || lvalue instanceof BaseMemoryView) &&
                 rvalue instanceof Array)
         ) {
-            const complexRVal = rvalue instanceof View ? this.lvToValue(rvalue, state) as BaseValue : rvalue as BaseValue;
+            const complexRVal = rvalue instanceof View ? this.decode(rvalue, state) as BaseValue : rvalue as BaseValue;
 
             if (lvalue instanceof BaseMemoryView) {
                 lvalue.encode(complexRVal, state.memory, state.allocator);
@@ -649,13 +671,13 @@ export class Interpreter {
 
         if (lvalue instanceof PointerLocalView) {
             // Assignment of a pointer of the same type - just assign
-            if (rvalue instanceof View && lvalue.type.pp() === rvalue.type.pp()) {
+            if (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp()) {
                 lvalue.encode(rvalue);
             } else {
                 if (lvalue.type.location === sol.DataLocation.Memory) {
                     // Assignment to a memory 
                     // @todo replace with encodeInMem
-                    const complexRVal = rvalue instanceof View ? this.lvToValue(rvalue, state) as BaseValue : rvalue as BaseValue[];
+                    const complexRVal = rvalue instanceof View ? this.decode(rvalue, state) as BaseValue : rvalue as BaseValue[];
                     const ptr = state.allocator.alloc(PointerMemView.allocSize(complexRVal, lvalue.type.to));
                     const view = makeMemoryView(lvalue.type.to, ptr);
                     view.encode(complexRVal, state.memory, state.allocator);
@@ -948,8 +970,50 @@ export class Interpreter {
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
     }
 
+    /**
+     * Evaluate a struct constructor call (e.g. Struct(5, x+y, [1,2,3])). This allocates memory to hold the struct,
+     * evaluates all field expressions and assigns them to the relevant fiels in the memory struct.
+     * Returns a view to the struct in memory.
+     * 
+     * @todo handle the case with mappings in structs. Those get silently ignored in initializers
+     * @param expr 
+     * @param state 
+     */
     evalStructConstructorCall(expr: sol.FunctionCall, state: State): [Trace, Value] {
-        nyi("");
+        const infer = this.infer(state);
+        const calleeT = infer.typeOf(expr.vExpression);
+
+        this.expect(
+            calleeT instanceof sol.TypeNameType &&
+            calleeT.type instanceof sol.UserDefinedType &&
+            calleeT.type.definition instanceof sol.StructDefinition,
+            `Expected UserDefinedTypeName not ${calleeT.pp()}`
+        );
+        this.expect(expr.fieldNames !== undefined, `Should have fieldNames defined`)
+
+        const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
+        const structView = new StructMemView(structT, state.allocator.alloc(PointerMemView.allocSize(undefined, structT)))
+
+        const trace: Trace = [];
+        const fieldMap = new Map<string, Value>();
+
+        // Note we must evalute the arguments in order to get the correct  trace
+        for (let i = 0; i < expr.vArguments.length; i++) {
+            const [argTrace, argVal] = this.eval(expr.vArguments[i], state);
+            trace.push(...argTrace);
+
+            fieldMap.set(expr.fieldNames[i], argVal);
+        }
+
+        for (const [fieldName] of structView.type.fields) {
+            const fieldView = structView.fieldView(fieldName);
+            const fieldVal = fieldMap.get(fieldName);
+            this.expect(fieldView instanceof BaseMemoryView, `Expected to get field ${fieldName} of ${structT.name}`);
+            this.expect(fieldVal !== undefined, `Field ${fieldName} of ${structT.name} not found in constructor`);
+            this.assign(fieldView, fieldVal, state)
+        }
+
+        return [trace, structView]
     }
 
     evalNewCall(expr: sol.FunctionCall, state: State): [Trace, Value] {
@@ -1041,6 +1105,8 @@ export class Interpreter {
             } else {
                 nyi(`Array like view ${baseVal.constructor.name}`);
             }
+
+            res = this.lvToValue(res, state);
         } else if (baseVal instanceof Uint8Array) {
             this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
             this.expect(
@@ -1109,7 +1175,7 @@ export class Interpreter {
                 !(fieldView instanceof DecodingFailure),
                 `Unknown field ${expr.memberName}`
             );
-            return [baseTrace, fieldView];
+            return [baseTrace, this.lvToValue(fieldView, state)];
         }
 
         if (baseVal instanceof BuiltinStruct) {
@@ -1173,17 +1239,43 @@ export class Interpreter {
         return n.getClosestParentByType(sol.UncheckedBlock) !== undefined;
     }
 
-    public lvToValue(lv: LValue, state: State): Value {
+    /**
+     * Given a view decode its contents. Note that this may return complex values.
+     */
+    public decode(lv: View, state: State): BaseValue {
         if (lv instanceof BaseStorageView) {
             return lv.decode(state.storage);
         } else if (lv instanceof BaseMemoryView) {
             return lv.decode(state.memory);
         } else if (lv instanceof BaseCalldataView) {
             return lv.decode(getMsg(state));
-        } else if (lv instanceof Array) {
-            return lv.map((x) => this.lvToValue(x, state));
         } else if (lv instanceof PrimitiveLocalView) {
             return lv.decode();
+        }
+
+        nyi(`decode(${lv})`);
+    }
+
+    /**
+     * Convert an LValue to an RValue.
+     */
+    public lvToValue(lv: LValue | Poison, state: State): Value {
+        if (lv instanceof Poison) {
+            return lv;
+        }
+
+        if (lv instanceof View) {
+            if (isValueType(lv.type)) {
+                return this.decode(lv, state) as PrimitiveValue;
+            }
+
+            if (isPointerView(lv)) {
+                return this.deref(lv, state);
+            }
+
+            nyi(`Unexpected LValue view ${lv.pp()}`)
+        } else if (lv instanceof Array) {
+            return lv.map((x) => this.lvToValue(x, state));
         } else if (lv === null) {
             return none;
         }

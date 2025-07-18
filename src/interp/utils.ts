@@ -1,4 +1,4 @@
-import { bigIntToNum, ExpStructType, makeMemoryView, nyi, PointerMemView, PrimitiveValue, Struct, ZERO_ADDRESS, Value as BaseValue, BaseMemoryView } from "sol-dbg";
+import { bigIntToNum, ExpStructType, makeMemoryView, nyi, PointerMemView, PrimitiveValue, Struct, ZERO_ADDRESS, Value as BaseValue, StructView, StructMemView, StructCalldataView, StructStorageView, View } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { none } from "./value";
 import { SolMessage, State } from "./state";
@@ -69,6 +69,7 @@ export function getMsg(state: State): Uint8Array {
     return topExtFrame(state).data;
 }
 
+// @todo move to solc-typed-ast
 export function isValueType(type: sol.TypeNode): boolean {
     return (
         type instanceof sol.IntType ||
@@ -81,6 +82,13 @@ export function isValueType(type: sol.TypeNode): boolean {
                 type.definition instanceof sol.ContractDefinition ||
                 type.definition instanceof sol.UserDefinedValueTypeDefinition))
     );
+}
+
+//@todo move to sol-dbg
+export function isStructView(v: any): v is StructView<any, View<any, BaseValue, any, sol.TypeNode>> {
+    return v instanceof StructMemView ||
+        v instanceof StructCalldataView ||
+        v instanceof StructStorageView;
 }
 
 // Hardcoded version good enough for debugging here.
