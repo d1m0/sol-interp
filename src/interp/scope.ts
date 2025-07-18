@@ -33,7 +33,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<string, sol.TypeNode>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) { }
+    ) {}
 
     abstract _lookup(name: string): Value | undefined;
     abstract _lookupLocation(name: string): View | undefined;
@@ -70,7 +70,7 @@ export abstract class BaseScope {
         }
 
         if (this._next === undefined) {
-            return
+            return;
         }
 
         this._next.set(name, val);
@@ -111,7 +111,14 @@ export class LocalsScope extends BaseScope {
                 for (const stmt of node.vStatements) {
                     if (stmt instanceof sol.VariableDeclarationStatement) {
                         for (const decl of stmt.vDeclarations) {
-                            res.set(decl.name, simplifyType(infer.variableDeclarationToTypeNode(decl), infer, sol.DataLocation.Memory));
+                            res.set(
+                                decl.name,
+                                simplifyType(
+                                    infer.variableDeclarationToTypeNode(decl),
+                                    infer,
+                                    sol.DataLocation.Memory
+                                )
+                            );
                         }
                     }
                 }
@@ -125,21 +132,37 @@ export class LocalsScope extends BaseScope {
                 // In solidity >= 0.5.0 each local variable has a scope starting at its declaration
                 // Also if this is the initialization stmt of a for loop, its its own scope
                 for (const decl of node.vDeclarations) {
-                    res.set(decl.name, simplifyType(infer.variableDeclarationToTypeNode(decl), infer, sol.DataLocation.Memory));
+                    res.set(
+                        decl.name,
+                        simplifyType(
+                            infer.variableDeclarationToTypeNode(decl),
+                            infer,
+                            sol.DataLocation.Memory
+                        )
+                    );
                 }
             }
         } else if (node instanceof sol.FunctionDefinition) {
             for (const decl of node.vParameters.vParameters) {
-                res.set(decl.name, simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined));
+                res.set(
+                    decl.name,
+                    simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
             }
 
             for (let i = 0; i < node.vReturnParameters.vParameters.length; i++) {
                 const decl = node.vReturnParameters.vParameters[i];
-                res.set(LocalsScope.returnName(decl, i), simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined));
+                res.set(
+                    LocalsScope.returnName(decl, i),
+                    simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
             }
         } else if (node instanceof sol.ModifierDefinition) {
             for (const decl of node.vParameters.vParameters) {
-                res.set(decl.name, simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined));
+                res.set(
+                    decl.name,
+                    simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
             }
         }
 

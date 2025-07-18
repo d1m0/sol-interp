@@ -5,7 +5,6 @@ import {
     PrimitiveValue,
     PointerView,
     Value,
-    nyi,
     isPointerView as baseIsPointerView,
     ArrayLikeView,
     isArrayLikeMemView,
@@ -14,6 +13,7 @@ import {
 } from "sol-dbg";
 import { FixedBytesType, PointerType, TypeNode, types } from "solc-typed-ast";
 import { BaseScope } from "./scope";
+import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
 
 export abstract class BaseLocalView<V extends PrimitiveValue, T extends TypeNode> extends View<
     null,
@@ -98,11 +98,12 @@ export class PointerLocalView
     implements PointerView<null, View<any, Value, any, TypeNode>> {
     toView(): DecodingFailure | View<any, Value, any, TypeNode> {
         const ptr = this.decode();
-        if (ptr instanceof View) {
+
+        if (isFailure(ptr)) {
             return ptr;
         }
 
-        nyi(`PointerLocalView.toView() for innter value ${ptr} ${ptr.constructor.name}`);
+        return ptr;
     }
 }
 

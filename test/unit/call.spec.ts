@@ -4,7 +4,6 @@ import * as sol from "solc-typed-ast";
 import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
 import { Assert, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
-import { ppMem } from "../../src/interp/pp";
 
 type ExceptionConstructors = typeof Assert;
 const samples: Array<
@@ -54,11 +53,26 @@ const samples: Array<
         ["MemoryAliasing.sol", "MemoryAliasing", "arrays", [], [], []],
         ["MemoryAliasing.sol", "MemoryAliasing", "nestedArrays", [], [], []],
         ["MemoryAliasing.sol", "MemoryAliasing", "structs", [], [], []],
-        ["MemoryAliasing.sol", "MemoryAliasing", "arraysInMemoryStructs", [], [], [[42n, 80n, 3n, 4n], [42n, 80n, 3n, 4n]]],
+        [
+            "MemoryAliasing.sol",
+            "MemoryAliasing",
+            "arraysInMemoryStructs",
+            [],
+            [],
+            [
+                [42n, 80n, 3n, 4n],
+                [42n, 80n, 3n, 4n]
+            ]
+        ],
         ["MemoryAliasing.sol", "MemoryAliasing", "structInMemoryStructs", [], [], []],
         ["MemoryAliasing.sol", "MemoryAliasing", "structsInMemoryArrays", [], [], []],
         ["MemoryAliasing.sol", "MemoryAliasing", "structReAssignment", [], [], []],
         ["MemoryAliasing.sol", "MemoryAliasing", "structReAssignmentFromStorage", [], [], []],
+        ["MemoryAliasing.sol", "MemoryAliasing", "localMemArrayLitInit", [], [], []],
+        ["StorageAliasing.sol", "StorageAliasing", "arrays", [], [], []],
+        ["StorageAliasing.sol", "StorageAliasing", "arraysInStructs", [], [], []],
+        ["StorageAliasing.sol", "StorageAliasing", "maps", [], [], []],
+        ["StorageAliasing.sol", "StorageAliasing", "structInStructCopy", [], [], []]
     ];
 
 describe("Simple function call tests", () => {
@@ -87,7 +101,7 @@ describe("Simple function call tests", () => {
             );
             if (expectedReturns instanceof Array) {
                 try {
-                    let returns = interp.callInternal(fun, encodeMemArgs(args, state), state);
+                    const returns = interp.callInternal(fun, encodeMemArgs(args, state), state);
                     const decodedReturns = returns.map((ret) =>
                         ret instanceof View ? interp.decode(ret, state) : ret
                     );
@@ -96,10 +110,11 @@ describe("Simple function call tests", () => {
                     if (e instanceof InterpError) {
                         //console.error(`Trace: ${ppTrace(e.trace)}`)
                         //console.error(`Memory: ${ppMem(state.memory)}`)
-                        console.error(`Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e}`)
+                        console.error(
+                            `Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e}`
+                        );
                     } else {
                         console.error(`Unexpected unrelated exception ${e} ${(e as Error).stack}`);
-                        console.error(`Memory: ${ppMem(state.memory)}`)
                     }
                     expect(false).toBeTruthy();
                 }

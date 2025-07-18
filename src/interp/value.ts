@@ -19,14 +19,14 @@ export class BuiltinFunction {
         public readonly name: string,
         public readonly type: BuiltinFunctionType,
         public readonly call: (interp: Interpreter, state: State, args: Value[]) => Value[]
-    ) { }
+    ) {}
 }
 
 export class BuiltinStruct {
     constructor(
         public readonly name: string,
         public readonly fields: Array<[string, Value]>
-    ) { }
+    ) {}
 }
 
 /**
@@ -77,14 +77,14 @@ export function isPrimitiveValue(v: any): v is PrimitiveValue {
     );
 }
 
-type AddressConstructor = (new (...v: any[]) => Address)
-type ExternalFunRefConstructor = (new (...v: any[]) => ExternalFunRef)
-type InternalFunRefConstructor = (new (...v: any[]) => InternalFunRef)
-type SliceConstructor = (new (...v: any[]) => Slice)
-type ViewConstructor = (new (...v: any[]) => View)
-type PoisonConstructor = (new (...v: any[]) => Poison)
-type BuiltinFunctionConstructor = (new (...v: any[]) => BuiltinFunction)
-type BuiltinStructConstructor = (new (...v: any[]) => BuiltinStruct)
+type AddressConstructor = new (...v: any[]) => Address;
+type ExternalFunRefConstructor = new (...v: any[]) => ExternalFunRef;
+type InternalFunRefConstructor = new (...v: any[]) => InternalFunRef;
+type SliceConstructor = new (...v: any[]) => Slice;
+type ViewConstructor = new (...v: any[]) => View;
+type PoisonConstructor = new (...v: any[]) => Poison;
+type BuiltinFunctionConstructor = new (...v: any[]) => BuiltinFunction;
+type BuiltinStructConstructor = new (...v: any[]) => BuiltinStruct;
 
 export type ValueTypeConstructors =
     | BigIntConstructor
@@ -98,83 +98,86 @@ export type ValueTypeConstructors =
     | PoisonConstructor
     | BuiltinFunctionConstructor
     | BuiltinStructConstructor
-    | ArrayConstructor
+    | ArrayConstructor;
 
-export type TypeConstructorToValueType<V extends ValueTypeConstructors> = V extends BigIntConstructor
-    ? bigint
-    : V extends BooleanConstructor
-    ? boolean
-    : V extends Uint8ArrayConstructor
-    ? Uint8Array
-    : V extends AddressConstructor
-    ? Address
-    : V extends ExternalFunRefConstructor
-    ? ExternalFunRef
-    : V extends InternalFunRefConstructor
-    ? InternalFunRef
-    : V extends SliceConstructor
-    ? Slice
-    : V extends ViewConstructor
-    ? View
-    : V extends PoisonConstructor
-    ? Poison
-    : V extends BuiltinFunctionConstructor
-    ? BuiltinFunction
-    : V extends BuiltinStructConstructor
-    ? BuiltinStruct
-    : V extends ArrayConstructor
-    ? Value[]
-    : never;
+export type TypeConstructorToValueType<V extends ValueTypeConstructors> =
+    V extends BigIntConstructor
+        ? bigint
+        : V extends BooleanConstructor
+          ? boolean
+          : V extends Uint8ArrayConstructor
+            ? Uint8Array
+            : V extends AddressConstructor
+              ? Address
+              : V extends ExternalFunRefConstructor
+                ? ExternalFunRef
+                : V extends InternalFunRefConstructor
+                  ? InternalFunRef
+                  : V extends SliceConstructor
+                    ? Slice
+                    : V extends ViewConstructor
+                      ? View
+                      : V extends PoisonConstructor
+                        ? Poison
+                        : V extends BuiltinFunctionConstructor
+                          ? BuiltinFunction
+                          : V extends BuiltinStructConstructor
+                            ? BuiltinStruct
+                            : V extends ArrayConstructor
+                              ? Value[]
+                              : never;
 
-
-export function match<T extends ValueTypeConstructors>(v: Value, typeConstructor: T): v is TypeConstructorToValueType<T> {
+export function match<T extends ValueTypeConstructors>(
+    v: Value,
+    typeConstructor: T
+): v is TypeConstructorToValueType<T> {
     if (typeConstructor === BigInt) {
-        return typeof v === "bigint"
+        return typeof v === "bigint";
     }
 
     if (typeConstructor === Boolean) {
-        return typeof v === "boolean"
+        return typeof v === "boolean";
     }
 
     if (typeConstructor === Uint8Array) {
-        return v instanceof Uint8Array
+        return v instanceof Uint8Array;
     }
 
     if (typeConstructor === Address) {
-        return v instanceof Address
+        return v instanceof Address;
     }
 
     if (typeConstructor === ExternalFunRef) {
-        return v instanceof ExternalFunRef
+        return v instanceof ExternalFunRef;
     }
 
     if (typeConstructor === InternalFunRef) {
-        return v instanceof InternalFunRef
+        return v instanceof InternalFunRef;
     }
 
     if (typeConstructor === Slice) {
-        return v instanceof Slice
+        return v instanceof Slice;
     }
 
     if (typeConstructor === View) {
-        return v instanceof View
+        return v instanceof View;
     }
 
     if (typeConstructor === Poison) {
-        return v instanceof Poison
+        return v instanceof Poison;
     }
 
     if (typeConstructor === BuiltinFunction) {
-        return v instanceof BuiltinFunction
+        return v instanceof BuiltinFunction;
     }
 
     if (typeConstructor === BuiltinStruct) {
-        return v instanceof BuiltinStruct
+        return v instanceof BuiltinStruct;
     }
 
     if (typeConstructor === Array) {
-        return v instanceof Array
+        return v instanceof Array;
     }
 
-    nyi(`Type constructor ${typeConstructor}`)
+    nyi(`Type constructor ${typeConstructor}`);
 }

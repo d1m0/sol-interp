@@ -19,19 +19,36 @@ import {
     StructCalldataView,
     StructStorageView,
     simplifyType,
-    makeMemoryView,
     PrimitiveValue,
     ExpStructType,
+    makeMemoryView,
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
-import { EvalStep, ExecStep, Trace, } from "./step";
+import { EvalStep, ExecStep, Trace } from "./step";
 import { InternalError, NoScope, NotDefined, OOB, Overflow, RuntimeError } from "./exceptions";
 import { gte, lt } from "semver";
-import { BuiltinFunction, BuiltinStruct, isPrimitiveValue, LValue, match, none, NonPoisonValue, TypeConstructorToValueType, Value, ValueTypeConstructors } from "./value";
+import {
+    BuiltinFunction,
+    BuiltinStruct,
+    isPrimitiveValue,
+    LValue,
+    match,
+    none,
+    NonPoisonValue,
+    TypeConstructorToValueType,
+    Value,
+    ValueTypeConstructors
+} from "./value";
 import { Address } from "@ethereumjs/util";
 import { BaseScope, LocalsScope } from "./scope";
-import { getMsg, isStructView, isValueType, makeZeroValue, printNode, } from "./utils";
+import {
+    getMsg,
+    isStructView,
+    isValueType,
+    makeZeroValue,
+    printNode
+} from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
     BaseLocalView,
@@ -41,7 +58,7 @@ import {
     PointerLocalView,
     PrimitiveLocalView
 } from "./view";
-import { ppLValue, ppValue, ppValueTypeConstructor, } from "./pp";
+import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -63,7 +80,7 @@ const scratchWord = new Uint8Array(32);
  *      `callInternal(callee: sol.FunctionDefinition, args: Value[], state: State)`
  * * call an external method
  *      @todo
- * 
+ *
  * Most of the Interpreter state is kept in the `State` object that is passed around. The only runtime state
  * this class maintains is mostly for debugging purposes:
  *  - AST node stack of currently executed/evaluated objects
@@ -92,14 +109,18 @@ export class Interpreter {
     /**
      * An internal interpreter exception. This indicates a bug in the interpreter
      */
-    fail(errorConstr: (new (...args: any[]) => InternalError), msg: string, ctx: sol.ASTNode = this.curNode): never {
+    fail(
+        errorConstr: new (...args: any[]) => InternalError,
+        msg: string,
+        ctx: sol.ASTNode = this.curNode
+    ): never {
         throw new errorConstr(ctx, this._trace, msg);
     }
 
     /**
      * A runtime error. This indicates an actual EVM exception at runtime
      */
-    runtimeError(errorConstr: (new (...args: any[]) => RuntimeError), msg: string): never {
+    runtimeError(errorConstr: new (...args: any[]) => RuntimeError, msg: string): never {
         throw new errorConstr(this.curNode, this._trace, msg);
     }
 
@@ -148,12 +169,7 @@ export class Interpreter {
      * @param args
      * @param state
      */
-    public callInternal(
-        callee: sol.FunctionDefinition,
-        args: Value[],
-        state: State
-    ): Value[] {
-
+    public callInternal(callee: sol.FunctionDefinition, args: Value[], state: State): Value[] {
         this.nodes.push(callee);
         // @todo handle modifiers!!!!!
         const formalArgs: sol.VariableDeclaration[] = callee.vParameters.vParameters;
@@ -162,10 +178,9 @@ export class Interpreter {
         const infer = this.infer(state);
         const formalReturns = callee.vReturnParameters.vParameters;
         const retVals = formalReturns.map((ret) => {
-            const type = simplifyType(infer.variableDeclarationToTypeNode(ret), infer, undefined)
-            return makeZeroValue(type, state)
-        }
-        );
+            const type = simplifyType(infer.variableDeclarationToTypeNode(ret), infer, undefined);
+            return makeZeroValue(type, state);
+        });
 
         const argRetNames = [
             ...formalArgs.map((d) => d.name),
@@ -184,13 +199,12 @@ export class Interpreter {
         );
 
         const results = formalReturns.map((ret, i) => {
-            const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i))
+            const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
             if (res === undefined) {
-                this.fail(NotDefined, ``)
+                this.fail(NotDefined, ``);
             }
             return res;
-        }
-        );
+        });
         this.nodes.pop();
         return results;
     }
@@ -260,20 +274,25 @@ export class Interpreter {
 
             varInitialVals =
                 stmt.vInitialValue instanceof sol.TupleExpression &&
-                    (stmt.vInitialValue.vOriginalComponents.length > 1 && !stmt.vInitialValue.isInlineArray)
+                    stmt.vInitialValue.vOriginalComponents.length > 1 &&
+                    !stmt.vInitialValue.isInlineArray
                     ? (initVal as Value[])
                     : [initVal];
         } else {
             varInitialVals = stmt.vDeclarations.map((d) => {
-                const type = simplifyType(infer.variableDeclarationToTypeNode(d), infer, undefined)
-                return makeZeroValue(type, state)
+                const type = simplifyType(infer.variableDeclarationToTypeNode(d), infer, undefined);
+                return makeZeroValue(type, state);
             });
         }
 
         // VariableDeclarationStatements are their own scope on solidity >0.5.0 and
         // when theyre in the initialization of a for loop.
         if (gte(state.version, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
-            this.pushScope(stmt, stmt.vDeclarations.map((d) => [d.name, none]), state);
+            this.pushScope(
+                stmt,
+                stmt.vDeclarations.map((d) => [d.name, none]),
+                state
+            );
         }
 
         sol.assert(state.scope !== undefined, `Missing scope`);
@@ -285,20 +304,17 @@ export class Interpreter {
             const loc = state.scope.lookupLocation(stmt.vDeclarations[j].name);
 
             if (loc === undefined) {
-                this.fail(NotDefined, ``)
+                this.fail(NotDefined, ``);
             }
 
-            this.assign(loc, varInitialVals[i], state)
+            this.assign(loc, varInitialVals[i], state);
             j++;
         }
 
         return ControlFlow.Fallthrough;
     }
 
-    private execExpressionStatement(
-        stmt: sol.ExpressionStatement,
-        state: State
-    ): ControlFlow {
+    private execExpressionStatement(stmt: sol.ExpressionStatement, state: State): ControlFlow {
         // I think (?) the only things that can break control flow are statements (break, continue, return)
         // Note that exceptions (revert, assert...) are also handled in the interpreter by raising an exception and handling
         // it at the last external call site
@@ -309,7 +325,7 @@ export class Interpreter {
     private execBlock(block: sol.Block | sol.UncheckedBlock, state: State): ControlFlow {
         let flow: ControlFlow = ControlFlow.Fallthrough;
 
-        let localVals: [string, Value][] = [];
+        const localVals: Array<[string, Value]> = [];
 
         // For Solidity <0.5.0 block locals are live for the whole block. So 0-init them at the start of the block
         if (lt(state.version, "0.5.0")) {
@@ -318,8 +334,12 @@ export class Interpreter {
             for (const stmt of block.vStatements) {
                 if (stmt instanceof sol.VariableDeclarationStatement) {
                     for (const decl of stmt.vDeclarations) {
-                        const type = simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined);
-                        localVals.push([decl.name, makeZeroValue(type, state)])
+                        const type = simplifyType(
+                            infer.variableDeclarationToTypeNode(decl),
+                            infer,
+                            undefined
+                        );
+                        localVals.push([decl.name, makeZeroValue(type, state)]);
                     }
                 }
             }
@@ -538,11 +558,18 @@ export class Interpreter {
     /**
      * Evaluate an expression in a given state, and check that its of a particular expected value type.
      */
-    evalT<T extends ValueTypeConstructors>(expr: sol.Expression, typeConstr: T, state: State): TypeConstructorToValueType<T> {
+    evalT<T extends ValueTypeConstructors>(
+        expr: sol.Expression,
+        typeConstr: T,
+        state: State
+    ): TypeConstructorToValueType<T> {
         const res = this.eval(expr, state);
 
         if (!match(res, typeConstr)) {
-            this.fail(InternalError, `Unexpected eval result ${ppValue(res)}. Expected ${ppValueTypeConstructor(typeConstr)}`);
+            this.fail(
+                InternalError,
+                `Unexpected eval result ${ppValue(res)}. Expected ${ppValueTypeConstructor(typeConstr)}`
+            );
         }
 
         return res;
@@ -580,7 +607,7 @@ export class Interpreter {
         }
 
         if (res instanceof DecodingFailure) {
-            this.fail(InternalError, `Couldn't deref pointer view ${v}`)
+            this.fail(InternalError, `Couldn't deref pointer view ${v}`);
         }
 
         return res;
@@ -594,7 +621,7 @@ export class Interpreter {
             sol.assert(state.scope !== undefined, `Missing scope in evalLV({0})`, expr);
             const scopeView = state.scope.lookupLocation(expr.name);
             if (scopeView === undefined) {
-                this.fail(NotDefined, ``)
+                this.fail(NotDefined, ``);
             }
 
             return scopeView;
@@ -609,7 +636,7 @@ export class Interpreter {
                 lvs.push(this.evalLV(comp, state));
             }
 
-            res = lvs.length === 1 ? lvs[0] : lvs
+            res = lvs.length === 1 ? lvs[0] : lvs;
         } else if (expr instanceof sol.IndexAccess) {
             this.expect(
                 expr.vIndexExpression !== undefined,
@@ -629,7 +656,7 @@ export class Interpreter {
                 baseLV = this.deref(baseLV, state);
             }
 
-            let idxView: LValue | DecodingFailure
+            let idxView: LValue | DecodingFailure;
 
             if (isArrayLikeView(baseLV)) {
                 this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
@@ -672,15 +699,15 @@ export class Interpreter {
                     `No field ${expr.memberName} found on base ${baseLV.pp()}`
                 );
 
-                res = fieldView
+                res = fieldView;
             } else {
-                nyi(`evalLV(${printNode(expr)})`)
+                nyi(`evalLV(${printNode(expr)}): ${ppLValue(baseLV)}`);
             }
         } else {
             nyi(`evalLV(${expr.print()})`);
         }
 
-        this._trace.push(new EvalStep(expr, res))
+        this._trace.push(new EvalStep(expr, res));
         this.nodes.pop();
 
         return res;
@@ -704,36 +731,54 @@ export class Interpreter {
             ((lvalue instanceof BaseStorageView || lvalue instanceof BaseMemoryView) &&
                 rvalue instanceof Array)
         ) {
-            const complexRVal = rvalue instanceof View ? this.decode(rvalue, state) as BaseValue : rvalue as BaseValue;
+            const complexRVal =
+                rvalue instanceof View
+                    ? (this.decode(rvalue, state) as BaseValue)
+                    : (rvalue as BaseValue);
 
             if (lvalue instanceof BaseMemoryView) {
                 lvalue.encode(complexRVal, state.memory, state.allocator);
             } else {
-                state.storage = (lvalue as BaseStorageView<BaseValue, sol.TypeNode>).encode(complexRVal, state.storage);
+                state.storage = (lvalue as BaseStorageView<BaseValue, sol.TypeNode>).encode(
+                    complexRVal,
+                    state.storage
+                );
             }
 
             return;
         }
 
+        // @todo: uncomment this and figure out what are the cases of copying-vs-aliasing for local var views
+        // @todo add 
+        /*
         if (lvalue instanceof PointerLocalView) {
             // Assignment of a pointer of the same type - just assign
-            if (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp()) {
+            if (
+                rvalue instanceof View
+            ) {
+                if (!(lvalue.type.to.pp() === rvalue.type.pp() && lvalue.type.location === getViewLocation(rvalue))) {
+                    this.fail(InterpError, `Mismatch in assignment to local: got ${rvalue.type.pp()} expected ${lvalue.type.pp()}`);
+                }
+
                 lvalue.encode(rvalue);
             } else {
+                this.expect(rvalue instanceof Array, `Expect an array literal`)
                 if (lvalue.type.location === sol.DataLocation.Memory) {
-                    // Assignment to a memory 
+                    // Assignment to a memory
                     // @todo replace with encodeInMem
-                    const complexRVal = rvalue instanceof View ? this.decode(rvalue, state) as BaseValue : rvalue as BaseValue[];
-                    const ptr = state.allocator.alloc(PointerMemView.allocSize(complexRVal, lvalue.type.to));
+                    const ptr = state.allocator.alloc(
+                        PointerMemView.allocSize(rvalue as BaseValue, lvalue.type.to)
+                    );
                     const view = makeMemoryView(lvalue.type.to, ptr);
-                    view.encode(complexRVal, state.memory, state.allocator);
-                    lvalue.encode(view)
+                    view.encode(rvalue as BaseValue, state.memory, state.allocator);
+                    lvalue.encode(view);
                 } else {
-                    nyi(`Assigning ${rvalue} to ${lvalue.pp()}`)
+                    nyi(`Assigning ${rvalue} to ${lvalue.pp()}`);
                 }
             }
             return;
         }
+            */
 
         // In all other cases we are either assigning a primitive value, or assigning memory-to-memory (which aliases).
         if (lvalue instanceof BaseStorageView) {
@@ -784,7 +829,7 @@ export class Interpreter {
                 rvalue,
                 lType,
                 undefined,
-                this.isUnchecked(expr, state),
+                this.isUnchecked(expr, state)
             );
             this.assign(lv, rvalue, state);
         } else {
@@ -795,16 +840,12 @@ export class Interpreter {
         return rvalue;
     }
 
-    private clamp(
-        val: bigint,
-        type: sol.TypeNode,
-        unchecked: boolean,
-    ): bigint {
+    private clamp(val: bigint, type: sol.TypeNode, unchecked: boolean): bigint {
         const clampedVal = type instanceof sol.IntType ? sol.clampIntToType(val, type) : val;
         const overflow = clampedVal !== val;
 
         if (overflow && !unchecked) {
-            this.runtimeError(Overflow, ``)
+            this.runtimeError(Overflow, ``);
         }
 
         return clampedVal;
@@ -816,7 +857,7 @@ export class Interpreter {
         right: Value,
         type: sol.TypeNode,
         userFunction: sol.FunctionDefinition | undefined,
-        unchecked: boolean,
+        unchecked: boolean
     ): NonPoisonValue {
         // @todo - need to detect
         if (userFunction) {
@@ -942,23 +983,17 @@ export class Interpreter {
             rVal,
             this.typeof(expr, state),
             expr.vUserFunction,
-            this.isUnchecked(expr, state),
+            this.isUnchecked(expr, state)
         );
     }
 
     evalConditional(expr: sol.Conditional, state: State): Value {
         const cVal = this.evalT(expr.vCondition, Boolean, state);
 
-        return this.eval(
-            cVal ? expr.vTrueExpression : expr.vFalseExpression,
-            state
-        );
+        return this.eval(cVal ? expr.vTrueExpression : expr.vFalseExpression, state);
     }
 
-    evalElementaryTypeNameExpression(
-        expr: sol.ElementaryTypeNameExpression,
-        state: State
-    ): Value {
+    evalElementaryTypeNameExpression(expr: sol.ElementaryTypeNameExpression, state: State): Value {
         nyi("");
     }
 
@@ -1007,10 +1042,10 @@ export class Interpreter {
      * Evaluate a struct constructor call (e.g. Struct(5, x+y, [1,2,3])). This allocates memory to hold the struct,
      * evaluates all field expressions and assigns them to the relevant fiels in the memory struct.
      * Returns a view to the struct in memory.
-     * 
+     *
      * @todo handle the case with mappings in structs. Those get silently ignored in initializers
-     * @param expr 
-     * @param state 
+     * @param expr
+     * @param state
      */
     evalStructConstructorCall(expr: sol.FunctionCall, state: State): Value {
         const infer = this.infer(state);
@@ -1022,10 +1057,13 @@ export class Interpreter {
             calleeT.type.definition instanceof sol.StructDefinition,
             `Expected UserDefinedTypeName not ${calleeT.pp()}`
         );
-        this.expect(expr.fieldNames !== undefined, `Should have fieldNames defined`)
+        this.expect(expr.fieldNames !== undefined, `Should have fieldNames defined`);
 
         const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
-        const structView = new StructMemView(structT, state.allocator.alloc(PointerMemView.allocSize(undefined, structT)))
+        const structView = new StructMemView(
+            structT,
+            state.allocator.alloc(PointerMemView.allocSize(undefined, structT))
+        );
 
         const fieldMap = new Map<string, Value>();
 
@@ -1038,12 +1076,18 @@ export class Interpreter {
         for (const [fieldName] of structView.type.fields) {
             const fieldView = structView.fieldView(fieldName);
             const fieldVal = fieldMap.get(fieldName);
-            this.expect(fieldView instanceof BaseMemoryView, `Expected to get field ${fieldName} of ${structT.name}`);
-            this.expect(fieldVal !== undefined, `Field ${fieldName} of ${structT.name} not found in constructor`);
-            this.assign(fieldView, fieldVal, state)
+            this.expect(
+                fieldView instanceof BaseMemoryView,
+                `Expected to get field ${fieldName} of ${structT.name}`
+            );
+            this.expect(
+                fieldVal !== undefined,
+                `Field ${fieldName} of ${structT.name} not found in constructor`
+            );
+            this.assign(fieldView, fieldVal, state);
         }
 
-        return structView
+        return structView;
     }
 
     evalNewCall(expr: sol.FunctionCall, state: State): Value {
@@ -1080,7 +1124,7 @@ export class Interpreter {
         }
 
         const callee = this.evalNP(expr.vExpression, state);
-        const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state))
+        const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
 
         if (callee instanceof BuiltinFunction) {
             return callee.call(this, state, args);
@@ -1097,7 +1141,7 @@ export class Interpreter {
         const res = state.scope.lookup(expr.name);
 
         if (res === undefined) {
-            this.fail(NotDefined, ``)
+            this.fail(NotDefined, ``);
         }
 
         return res;
@@ -1144,7 +1188,7 @@ export class Interpreter {
             );
 
             if (indexVal < 0n || indexVal >= baseT.size) {
-                this.runtimeError(OOB, ``)
+                this.runtimeError(OOB, ``);
             }
 
             res = BigInt(baseVal[Number(indexVal)]);
@@ -1153,7 +1197,7 @@ export class Interpreter {
         }
 
         if (res instanceof DecodingFailure) {
-            this.runtimeError(OOB, ``)
+            this.runtimeError(OOB, ``);
         }
 
         // @todo add test for order of operations
@@ -1215,7 +1259,25 @@ export class Interpreter {
 
     evalTupleExpression(expr: sol.TupleExpression, state: State): Value {
         // A copmonent here may be an empty tuple, so we use allow poison in non-null components
-        const compVals: Value[] = expr.vOriginalComponents.map((comp) => comp === null ? none : this.eval(comp, state))
+        const compVals: Value[] = expr.vOriginalComponents.map((comp) =>
+            comp === null ? none : this.eval(comp, state)
+        );
+
+        // Array literals get allocated in memory
+        if (expr.isInlineArray) {
+            const infer = this.infer(state);
+            const arrT = infer.typeOf(expr);
+            this.expect(arrT instanceof sol.PointerType && arrT.to instanceof sol.ArrayType && arrT.to.size !== undefined, `Expected a fixed size array in memory not ${arrT.pp()}`)
+
+            const size = PointerMemView.allocSize(undefined, arrT);
+            const addr = state.allocator.alloc(size);
+            const view = makeMemoryView(arrT, addr);
+            view.encode(compVals as PrimitiveValue[], state.memory, state.allocator);
+
+            this.expect(view instanceof PointerMemView, ``)
+
+            return view.toView(state.memory);
+        }
 
         if (compVals.length === 0) {
             return none;
@@ -1230,7 +1292,7 @@ export class Interpreter {
 
     expect(b: boolean, msg?: string): asserts b {
         if (!b) {
-            this.fail(InternalError, msg ? msg : ``)
+            this.fail(InternalError, msg ? msg : ``);
         }
     }
 
@@ -1290,7 +1352,7 @@ export class Interpreter {
                 return this.deref(lv, state);
             }
 
-            nyi(`Unexpected LValue view ${lv.pp()}`)
+            nyi(`Unexpected LValue view ${lv.pp()}`);
         } else if (lv instanceof Array) {
             return lv.map((x) => this.lvToValue(x, state));
         } else if (lv === null) {
@@ -1323,7 +1385,7 @@ export class Interpreter {
             const subVal = this.lvToValue(subExprLoc, state);
             this.expect(typeof subVal === "bigint", `Unexpected value ${subVal} for unary ~`);
             if (state.scope === undefined) {
-                this.fail(NoScope, `Need scope for ${expr.operator}`)
+                this.fail(NoScope, `Need scope for ${expr.operator}`);
             }
 
             const newVal = expr.operator === "++" ? subVal + 1n : subVal - 1n;

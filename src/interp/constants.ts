@@ -35,7 +35,7 @@ export function encodeConstants(
             const loc = allocator.alloc(
                 PointerMemView.allocSize(nd.value, sol.types.bytesMemory.to)
             );
-            const view = new BytesMemView(sol.types.stringMemory.to, loc);
+            const view = new BytesMemView(sol.types.bytesMemory.to, loc);
             const buf = hexToBytes(`0x${nd.hexValue}`);
             view.encode(buf, allocator.memory);
             res.set(nd.id, view);

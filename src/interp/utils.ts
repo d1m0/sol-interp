@@ -1,7 +1,26 @@
-import { bigIntToNum, ExpStructType, makeMemoryView, nyi, PointerMemView, PrimitiveValue, Struct, ZERO_ADDRESS, Value as BaseValue, StructView, StructMemView, StructCalldataView, StructStorageView, View } from "sol-dbg";
+import {
+    bigIntToNum,
+    ExpStructType,
+    makeMemoryView,
+    nyi,
+    PointerMemView,
+    PrimitiveValue,
+    Struct,
+    ZERO_ADDRESS,
+    Value as BaseValue,
+    StructView,
+    StructMemView,
+    StructCalldataView,
+    StructStorageView,
+    View,
+    BaseMemoryView,
+    BaseCalldataView,
+    BaseStorageView
+} from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { none } from "./value";
 import { SolMessage, State } from "./state";
+import { BaseLocalView } from "./view";
 
 export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
     if (t instanceof sol.IntType) {
@@ -22,33 +41,32 @@ export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
 
     if (t instanceof sol.PointerType) {
         if (t.location === sol.DataLocation.Memory) {
-            let zeroValue: BaseValue
+            let zeroValue: BaseValue;
 
             if (t.to instanceof sol.ArrayType) {
                 const len = t.to.size !== undefined ? bigIntToNum(t.to.size) : 0;
-                zeroValue = []
+                zeroValue = [];
 
                 for (let i = 0; i < len; i++) {
-                    zeroValue.push(makeZeroValue(t.to.elementT, state))
+                    zeroValue.push(makeZeroValue(t.to.elementT, state));
                 }
-
             } else if (t.to instanceof sol.BytesType) {
-                zeroValue = new Uint8Array()
+                zeroValue = new Uint8Array();
             } else if (t.to instanceof sol.StringType) {
-                zeroValue = ""
+                zeroValue = "";
             } else if (t.to instanceof ExpStructType) {
-                const fieldVals: [string, PrimitiveValue][] = [];
+                const fieldVals: Array<[string, PrimitiveValue]> = [];
                 for (const [fieldName, fieldT] of t.to.fields) {
-                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)])
+                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
                 }
                 zeroValue = new Struct(fieldVals);
             } else {
-                nyi(`makeZeroValue of memory pointer type ${t.pp()}`)
+                nyi(`makeZeroValue of memory pointer type ${t.pp()}`);
             }
 
-            let addr = state.allocator.alloc(PointerMemView.allocSize(zeroValue, t.to))
-            const res = makeMemoryView(t.to, addr)
-            res.encode(zeroValue, state.memory, state.allocator)
+            const addr = state.allocator.alloc(PointerMemView.allocSize(zeroValue, t.to));
+            const res = makeMemoryView(t.to, addr);
+            res.encode(zeroValue, state.memory, state.allocator);
 
             return res;
         }
@@ -85,10 +103,14 @@ export function isValueType(type: sol.TypeNode): boolean {
 }
 
 //@todo move to sol-dbg
-export function isStructView(v: any): v is StructView<any, View<any, BaseValue, any, sol.TypeNode>> {
-    return v instanceof StructMemView ||
+export function isStructView(
+    v: any
+): v is StructView<any, View<any, BaseValue, any, sol.TypeNode>> {
+    return (
+        v instanceof StructMemView ||
         v instanceof StructCalldataView ||
-        v instanceof StructStorageView;
+        v instanceof StructStorageView
+    );
 }
 
 // Hardcoded version good enough for debugging here.
@@ -100,6 +122,26 @@ const writer = new sol.ASTWriter(
 
 export function printNode(n: sol.ASTNode): string {
     return writer.write(n);
+}
+
+export function getViewLocation(v: View): sol.DataLocation | "local" {
+    if (v instanceof BaseMemoryView) {
+        return sol.DataLocation.Memory;
+    }
+
+    if (v instanceof BaseCalldataView) {
+        return sol.DataLocation.CallData;
+    }
+
+    if (v instanceof BaseStorageView) {
+        return sol.DataLocation.Storage;
+    }
+
+    if (v instanceof BaseLocalView) {
+        return "local";
+    }
+
+    nyi(`View type ${v.pp()}`);
 }
 
 export const stringT = new sol.StringType();

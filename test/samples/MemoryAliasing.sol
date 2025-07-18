@@ -404,4 +404,42 @@ contract MemoryAliasing {
        //m1 = m;
    }
    
+   function localMemArrayLitInit() public {
+        uint[3] memory a;
+        uint[3] memory b = a;
+        /** 
+         * Heap is:
+         * a --> [0,0,0]
+         * b ---/
+         */
+        //a= [uint(1),2,3];
+        b[0] = 100;
+        /** 
+         * Heap is:
+         * a --> [100,0,0]
+         * b ---/
+         */
+        assert(a[0] == 100);
+
+        uint[3] memory a1;
+        uint[3] memory b1=a1;
+        /** 
+         * Heap is:
+         * a1 --> [0,0,0]
+         * b1 ---/
+         */
+        a1=[uint(1),2,3];
+        /** 
+         * Heap is:
+         * a1 --> [1,2,3]
+         * b1 --> [0,0,0]
+         */
+        b1[0] = 100;
+        /** 
+         * Heap is:
+         * a1 --> [1,2,3]
+         * b1 --> [100,0,0]
+         */
+        assert(a1[0] == 1);
+    }
 }
