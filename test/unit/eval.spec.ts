@@ -129,7 +129,7 @@ describe("Eval unit tests", () => {
             const expr = new sol.XPath(contract).query(path)[0] as sol.Expression;
             const state = makeState(expr, sample.version, ...defs);
             expect(expr).toBeDefined();
-            const [, v] = interp.eval(expr, state);
+            const v = interp.eval(expr, state);
             expect(v).toEqual(expValue);
         });
     }

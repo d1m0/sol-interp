@@ -112,6 +112,7 @@ export function encodeMemArgs(args: Array<[string, Value]>, state: State): Inter
 
     for (const [name, val] of args) {
         const view = (state.scope as BaseScope).lookupLocation(name);
+        sol.assert(view !== undefined, ``)
         if (isValueType(view.type)) {
             res.push(val as PrimitiveValue);
         } else {

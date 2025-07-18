@@ -1,5 +1,4 @@
 import * as sol from "solc-typed-ast";
-import { NotDefined } from "./exceptions";
 import { Value } from "./value";
 import { State } from "./state";
 import { ExpStructType, getContractLayoutType, simplifyType, View } from "sol-dbg";
@@ -40,7 +39,7 @@ export abstract class BaseScope {
     abstract _lookupLocation(name: string): View | undefined;
     abstract _set(name: string, val: Value): void;
 
-    lookup(name: string): Value {
+    lookup(name: string): Value | undefined {
         let v;
 
         if (this.knownIds.has(name)) {
@@ -49,24 +48,16 @@ export abstract class BaseScope {
             v = this._next ? this._next.lookup(name) : undefined;
         }
 
-        if (v === undefined) {
-            throw new NotDefined(name);
-        }
-
         return v;
     }
 
-    lookupLocation(name: string): View {
+    lookupLocation(name: string): View | undefined {
         let v;
 
         if (this.knownIds.has(name)) {
             v = this._lookupLocation(name);
         } else {
             v = this._next ? this._next.lookupLocation(name) : undefined;
-        }
-
-        if (v === undefined) {
-            throw new NotDefined(name);
         }
 
         return v;
@@ -79,7 +70,7 @@ export abstract class BaseScope {
         }
 
         if (this._next === undefined) {
-            throw new NotDefined(name);
+            return
         }
 
         this._next.set(name, val);

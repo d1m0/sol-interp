@@ -2,7 +2,7 @@ import { View, Value, zip } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
-import { Assert } from "../../src/interp/exceptions";
+import { Assert, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
 import { ppMem } from "../../src/interp/pp";
 
@@ -87,14 +87,20 @@ describe("Simple function call tests", () => {
             );
             if (expectedReturns instanceof Array) {
                 try {
-                    let [, returns] = interp.callInternal(fun, encodeMemArgs(args, state), state);
+                    let returns = interp.callInternal(fun, encodeMemArgs(args, state), state);
                     const decodedReturns = returns.map((ret) =>
                         ret instanceof View ? interp.decode(ret, state) : ret
                     );
                     expect(decodedReturns).toEqual(expectedReturns);
                 } catch (e) {
-                    console.error(`Unexpected exception ${e} ${(e as Error).stack}`);
-                    console.error(`Memory: ${ppMem(state.memory)}`)
+                    if (e instanceof InterpError) {
+                        //console.error(`Trace: ${ppTrace(e.trace)}`)
+                        //console.error(`Memory: ${ppMem(state.memory)}`)
+                        console.error(`Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e}`)
+                    } else {
+                        console.error(`Unexpected unrelated exception ${e} ${(e as Error).stack}`);
+                        console.error(`Memory: ${ppMem(state.memory)}`)
+                    }
                     expect(false).toBeTruthy();
                 }
             } else {

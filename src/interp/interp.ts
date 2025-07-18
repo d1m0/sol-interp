@@ -25,10 +25,10 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
-import { EvalStep, ExecStep, Trace } from "./step";
-import { InterpError, NoScope, OOB, Overflow } from "./exceptions";
+import { EvalStep, ExecStep, Trace, } from "./step";
+import { InternalError, NoScope, NotDefined, OOB, Overflow, RuntimeError } from "./exceptions";
 import { gte, lt } from "semver";
-import { BuiltinFunction, BuiltinStruct, isPrimitiveValue, LValue, none, Value } from "./value";
+import { BuiltinFunction, BuiltinStruct, isPrimitiveValue, LValue, match, none, NonPoisonValue, TypeConstructorToValueType, Value, ValueTypeConstructors } from "./value";
 import { Address } from "@ethereumjs/util";
 import { BaseScope, LocalsScope } from "./scope";
 import { getMsg, isStructView, isValueType, makeZeroValue, printNode, } from "./utils";
@@ -41,7 +41,7 @@ import {
     PointerLocalView,
     PrimitiveLocalView
 } from "./view";
-import { ppLValue, ppMem, } from "./pp";
+import { ppLValue, ppValue, ppValueTypeConstructor, } from "./pp";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -56,25 +56,59 @@ const scratchWord = new Uint8Array(32);
  * Solidity Interpeter class. Includes the following entrypoint
  *
  * * evaluate a single expression
- *      `eval(expr: sol.Expression, state: State): [Trace, Value]`
+ *      `eval(expr: sol.Expression, state: State): Value`
  * * execute one statement
- *      @todo
+ *      `exec(stmt: sol.Statement, state: State): ControlFlow`
  * * call an internal function
- *      @todo
+ *      `callInternal(callee: sol.FunctionDefinition, args: Value[], state: State)`
  * * call an external method
+ *      @todo
+ * 
+ * Most of the Interpreter state is kept in the `State` object that is passed around. The only runtime state
+ * this class maintains is mostly for debugging purposes:
+ *  - AST node stack of currently executed/evaluated objects
  */
 export class Interpreter {
+    nodes: sol.ASTNode[];
+    _trace: Trace;
+
     constructor(
         protected readonly world: WorldInterface,
         protected readonly artifactManager: ArtifactManager
-    ) { }
+    ) {
+        this.nodes = [];
+        this._trace = [];
+    }
+
+    get curNode(): sol.ASTNode {
+        sol.assert(this.nodes.length > 0, `No cur node`);
+        return this.nodes[this.nodes.length - 1];
+    }
+
+    get trace(): Trace {
+        return this._trace;
+    }
+
+    /**
+     * An internal interpreter exception. This indicates a bug in the interpreter
+     */
+    fail(errorConstr: (new (...args: any[]) => InternalError), msg: string, ctx: sol.ASTNode = this.curNode): never {
+        throw new errorConstr(ctx, this._trace, msg);
+    }
+
+    /**
+     * A runtime error. This indicates an actual EVM exception at runtime
+     */
+    runtimeError(errorConstr: (new (...args: any[]) => RuntimeError), msg: string): never {
+        throw new errorConstr(this.curNode, this._trace, msg);
+    }
 
     ///*********************EXTERNAL FUNCTION CALLS************************************
-    public create(msg: SolMessage, state: State): [Trace, Address] {
+    public create(msg: SolMessage, state: State): Address {
         nyi(`create`);
     }
 
-    public call(msg: SolMessage, state: State): [Trace, Value[] | InterpError] {
+    public call(msg: SolMessage, state: State): Value[] | InternalError {
         nyi(`create`);
     }
 
@@ -118,7 +152,9 @@ export class Interpreter {
         callee: sol.FunctionDefinition,
         args: Value[],
         state: State
-    ): [Trace, Value[]] {
+    ): Value[] {
+
+        this.nodes.push(callee);
         // @todo handle modifiers!!!!!
         const formalArgs: sol.VariableDeclaration[] = callee.vParameters.vParameters;
 
@@ -141,81 +177,87 @@ export class Interpreter {
         this.pushScope(callee, zip(argRetNames, argRetVals), state);
 
         sol.assert(callee.vBody !== undefined, `Can't call function with no body ${callee.name}`);
-        const [trace, flow] = this.exec(callee.vBody, state);
+        const flow = this.exec(callee.vBody, state);
         sol.assert(
             flow === ControlFlow.Fallthrough || flow === ControlFlow.Return,
             `Unexpected control flow at end of function ${flow}`
         );
 
-        const results = formalReturns.map((ret, i) =>
-            (state.scope as BaseScope).lookup(ret.name === "" ? `<ret_${i}>` : ret.name)
+        const results = formalReturns.map((ret, i) => {
+            const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i))
+            if (res === undefined) {
+                this.fail(NotDefined, ``)
+            }
+            return res;
+        }
         );
-        return [trace, results];
+        this.nodes.pop();
+        return results;
     }
 
     ///*********************STATEMENTS*************************************************
-    public exec(stmt: sol.Statement, state: State): [Trace, ControlFlow] {
-        console.error(`exec: ${printNode(stmt)} mem: ${ppMem(state.memory)}`)
-        let trace: Trace;
+    public exec(stmt: sol.Statement, state: State): ControlFlow {
+        // console.error(`exec: ${printNode(stmt)} mem: ${ppMem(state.memory)}`)
         let res: ControlFlow;
 
+        this.nodes.push(stmt);
+
         if (stmt instanceof sol.Block || stmt instanceof sol.UncheckedBlock) {
-            [trace, res] = this.execBlock(stmt, state);
+            res = this.execBlock(stmt, state);
         } else if (stmt instanceof sol.ExpressionStatement) {
-            [trace, res] = this.execExpressionStatement(stmt, state);
+            res = this.execExpressionStatement(stmt, state);
         } else if (stmt instanceof sol.VariableDeclarationStatement) {
-            [trace, res] = this.execVariableDeclarationStatement(stmt, state);
+            res = this.execVariableDeclarationStatement(stmt, state);
         } else if (stmt instanceof sol.Return) {
-            [trace, res] = this.execReturn(stmt, state);
+            res = this.execReturn(stmt, state);
         } else if (stmt instanceof sol.IfStatement) {
-            [trace, res] = this.execIfStatement(stmt, state);
+            res = this.execIfStatement(stmt, state);
         } else if (stmt instanceof sol.WhileStatement) {
-            [trace, res] = this.execWhileStatement(stmt, state);
+            res = this.execWhileStatement(stmt, state);
         } else if (stmt instanceof sol.Break) {
-            [trace, res] = this.execBreak(stmt, state);
+            res = this.execBreak();
         } else if (stmt instanceof sol.Continue) {
-            [trace, res] = this.execContinue(stmt, state);
+            res = this.execContinue();
         } else if (stmt instanceof sol.DoWhileStatement) {
-            [trace, res] = this.execDoWhileStatement(stmt, state);
+            res = this.execDoWhileStatement(stmt, state);
         } else if (stmt instanceof sol.ForStatement) {
-            [trace, res] = this.execForStatement(stmt, state);
+            res = this.execForStatement(stmt, state);
             /*
         } else if (stmt instanceof sol.EmitStatement) {
-            [trace, res] = this.execEmitStatement(stmt, state);
+            res = this.execEmitStatement(stmt, state);
         } else if (stmt instanceof sol.InlineAssembly) {
-            [trace, res] = this.execInlineAssembly(stmt, state);
+            res = this.execInlineAssembly(stmt, state);
         } else if (stmt instanceof sol.PlaceholderStatement) {
-            [trace, res] = this.execPlaceholderStatement(stmt, state);
+            res = this.execPlaceholderStatement(stmt, state);
         } else if (stmt instanceof sol.RevertStatement) {
-            [trace, res] = this.execRevertStatement(stmt, state);
+            res = this.execRevertStatement(stmt, state);
         } else if (stmt instanceof sol.Throw) {
-            [trace, res] = this.execThrow(stmt, state);
+            res = this.execThrow(stmt, state);
         } else if (stmt instanceof sol.TryCatchClause) {
-            [trace, res] = this.execTryCatchClause(stmt, state);
+            res = this.execTryCatchClause(stmt, state);
         } else if (stmt instanceof sol.TryStatement) {
-            [trace, res] = this.execTryStatement(stmt, state);
+            res = this.execTryStatement(stmt, state);
             */
         } else {
             nyi(`Stmt ${stmt.constructor.name}`);
         }
 
-        trace.push(new ExecStep(stmt));
+        this._trace.push(new ExecStep(stmt));
+        this.nodes.pop();
 
-        return [trace, res];
+        return res;
     }
 
     private execVariableDeclarationStatement(
         stmt: sol.VariableDeclarationStatement,
         state: State
-    ): [Trace, ControlFlow] {
-        const trace: Trace = [];
+    ): ControlFlow {
         let varInitialVals: Value[] = [];
         const infer = this.infer(state);
 
         if (stmt.vInitialValue) {
-            const [initVT, initVal] = this.eval(stmt.vInitialValue, state);
+            const initVal = this.evalNP(stmt.vInitialValue, state);
 
-            trace.push(...initVT);
             varInitialVals =
                 stmt.vInitialValue instanceof sol.TupleExpression &&
                     (stmt.vInitialValue.vOriginalComponents.length > 1 && !stmt.vInitialValue.isInlineArray)
@@ -240,26 +282,31 @@ export class Interpreter {
                 continue;
             }
 
-            this.assign(state.scope.lookupLocation(stmt.vDeclarations[j].name), varInitialVals[i], state)
+            const loc = state.scope.lookupLocation(stmt.vDeclarations[j].name);
+
+            if (loc === undefined) {
+                this.fail(NotDefined, ``)
+            }
+
+            this.assign(loc, varInitialVals[i], state)
             j++;
         }
 
-        return [trace, ControlFlow.Fallthrough];
+        return ControlFlow.Fallthrough;
     }
 
     private execExpressionStatement(
         stmt: sol.ExpressionStatement,
         state: State
-    ): [Trace, ControlFlow] {
+    ): ControlFlow {
         // I think (?) the only things that can break control flow are statements (break, continue, return)
         // Note that exceptions (revert, assert...) are also handled in the interpreter by raising an exception and handling
         // it at the last external call site
-        const [trace] = this.eval(stmt.vExpression, state);
-        return [trace, ControlFlow.Fallthrough];
+        this.eval(stmt.vExpression, state);
+        return ControlFlow.Fallthrough;
     }
 
-    private execBlock(block: sol.Block | sol.UncheckedBlock, state: State): [Trace, ControlFlow] {
-        const trace: Trace = [];
+    private execBlock(block: sol.Block | sol.UncheckedBlock, state: State): ControlFlow {
         let flow: ControlFlow = ControlFlow.Fallthrough;
 
         let localVals: [string, Value][] = [];
@@ -277,13 +324,11 @@ export class Interpreter {
                 }
             }
         }
+
         this.pushScope(block, localVals, state);
 
         for (const stmt of block.vStatements) {
-            let stmtTrace;
-            [stmtTrace, flow] = this.exec(stmt, state);
-
-            trace.push(...stmtTrace);
+            flow = this.exec(stmt, state);
 
             if (flow !== ControlFlow.Fallthrough) {
                 break;
@@ -299,18 +344,15 @@ export class Interpreter {
         }
 
         this.popScope(state);
-        return [trace, flow];
+        return flow;
     }
 
-    private execReturn(stmt: sol.Return, state: State): [Trace, ControlFlow] {
+    private execReturn(stmt: sol.Return, state: State): ControlFlow {
         sol.assert(state.scope !== undefined, ``);
-        let trace: Trace = [];
         let retVals: Value[] = [];
 
         if (stmt.vExpression) {
-            let retVal: Value;
-
-            [trace, retVal] = this.eval(stmt.vExpression, state);
+            const retVal = this.evalNP(stmt.vExpression, state);
             retVals =
                 stmt.vExpression instanceof sol.TupleExpression ? (retVal as Value[]) : [retVal];
         } else {
@@ -331,41 +373,35 @@ export class Interpreter {
             state.scope.set(retName, retVals[i]);
         }
 
-        return [trace, ControlFlow.Return];
+        return ControlFlow.Return;
     }
 
-    private execIfStatement(stmt: sol.IfStatement, state: State): [Trace, ControlFlow] {
-        const [condTrace, condV] = this.eval(stmt.vCondition, state);
-        let bodyTrace: Trace = [];
+    private execIfStatement(stmt: sol.IfStatement, state: State): ControlFlow {
+        const condV = this.evalT(stmt.vCondition, Boolean, state);
         let cflow: ControlFlow = ControlFlow.Fallthrough;
 
         if (condV) {
-            [bodyTrace, cflow] = this.exec(stmt.vTrueBody, state);
+            cflow = this.exec(stmt.vTrueBody, state);
         } else if (stmt.vFalseBody) {
-            [bodyTrace, cflow] = this.exec(stmt.vFalseBody, state);
+            cflow = this.exec(stmt.vFalseBody, state);
         }
 
-        return [[...condTrace, ...bodyTrace], cflow];
+        return cflow;
     }
 
-    private execWhileStatement(stmt: sol.WhileStatement, state: State): [Trace, ControlFlow] {
-        const trace: Trace = [];
-
+    private execWhileStatement(stmt: sol.WhileStatement, state: State): ControlFlow {
         // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
         while (true) {
-            const [condTrace, condVal] = this.eval(stmt.vCondition, state);
-            trace.push(...condTrace);
-            this.expect(typeof condVal === `boolean`);
+            const condVal = this.evalT(stmt.vCondition, Boolean, state);
 
             if (!condVal) {
                 break;
             }
 
-            const [bodyTrace, bodyCflow] = this.exec(stmt.vBody, state);
-            trace.push(...bodyTrace);
+            const bodyCflow = this.exec(stmt.vBody, state);
 
             if (bodyCflow === ControlFlow.Return) {
-                return [trace, ControlFlow.Return];
+                return ControlFlow.Return;
             }
 
             if (bodyCflow === ControlFlow.Break) {
@@ -375,62 +411,50 @@ export class Interpreter {
             // Nothing to do on continue.
         }
 
-        return [trace, ControlFlow.Fallthrough];
+        return ControlFlow.Fallthrough;
     }
 
-    private execBreak(stmt: sol.Break, state: State): [Trace, ControlFlow] {
-        return [[], ControlFlow.Break];
+    private execBreak(): ControlFlow {
+        return ControlFlow.Break;
     }
 
-    private execContinue(stmt: sol.Continue, state: State): [Trace, ControlFlow] {
-        return [[], ControlFlow.Continue];
+    private execContinue(): ControlFlow {
+        return ControlFlow.Continue;
     }
 
-    private execDoWhileStatement(stmt: sol.DoWhileStatement, state: State): [Trace, ControlFlow] {
-        const trace: Trace = [];
+    private execDoWhileStatement(stmt: sol.DoWhileStatement, state: State): ControlFlow {
         let cond: boolean;
 
         // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
         do {
             // Execute body first
-            const [bodyTrace, bodyCflow] = this.exec(stmt.vBody, state);
-            trace.push(...bodyTrace);
+            const bodyCflow = this.exec(stmt.vBody, state);
 
             if (bodyCflow === ControlFlow.Return) {
-                return [trace, ControlFlow.Return];
+                return ControlFlow.Return;
             }
 
             if (bodyCflow === ControlFlow.Break) {
                 break;
             }
 
-            const [condTrace, condVal] = this.eval(stmt.vCondition, state);
-            trace.push(...condTrace);
-            this.expect(typeof condVal === `boolean`);
-
-            cond = condVal;
+            cond = this.evalT(stmt.vCondition, Boolean, state);
         } while (cond);
 
-        return [trace, ControlFlow.Fallthrough];
+        return ControlFlow.Fallthrough;
     }
 
-    private execForStatement(stmt: sol.ForStatement, state: State): [Trace, ControlFlow] {
-        const trace: Trace = [];
-
+    private execForStatement(stmt: sol.ForStatement, state: State): ControlFlow {
         if (stmt.vInitializationExpression !== undefined) {
-            const [initTrace, initFlow] = this.exec(stmt.vInitializationExpression, state);
+            const initFlow = this.exec(stmt.vInitializationExpression, state);
             this.expect(initFlow === ControlFlow.Fallthrough);
-            trace.push(...initTrace);
         }
 
         while (true) {
             let cond: boolean;
 
             if (stmt.vCondition) {
-                const [condTrace, condVal] = this.eval(stmt.vCondition, state);
-                trace.push(...condTrace);
-                this.expect(typeof condVal === `boolean`);
-                cond = condVal;
+                cond = this.evalT(stmt.vCondition, Boolean, state);
             } else {
                 cond = true;
             }
@@ -439,11 +463,10 @@ export class Interpreter {
                 break;
             }
 
-            const [bodyTrace, bodyCflow] = this.exec(stmt.vBody, state);
-            trace.push(...bodyTrace);
+            const bodyCflow = this.exec(stmt.vBody, state);
 
             if (bodyCflow === ControlFlow.Return) {
-                return [trace, ControlFlow.Return];
+                return ControlFlow.Return;
             }
 
             if (bodyCflow === ControlFlow.Break) {
@@ -452,9 +475,8 @@ export class Interpreter {
 
             // Eval the loop expression
             if (stmt.vLoopExpression !== undefined) {
-                const [loopExpTrace, loopFlow] = this.exec(stmt.vLoopExpression, state);
+                const loopFlow = this.exec(stmt.vLoopExpression, state);
                 this.expect(loopFlow === ControlFlow.Fallthrough);
-                trace.push(...loopExpTrace);
             }
         }
 
@@ -466,53 +488,77 @@ export class Interpreter {
             this.popScope(state);
         }
 
-        return [trace, ControlFlow.Fallthrough];
+        return ControlFlow.Fallthrough;
     }
+
     ///*********************EXPRESSIONS************************************************
     /**
      * Evaluate a single expression in a given state. Return a trace of the
      * evaluation and the resulting value.
      */
-    public eval(expr: sol.Expression, state: State): [Trace, Value] {
-        let trace: Trace;
+    public eval(expr: sol.Expression, state: State): Value {
+        this.nodes.push(expr);
         let res: Value;
 
         if (expr instanceof sol.Assignment) {
-            [trace, res] = this.evalAssignment(expr, state);
+            res = this.evalAssignment(expr, state);
         } else if (expr instanceof sol.BinaryOperation) {
-            [trace, res] = this.evalBinaryOperation(expr, state);
+            res = this.evalBinaryOperation(expr, state);
         } else if (expr instanceof sol.Conditional) {
-            [trace, res] = this.evalConditional(expr, state);
+            res = this.evalConditional(expr, state);
         } else if (expr instanceof sol.ElementaryTypeNameExpression) {
-            [trace, res] = this.evalElementaryTypeNameExpression(expr, state);
+            res = this.evalElementaryTypeNameExpression(expr, state);
         } else if (expr instanceof sol.FunctionCall) {
-            [trace, res] = this.evalFunctionCall(expr, state);
+            res = this.evalFunctionCall(expr, state);
         } else if (expr instanceof sol.Identifier) {
-            [trace, res] = this.evalIdentifier(expr, state);
+            res = this.evalIdentifier(expr, state);
         } else if (expr instanceof sol.IndexAccess) {
-            [trace, res] = this.evalIndexAccess(expr, state);
+            res = this.evalIndexAccess(expr, state);
         } else if (expr instanceof sol.IndexRangeAccess) {
-            [trace, res] = this.evalIndexRangeAccess(expr, state);
+            res = this.evalIndexRangeAccess(expr, state);
         } else if (expr instanceof sol.Literal) {
-            [trace, res] = this.evalLiteral(expr, state);
+            res = this.evalLiteral(expr, state);
         } else if (expr instanceof sol.MemberAccess) {
-            [trace, res] = this.evalMemberAccess(expr, state);
+            res = this.evalMemberAccess(expr, state);
         } else if (expr instanceof sol.TupleExpression) {
-            [trace, res] = this.evalTupleExpression(expr, state);
+            res = this.evalTupleExpression(expr, state);
         } else if (expr instanceof sol.UnaryOperation) {
-            [trace, res] = this.evalUnaryOperation(expr, state);
+            res = this.evalUnaryOperation(expr, state);
         } else {
             nyi(`evalExpression(${expr.constructor.name})`);
         }
 
-        if (res instanceof Poison) {
-            throw new InterpError(`Eval-ed poison while evaluating ${expr.print()}: ${res}`);
+        // console.error(`eval(${printNode(expr)})->${ppValue(res)}`)
+        this._trace.push(new EvalStep(expr, res));
+        this.nodes.pop();
+
+        return res;
+    }
+
+    /**
+     * Evaluate an expression in a given state, and check that its of a particular expected value type.
+     */
+    evalT<T extends ValueTypeConstructors>(expr: sol.Expression, typeConstr: T, state: State): TypeConstructorToValueType<T> {
+        const res = this.eval(expr, state);
+
+        if (!match(res, typeConstr)) {
+            this.fail(InternalError, `Unexpected eval result ${ppValue(res)}. Expected ${ppValueTypeConstructor(typeConstr)}`);
         }
 
-        // console.error(`eval(${printNode(expr)})->${ppValue(res)}`)
-        trace.push(new EvalStep(expr, res));
+        return res;
+    }
 
-        return [trace, res];
+    /**
+     * Evaluate an expression in a given state, and check that result is not poison
+     */
+    public evalNP(expr: sol.Expression, state: State): NonPoisonValue {
+        const res = this.eval(expr, state);
+
+        if (res instanceof Poison) {
+            this.fail(InternalError, `Got poison`, expr);
+        }
+
+        return res;
     }
 
     deref<T extends StateArea>(
@@ -534,21 +580,25 @@ export class Interpreter {
         }
 
         if (res instanceof DecodingFailure) {
-            throw new InterpError(`Couldn't deref pointer view ${v}`);
+            this.fail(InternalError, `Couldn't deref pointer view ${v}`)
         }
 
         return res;
     }
 
-    evalLV(expr: sol.Expression, state: State): [Trace, LValue] {
+    evalLV(expr: sol.Expression, state: State): LValue {
+        this.nodes.push(expr);
+        let res: LValue;
+
         if (expr instanceof sol.Identifier) {
             sol.assert(state.scope !== undefined, `Missing scope in evalLV({0})`, expr);
-            const lv = state.scope.lookupLocation(expr.name);
-            return [[new EvalStep(expr, lv)], lv];
-        }
+            const scopeView = state.scope.lookupLocation(expr.name);
+            if (scopeView === undefined) {
+                this.fail(NotDefined, ``)
+            }
 
-        if (expr instanceof sol.TupleExpression) {
-            const trace: Trace = [];
+            return scopeView;
+        } else if (expr instanceof sol.TupleExpression) {
             const lvs: LValue[] = [];
             for (const comp of expr.vOriginalComponents) {
                 if (comp === null) {
@@ -556,25 +606,19 @@ export class Interpreter {
                     continue;
                 }
 
-                const [compTrace, compVal] = this.evalLV(comp, state);
-                trace.push(...compTrace);
-                lvs.push(compVal);
+                lvs.push(this.evalLV(comp, state));
             }
 
-            trace.push(new EvalStep(expr, lvs));
-
-            return [trace, lvs.length === 1 ? lvs[0] : lvs];
-        }
-
-        if (expr instanceof sol.IndexAccess) {
+            res = lvs.length === 1 ? lvs[0] : lvs
+        } else if (expr instanceof sol.IndexAccess) {
             this.expect(
                 expr.vIndexExpression !== undefined,
                 `Missing index expression in ${expr.print()}`
             );
 
-            let [baseTrace, baseLV] = this.evalLV(expr.vBaseExpression, state);
+            let baseLV = this.evalLV(expr.vBaseExpression, state);
             // Note that the index expression of an LValue is not itself an LValue so we eval it.
-            const [idxTrace, indexVal] = this.eval(expr.vIndexExpression, state);
+            const indexVal = this.evalNP(expr.vIndexExpression, state);
 
             this.expect(
                 baseLV instanceof View,
@@ -585,19 +629,19 @@ export class Interpreter {
                 baseLV = this.deref(baseLV, state);
             }
 
-            let res: LValue | DecodingFailure;
+            let idxView: LValue | DecodingFailure
 
             if (isArrayLikeView(baseLV)) {
                 this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
 
                 if (isArrayLikeMemView(baseLV)) {
-                    res = baseLV.indexView(indexVal, state.memory);
+                    idxView = baseLV.indexView(indexVal, state.memory);
                 } else if (isArrayLikeCalldataView(baseLV)) {
-                    res = baseLV.indexView(indexVal, getMsg(state));
+                    idxView = baseLV.indexView(indexVal, getMsg(state));
                 } else if (isArrayLikeStorageView(baseLV)) {
-                    res = baseLV.indexView(indexVal, state.storage);
+                    idxView = baseLV.indexView(indexVal, state.storage);
                 } else if (baseLV instanceof ArrayLikeLocalView) {
-                    res = baseLV.indexView(indexVal);
+                    idxView = baseLV.indexView(indexVal);
                 } else {
                     nyi(`Unkown ArrayLikeView ${baseLV.constructor.name}`);
                 }
@@ -605,16 +649,13 @@ export class Interpreter {
                 nyi(`Index access base ${ppLValue(baseLV)}`);
             }
 
-            if (res instanceof DecodingFailure) {
-                throw new InterpError(`Failed decoding index LValue in ${expr.print()}`);
+            if (idxView instanceof DecodingFailure) {
+                this.runtimeError(OOB, `Failed decoding index LValue`);
             }
 
-
-            return [[...baseTrace, ...idxTrace, new EvalStep(expr, res)], res];
-        }
-
-        if (expr instanceof sol.MemberAccess) {
-            let [baseTrace, baseLV] = this.evalLV(expr.vExpression, state);
+            res = idxView;
+        } else if (expr instanceof sol.MemberAccess) {
+            let baseLV = this.evalLV(expr.vExpression, state);
             this.expect(
                 baseLV instanceof View,
                 `Expected IndexAccess LValue ${expr.print()} to evaluate to a view, not ${baseLV}`
@@ -631,13 +672,18 @@ export class Interpreter {
                     `No field ${expr.memberName} found on base ${baseLV.pp()}`
                 );
 
-                baseTrace.push(new EvalStep(expr, fieldView))
-                return [baseTrace, fieldView]
+                res = fieldView
+            } else {
+                nyi(`evalLV(${printNode(expr)})`)
             }
-
-            nyi(``)
+        } else {
+            nyi(`evalLV(${expr.print()})`);
         }
-        nyi(`evalLV(${expr.print()})`);
+
+        this._trace.push(new EvalStep(expr, res))
+        this.nodes.pop();
+
+        return res;
     }
 
     assign(lvalue: LValue, rvalue: Value, state: State): void {
@@ -663,7 +709,7 @@ export class Interpreter {
             if (lvalue instanceof BaseMemoryView) {
                 lvalue.encode(complexRVal, state.memory, state.allocator);
             } else {
-                (lvalue as BaseStorageView<BaseValue, sol.TypeNode>).encode(complexRVal, state.storage);
+                state.storage = (lvalue as BaseStorageView<BaseValue, sol.TypeNode>).encode(complexRVal, state.storage);
             }
 
             return;
@@ -716,12 +762,9 @@ export class Interpreter {
         }
     }
 
-    evalAssignment(expr: sol.Assignment, state: State): [Trace, Value] {
-        let rtrace;
-        let rvalue;
-
-        [rtrace, rvalue] = this.eval(expr.vRightHandSide, state);
-        const [ltrace, lv] = this.evalLV(expr.vLeftHandSide, state);
+    evalAssignment(expr: sol.Assignment, state: State): Value {
+        let rvalue = this.evalNP(expr.vRightHandSide, state);
+        const lv = this.evalLV(expr.vLeftHandSide, state);
 
         // @todo handle coercions
         // @todo handle memory to storage copy
@@ -736,13 +779,12 @@ export class Interpreter {
             // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
 
             rvalue = this.computeBinary(
-                expr,
                 lVal,
                 op,
                 rvalue,
                 lType,
                 undefined,
-                this.isUnchecked(expr, state)
+                this.isUnchecked(expr, state),
             );
             this.assign(lv, rvalue, state);
         } else {
@@ -750,34 +792,32 @@ export class Interpreter {
         }
 
         // @todo do we return lvalue or rvalue here?
-        return [[...rtrace, ...ltrace], rvalue];
+        return rvalue;
     }
 
     private clamp(
-        expr: sol.Expression,
         val: bigint,
         type: sol.TypeNode,
-        unchecked: boolean
+        unchecked: boolean,
     ): bigint {
         const clampedVal = type instanceof sol.IntType ? sol.clampIntToType(val, type) : val;
         const overflow = clampedVal !== val;
 
         if (overflow && !unchecked) {
-            throw new Overflow(expr);
+            this.runtimeError(Overflow, ``)
         }
 
         return clampedVal;
     }
 
     private computeBinary(
-        expr: sol.Expression,
         left: Value,
         operator: string,
         right: Value,
         type: sol.TypeNode,
         userFunction: sol.FunctionDefinition | undefined,
-        unchecked: boolean
-    ): Value {
+        unchecked: boolean,
+    ): NonPoisonValue {
         // @todo - need to detect
         if (userFunction) {
             nyi("User-defined operators");
@@ -859,7 +899,7 @@ export class Interpreter {
                 nyi(`Unknown arithmetic operator ${operator}`);
             }
 
-            return this.clamp(expr, res, type, unchecked);
+            return this.clamp(res, type, unchecked);
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
@@ -891,48 +931,43 @@ export class Interpreter {
         nyi(`${left} ${operator} ${right}`);
     }
 
-    evalBinaryOperation(expr: sol.BinaryOperation, state: State): [Trace, Value] {
+    evalBinaryOperation(expr: sol.BinaryOperation, state: State): Value {
         // Note: RHS evaluates first.
-        const [rTrace, rVal] = this.eval(expr.vRightExpression, state);
-        const [lTrace, lVal] = this.eval(expr.vLeftExpression, state);
+        const rVal = this.evalNP(expr.vRightExpression, state);
+        const lVal = this.evalNP(expr.vLeftExpression, state);
 
-        const res = this.computeBinary(
-            expr,
+        return this.computeBinary(
             lVal,
             expr.operator,
             rVal,
             this.typeof(expr, state),
             expr.vUserFunction,
-            this.isUnchecked(expr, state)
+            this.isUnchecked(expr, state),
         );
-
-        return [[...rTrace, ...lTrace], res];
     }
 
-    evalConditional(expr: sol.Conditional, state: State): [Trace, Value] {
-        const [cTrace, cVal] = this.eval(expr.vCondition, state);
+    evalConditional(expr: sol.Conditional, state: State): Value {
+        const cVal = this.evalT(expr.vCondition, Boolean, state);
 
         this.expect(typeof cVal === "boolean", `Condition expected a boolean`);
 
-        const [bTrace, bVal] = this.eval(
+        return this.eval(
             cVal ? expr.vTrueExpression : expr.vFalseExpression,
             state
         );
-
-        return [[...cTrace, bTrace], bVal];
     }
 
     evalElementaryTypeNameExpression(
         expr: sol.ElementaryTypeNameExpression,
         state: State
-    ): [Trace, Value] {
+    ): Value {
         nyi("");
     }
 
     /**
      * Type conversion is complex and changes with language versions.
      */
-    evalTypeConversion(expr: sol.FunctionCall, state: State): [Trace, Value] {
+    evalTypeConversion(expr: sol.FunctionCall, state: State): Value {
         const infer = this.infer(state);
         this.expect(expr.vArguments.length === 1, `Type conversion expects a single argument`);
         const calleeT = infer.typeOf(expr.vExpression);
@@ -944,7 +979,7 @@ export class Interpreter {
         const fromT = infer.typeOf(expr.vArguments[0]);
         const toT = calleeT.type;
 
-        const [fromTrace, fromV] = this.eval(expr.vArguments[0], state);
+        const fromV = this.evalNP(expr.vArguments[0], state);
 
         if (fromT instanceof sol.IntType && toT instanceof sol.FixedBytesType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
@@ -957,14 +992,14 @@ export class Interpreter {
             const view = new IntMemView(fromT, 0n);
             view.encode(fromV, scratchWord);
 
-            return [fromTrace, scratchWord.slice(32 - toT.size, 32)];
+            return scratchWord.slice(32 - toT.size, 32);
         }
 
         if (fromT instanceof sol.IntLiteralType && toT instanceof sol.IntType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
             // In Solidity <0.8.0 coercing int literals that didn't fit resulted in silent overflow.
             // In >0.8.0 its a type error, so we shouldn't encouter it.
-            return [fromTrace, this.clamp(expr, fromV, toT, lt(state.version, "0.8.0"))];
+            return this.clamp(fromV, toT, lt(state.version, "0.8.0"));
         }
 
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
@@ -979,7 +1014,7 @@ export class Interpreter {
      * @param expr 
      * @param state 
      */
-    evalStructConstructorCall(expr: sol.FunctionCall, state: State): [Trace, Value] {
+    evalStructConstructorCall(expr: sol.FunctionCall, state: State): Value {
         const infer = this.infer(state);
         const calleeT = infer.typeOf(expr.vExpression);
 
@@ -994,14 +1029,11 @@ export class Interpreter {
         const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
         const structView = new StructMemView(structT, state.allocator.alloc(PointerMemView.allocSize(undefined, structT)))
 
-        const trace: Trace = [];
         const fieldMap = new Map<string, Value>();
 
         // Note we must evalute the arguments in order to get the correct  trace
         for (let i = 0; i < expr.vArguments.length; i++) {
-            const [argTrace, argVal] = this.eval(expr.vArguments[i], state);
-            trace.push(...argTrace);
-
+            const argVal = this.evalNP(expr.vArguments[i], state);
             fieldMap.set(expr.fieldNames[i], argVal);
         }
 
@@ -1013,10 +1045,10 @@ export class Interpreter {
             this.assign(fieldView, fieldVal, state)
         }
 
-        return [trace, structView]
+        return structView
     }
 
-    evalNewCall(expr: sol.FunctionCall, state: State): [Trace, Value] {
+    evalNewCall(expr: sol.FunctionCall, state: State): Value {
         nyi("");
     }
 
@@ -1031,7 +1063,7 @@ export class Interpreter {
         return expr;
     }
 
-    evalFunctionCall(expr: sol.FunctionCall, state: State): [Trace, Value] {
+    evalFunctionCall(expr: sol.FunctionCall, state: State): Value {
         if (expr.kind === sol.FunctionCallKind.TypeConversion) {
             return this.evalTypeConversion(expr, state);
         }
@@ -1049,44 +1081,38 @@ export class Interpreter {
             return this.evalNewCall(expr, state);
         }
 
-        const trace: Trace = [];
-        const [calleeTrace, callee] = this.eval(expr.vExpression, state);
-        trace.push(...calleeTrace);
-
-        const args: Value[] = [];
-
-        for (const argExpr of expr.vArguments) {
-            const [argTrace, argVal] = this.eval(argExpr, state);
-            trace.push(...argTrace);
-            args.push(argVal);
-        }
+        const callee = this.evalNP(expr.vExpression, state);
+        const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state))
 
         if (callee instanceof BuiltinFunction) {
-            return [trace, callee.call(state, args)];
+            return callee.call(this, state, args);
         }
 
         nyi(`Function call ${expr.print()}`);
     }
 
-    evalIdentifier(expr: sol.Identifier, state: State): [Trace, Value] {
+    evalIdentifier(expr: sol.Identifier, state: State): Value {
         if (!state.scope) {
-            throw new NoScope();
+            this.fail(NoScope, ``);
         }
 
-        return [[], state.scope.lookup(expr.name)];
+        const res = state.scope.lookup(expr.name);
+
+        if (res === undefined) {
+            this.fail(NotDefined, ``)
+        }
+
+        return res;
     }
 
-    evalIndexAccess(expr: sol.IndexAccess, state: State): [Trace, Value] {
+    evalIndexAccess(expr: sol.IndexAccess, state: State): Value {
         this.expect(expr.vIndexExpression !== undefined, `Mising index expression in eval`);
         const infer = this.infer(state);
 
         const baseT = infer.typeOf(expr.vBaseExpression);
 
-        const baseRes = this.eval(expr.vBaseExpression, state);
-        const baseTrace = baseRes[0];
-        let baseVal = baseRes[1];
-
-        const [indexTrace, indexVal] = this.eval(expr.vIndexExpression, state);
+        let baseVal = this.evalNP(expr.vBaseExpression, state);
+        const indexVal = this.evalNP(expr.vIndexExpression, state);
 
         let res: Value;
 
@@ -1106,6 +1132,11 @@ export class Interpreter {
                 nyi(`Array like view ${baseVal.constructor.name}`);
             }
 
+            // @todo make this condition more specific by adding an OoB subclass of DecodingFailure in sol-dbg
+            if (res instanceof Poison) {
+                throw new OOB(expr, this._trace);
+            }
+
             res = this.lvToValue(res, state);
         } else if (baseVal instanceof Uint8Array) {
             this.expect(typeof indexVal === "bigint", `Expected a bigint for index`);
@@ -1115,7 +1146,7 @@ export class Interpreter {
             );
 
             if (indexVal < 0n || indexVal >= baseT.size) {
-                throw new OOB(expr);
+                this.runtimeError(OOB, ``)
             }
 
             res = BigInt(baseVal[Number(indexVal)]);
@@ -1124,24 +1155,24 @@ export class Interpreter {
         }
 
         if (res instanceof DecodingFailure) {
-            throw new OOB(expr);
+            this.runtimeError(OOB, ``)
         }
 
         // @todo add test for order of operations
-        return [[...baseTrace, ...indexTrace], res];
+        return res;
     }
 
-    evalIndexRangeAccess(expr: sol.IndexRangeAccess, state: State): [Trace, Value] {
+    evalIndexRangeAccess(expr: sol.IndexRangeAccess, state: State): Value {
         nyi("");
     }
 
-    evalLiteral(expr: sol.Literal, state: State): [Trace, Value] {
+    evalLiteral(expr: sol.Literal, state: State): Value {
         if (expr.kind === sol.LiteralKind.Number) {
-            return [[], BigInt(expr.value)];
+            return BigInt(expr.value);
         }
 
         if (expr.kind === sol.LiteralKind.Bool) {
-            return [[], expr.value === "true"];
+            return expr.value === "true";
         }
 
         this.expect(
@@ -1152,14 +1183,11 @@ export class Interpreter {
 
         const view = state.constantsMap.get(expr.id);
         this.expect(view !== undefined, `Missing string/bytes literal`);
-        return [[], view];
+        return view;
     }
 
-    evalMemberAccess(expr: sol.MemberAccess, state: State): [Trace, Value] {
-        let baseTrace: Trace;
-        let baseVal: Value;
-
-        [baseTrace, baseVal] = this.eval(expr.vExpression, state);
+    evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
+        let baseVal = this.evalNP(expr.vExpression, state);
 
         if (isPointerView(baseVal)) {
             baseVal = this.deref(baseVal, state);
@@ -1175,45 +1203,36 @@ export class Interpreter {
                 !(fieldView instanceof DecodingFailure),
                 `Unknown field ${expr.memberName}`
             );
-            return [baseTrace, this.lvToValue(fieldView, state)];
+            return this.lvToValue(fieldView, state);
         }
 
         if (baseVal instanceof BuiltinStruct) {
             const field = baseVal.fields.filter(([name]) => name === expr.memberName);
             this.expect(field.length === 1, `Unknown field ${expr.memberName}`);
-            return [baseTrace, field[0][1]];
+            return field[0][1];
         }
 
         nyi(`Member access of ${expr.memberName} in ${baseVal}`);
     }
 
-    evalTupleExpression(expr: sol.TupleExpression, state: State): [Trace, Value] {
-        const trace: Trace = [];
-        const compVals: Value[] = [];
-        for (const comp of expr.vComponents) {
-            if (comp === null) {
-                compVals.push(none);
-            } else {
-                const [t, v] = this.eval(comp, state);
-                trace.push(...t);
-                compVals.push(v);
-            }
-        }
+    evalTupleExpression(expr: sol.TupleExpression, state: State): Value {
+        // A copmonent here may be an empty tuple, so we use allow poison in non-null components
+        const compVals: Value[] = expr.vOriginalComponents.map((comp) => comp === null ? none : this.eval(comp, state))
 
         if (compVals.length === 0) {
-            return [trace, none];
+            return none;
         }
 
         if (compVals.length === 1) {
-            return [trace, compVals[0]];
+            return compVals[0];
         }
 
-        return [trace, compVals];
+        return compVals;
     }
 
     expect(b: boolean, msg?: string): asserts b {
         if (!b) {
-            throw new InterpError(msg ? msg : ``);
+            this.fail(InternalError, msg ? msg : ``)
         }
     }
 
@@ -1283,15 +1302,14 @@ export class Interpreter {
         nyi(`LValue: ${lv}`);
     }
 
-    evalUnaryOperation(expr: sol.UnaryOperation, state: State): [Trace, Value] {
+    evalUnaryOperation(expr: sol.UnaryOperation, state: State): Value {
         if (expr.vUserFunction) {
             nyi(`Unary user functions`);
         }
 
         if (expr.operator === "!") {
-            const [trace, subVal] = this.eval(expr.vSubExpression, state);
-            this.expect(typeof subVal === "boolean", `Unexpected value ${subVal} for unary !`);
-            return [trace, !subVal];
+            const subVal = this.evalT(expr.vSubExpression, Boolean, state);
+            return !subVal;
         }
 
         // In all other cases the result is bigint
@@ -1303,7 +1321,7 @@ export class Interpreter {
         // eval the subexpression as an LV. We can't evaluate it multiple times, as that may
         // duplicate state changes.
         if (expr.operator === "++" || expr.operator == "--") {
-            const [trace, subExprLoc] = this.evalLV(expr.vSubExpression, state);
+            const subExprLoc = this.evalLV(expr.vSubExpression, state);
             const subVal = this.lvToValue(subExprLoc, state);
             this.expect(typeof subVal === "bigint", `Unexpected value ${subVal} for unary ~`);
             this.expect(state.scope !== undefined, `Need scope for ${expr.operator}`);
@@ -1312,22 +1330,20 @@ export class Interpreter {
             this.assign(subExprLoc, newVal, state);
             res = expr.prefix ? newVal : subVal;
 
-            return [trace, res];
+            return res;
         }
 
-        const [trace, subVal] = this.eval(expr.vSubExpression, state);
+        const subVal = this.evalT(expr.vSubExpression, BigInt, state);
 
         if (expr.operator === "-") {
-            this.expect(typeof subVal === "bigint", `Unexpected value ${subVal} for unary -`);
             res = -subVal;
         } else if (expr.operator === "~") {
-            this.expect(typeof subVal === "bigint", `Unexpected value ${subVal} for unary ~`);
             res = ~subVal;
         } else {
             // @todo implement ++, --, delete
             nyi(`Unary operator ${expr.operator}`);
         }
 
-        return [trace, this.clamp(expr, res, t, unchecked)];
+        return this.clamp(res, t, unchecked);
     }
 }
