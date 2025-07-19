@@ -17,6 +17,7 @@ import { DefaultAllocator } from "sol-dbg/dist/debug/decoding/memory/allocator";
 import { assertBuiltin, encodeConstants } from "../../src";
 import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
+import { gt } from "semver";
 
 export const worldMock: WorldInterface = {
     create: function (): Promise<CallResult> {
@@ -112,6 +113,7 @@ export function encodeMemArgs(args: Array<[string, Value]>, state: State): Inter
 
     for (const [name, val] of args) {
         const view = (state.scope as BaseScope).lookupLocation(name);
+        sol.assert(view !== undefined, ``);
         if (isValueType(view.type)) {
             res.push(val as PrimitiveValue);
         } else {
@@ -142,7 +144,7 @@ export type SampleMap = Map<string, SampleInfo>;
 
 export async function loadSamples(names: string[]): Promise<[ArtifactManager, SampleMap]> {
     const res: SampleMap = new Map();
-    const compileResults: [PartialSolcOutput, string][] = [];
+    const compileResults: Array<[PartialSolcOutput, string]> = [];
     for (const fileName of names) {
         const file = fse.readFileSync(`test/samples/${fileName}`, {
             encoding: "utf-8"
@@ -154,7 +156,7 @@ export async function loadSamples(names: string[]): Promise<[ArtifactManager, Sa
             version,
             undefined,
             undefined,
-            { viaIR: true }
+            gt(version, "0.8.0") ? { viaIR: true } : undefined
         );
         compileResults.push([compileResult.data, version]);
     }

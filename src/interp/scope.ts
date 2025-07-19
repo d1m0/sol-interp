@@ -1,8 +1,13 @@
 import * as sol from "solc-typed-ast";
-import { NotDefined } from "./exceptions";
 import { Value } from "./value";
 import { State } from "./state";
-import { ExpStructType, getContractLayoutType, View } from "sol-dbg";
+import {
+    ExpStructType,
+    getContractLayoutType,
+    PointerStorageView,
+    simplifyType,
+    View
+} from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
@@ -40,7 +45,7 @@ export abstract class BaseScope {
     abstract _lookupLocation(name: string): View | undefined;
     abstract _set(name: string, val: Value): void;
 
-    lookup(name: string): Value {
+    lookup(name: string): Value | undefined {
         let v;
 
         if (this.knownIds.has(name)) {
@@ -49,24 +54,16 @@ export abstract class BaseScope {
             v = this._next ? this._next.lookup(name) : undefined;
         }
 
-        if (v === undefined) {
-            throw new NotDefined(name);
-        }
-
         return v;
     }
 
-    lookupLocation(name: string): View {
+    lookupLocation(name: string): View | undefined {
         let v;
 
         if (this.knownIds.has(name)) {
             v = this._lookupLocation(name);
         } else {
             v = this._next ? this._next.lookupLocation(name) : undefined;
-        }
-
-        if (v === undefined) {
-            throw new NotDefined(name);
         }
 
         return v;
@@ -79,7 +76,7 @@ export abstract class BaseScope {
         }
 
         if (this._next === undefined) {
-            throw new NotDefined(name);
+            return;
         }
 
         this._next.set(name, val);
@@ -120,7 +117,14 @@ export class LocalsScope extends BaseScope {
                 for (const stmt of node.vStatements) {
                     if (stmt instanceof sol.VariableDeclarationStatement) {
                         for (const decl of stmt.vDeclarations) {
-                            res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
+                            res.set(
+                                decl.name,
+                                simplifyType(
+                                    infer.variableDeclarationToTypeNode(decl),
+                                    infer,
+                                    sol.DataLocation.Memory
+                                )
+                            );
                         }
                     }
                 }
@@ -134,21 +138,37 @@ export class LocalsScope extends BaseScope {
                 // In solidity >= 0.5.0 each local variable has a scope starting at its declaration
                 // Also if this is the initialization stmt of a for loop, its its own scope
                 for (const decl of node.vDeclarations) {
-                    res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
+                    res.set(
+                        decl.name,
+                        simplifyType(
+                            infer.variableDeclarationToTypeNode(decl),
+                            infer,
+                            sol.DataLocation.Memory
+                        )
+                    );
                 }
             }
         } else if (node instanceof sol.FunctionDefinition) {
             for (const decl of node.vParameters.vParameters) {
-                res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
+                res.set(
+                    decl.name,
+                    simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
             }
 
             for (let i = 0; i < node.vReturnParameters.vParameters.length; i++) {
                 const decl = node.vReturnParameters.vParameters[i];
-                res.set(LocalsScope.returnName(decl, i), infer.variableDeclarationToTypeNode(decl));
+                res.set(
+                    LocalsScope.returnName(decl, i),
+                    simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
             }
         } else if (node instanceof sol.ModifierDefinition) {
             for (const decl of node.vParameters.vParameters) {
-                res.set(decl.name, infer.variableDeclarationToTypeNode(decl));
+                res.set(
+                    decl.name,
+                    simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
             }
         }
 
@@ -267,8 +287,9 @@ export class ContractScope extends BaseScope {
 
     _lookup(name: string): Value | undefined {
         const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
-        if (view.type instanceof sol.PointerType) {
-            return view;
+
+        if (view instanceof PointerStorageView) {
+            return view.toView();
         }
 
         return view.decode(this.state.storage);

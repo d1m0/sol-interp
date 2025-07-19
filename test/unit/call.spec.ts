@@ -2,7 +2,7 @@ import { View, Value, zip } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
-import { Assert } from "../../src/interp/exceptions";
+import { Assert, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
 
 type ExceptionConstructors = typeof Assert;
@@ -48,7 +48,33 @@ const samples: Array<
     ["fors_v04.sol", "ForLoops", "forStatementLoopInitializationOnly", [], [], []],
     ["fors_v04.sol", "ForLoops", "forStatementEmpty", [], [], []],
     ["fors_v04.sol", "ForLoops", "forStatementWithLoopControlStatements", [], [], []],
-    ["fors_v04.sol", "ForLoops", "forStatementwithTernaryInHeader", [], [], []]
+    ["fors_v04.sol", "ForLoops", "forStatementwithTernaryInHeader", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "primitiveValuesDontAlias", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "arrays", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "nestedArrays", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "structs", [], [], []],
+    [
+        "MemoryAliasing.sol",
+        "MemoryAliasing",
+        "arraysInMemoryStructs",
+        [],
+        [],
+        [
+            [42n, 80n, 3n, 4n],
+            [42n, 80n, 3n, 4n]
+        ]
+    ],
+    ["MemoryAliasing.sol", "MemoryAliasing", "structInMemoryStructs", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "structsInMemoryArrays", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "structReAssignment", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "structReAssignmentFromStorage", [], [], []],
+    ["MemoryAliasing.sol", "MemoryAliasing", "localMemArrayLitInit", [], [], []],
+    ["StorageAliasing.sol", "StorageAliasing", "arrays", [], [], []],
+    ["StorageAliasing.sol", "StorageAliasing", "arraysInStructs", [], [], []],
+    ["StorageAliasing.sol", "StorageAliasing", "maps", [], [], []],
+    ["StorageAliasing.sol", "StorageAliasing", "structInStructCopy", [], [], []],
+    ["InMemoryStructWithMapping.sol", "Test", "verify", [], [], []],
+    ["InMemoryStructWithMapping.sol", "Test", "verifyMapArr", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
@@ -77,13 +103,22 @@ describe("Simple function call tests", () => {
             );
             if (expectedReturns instanceof Array) {
                 try {
-                    let [, returns] = interp.callInternal(fun, encodeMemArgs(args, state), state);
-                    returns = returns.map((ret) =>
-                        ret instanceof View ? interp.lvToValue(ret, state) : ret
+                    const returns = interp.callInternal(fun, encodeMemArgs(args, state), state);
+                    const decodedReturns = returns.map((ret) =>
+                        ret instanceof View ? interp.decode(ret, state) : ret
                     );
-                    expect(returns).toEqual(expectedReturns);
+                    expect(decodedReturns).toEqual(expectedReturns);
                 } catch (e) {
-                    console.error(`Unexpected exception ${e}`);
+                    if (e instanceof InterpError) {
+                        //console.error(`Trace: ${ppTrace(e.trace)}`);
+                        //console.error(`Memory: ${ppMem(state.memory)}`)
+                        console.error(
+                            `Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e}`
+                        );
+                    } else {
+                        // console.error(`Trace: ${ppTrace(interp.trace)}`);
+                        console.error(`Unexpected unrelated exception ${e} ${(e as Error).stack}`);
+                    }
                     expect(false).toBeTruthy();
                 }
             } else {

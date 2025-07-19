@@ -1,9 +1,28 @@
-import { makeMemoryView, nyi, PointerMemView, ZERO_ADDRESS } from "sol-dbg";
+import {
+    bigIntToNum,
+    ExpStructType,
+    makeMemoryView,
+    nyi,
+    PointerMemView,
+    PrimitiveValue,
+    Struct,
+    ZERO_ADDRESS,
+    Value as BaseValue,
+    StructView,
+    StructMemView,
+    StructCalldataView,
+    StructStorageView,
+    View,
+    BaseMemoryView,
+    BaseCalldataView,
+    BaseStorageView
+} from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { none, Value } from "./value";
+import { none } from "./value";
 import { SolMessage, State } from "./state";
+import { BaseLocalView } from "./view";
 
-export function makeZeroValue(t: sol.TypeNode, state: State): Value {
+export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
     if (t instanceof sol.IntType) {
         return 0n;
     }
@@ -22,12 +41,34 @@ export function makeZeroValue(t: sol.TypeNode, state: State): Value {
 
     if (t instanceof sol.PointerType) {
         if (t.location === sol.DataLocation.Memory) {
-            // Reference types in memory with statically known size get auto-allocated
-            const staticSize = PointerMemView.staticTypeAllocSize(t);
-            if (staticSize !== undefined) {
-                const address = state.allocator.alloc(staticSize);
-                return makeMemoryView(t.to, address);
+            let zeroValue: BaseValue;
+
+            if (t.to instanceof sol.ArrayType) {
+                const len = t.to.size !== undefined ? bigIntToNum(t.to.size) : 0;
+                zeroValue = [];
+
+                for (let i = 0; i < len; i++) {
+                    zeroValue.push(makeZeroValue(t.to.elementT, state));
+                }
+            } else if (t.to instanceof sol.BytesType) {
+                zeroValue = new Uint8Array();
+            } else if (t.to instanceof sol.StringType) {
+                zeroValue = "";
+            } else if (t.to instanceof ExpStructType) {
+                const fieldVals: Array<[string, PrimitiveValue]> = [];
+                for (const [fieldName, fieldT] of t.to.fields) {
+                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
+                }
+                zeroValue = new Struct(fieldVals);
+            } else {
+                nyi(`makeZeroValue of memory pointer type ${t.pp()}`);
             }
+
+            const addr = state.allocator.alloc(PointerMemView.allocSize(zeroValue, t.to));
+            const res = makeMemoryView(t.to, addr);
+            res.encode(zeroValue, state.memory, state.allocator);
+
+            return res;
         }
 
         // In all other pointer case initialize with poison
@@ -46,6 +87,7 @@ export function getMsg(state: State): Uint8Array {
     return topExtFrame(state).data;
 }
 
+// @todo move to solc-typed-ast
 export function isValueType(type: sol.TypeNode): boolean {
     return (
         type instanceof sol.IntType ||
@@ -60,6 +102,17 @@ export function isValueType(type: sol.TypeNode): boolean {
     );
 }
 
+//@todo move to sol-dbg
+export function isStructView(
+    v: any
+): v is StructView<any, View<any, BaseValue, any, sol.TypeNode>> {
+    return (
+        v instanceof StructMemView ||
+        v instanceof StructCalldataView ||
+        v instanceof StructStorageView
+    );
+}
+
 // Hardcoded version good enough for debugging here.
 const writer = new sol.ASTWriter(
     sol.DefaultASTWriterMapping,
@@ -71,5 +124,61 @@ export function printNode(n: sol.ASTNode): string {
     return writer.write(n);
 }
 
+export function getViewLocation(v: View): sol.DataLocation | "local" {
+    if (v instanceof BaseMemoryView) {
+        return sol.DataLocation.Memory;
+    }
+
+    if (v instanceof BaseCalldataView) {
+        return sol.DataLocation.CallData;
+    }
+
+    if (v instanceof BaseStorageView) {
+        return sol.DataLocation.Storage;
+    }
+
+    if (v instanceof BaseLocalView) {
+        return "local";
+    }
+
+    nyi(`View type ${v.pp()}`);
+}
+
 export const stringT = new sol.StringType();
 export const bytesT = new sol.BytesType();
+
+/**
+ * Recursively change the location of all pointer in `type` to `loc`.
+ * This duplicates code in `solc-typed-ast` because it needs to handle `ExpStructType`
+ */
+export function changeLocTo(type: sol.TypeNode, loc: sol.DataLocation): sol.TypeNode {
+    if (type instanceof sol.PointerType) {
+        return new sol.PointerType(changeLocTo(type.to, loc), loc);
+    }
+
+    if (type instanceof sol.ArrayType) {
+        return new sol.ArrayType(changeLocTo(type.elementT, loc), type.size);
+    }
+
+    if (type instanceof sol.MappingType) {
+        const genearlKeyT = changeLocTo(type.keyType, loc);
+        const newValueT = changeLocTo(type.valueType, loc);
+
+        return new sol.MappingType(genearlKeyT, newValueT);
+    }
+
+    if (type instanceof sol.TupleType) {
+        return new sol.TupleType(
+            type.elements.map((elT) => (elT === null ? null : changeLocTo(elT, loc)))
+        );
+    }
+
+    if (type instanceof ExpStructType) {
+        return new ExpStructType(
+            type.name,
+            type.fields.map(([name, type]) => [name, changeLocTo(type, loc)])
+        );
+    }
+
+    return type;
+}
