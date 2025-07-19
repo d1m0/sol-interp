@@ -23,7 +23,14 @@ import {
     ExpStructType,
     makeMemoryView,
     bigIntToNum,
-    ArrayMemView
+    ArrayMemView,
+    MapStorageView,
+    StringMemView,
+    BytesMemView,
+    StringCalldataView,
+    BytesCalldataView,
+    StringStorageView,
+    BytesStorageView
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -64,6 +71,25 @@ enum ControlFlow {
 }
 
 const scratchWord = new Uint8Array(32);
+
+/**
+ * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
+ */
+export function skipFieldDueToMap(t: sol.TypeNode): boolean {
+    if (t instanceof sol.MappingType) {
+        return true;
+    }
+
+    if (t instanceof sol.PointerType) {
+        return skipFieldDueToMap(t.to);
+    }
+
+    if (t instanceof sol.ArrayType) {
+        return skipFieldDueToMap(t.elementT);
+    }
+
+    return false;
+}
 
 /**
  * Solidity Interpeter class. Includes the following entrypoint
@@ -668,6 +694,12 @@ export class Interpreter {
                 } else {
                     nyi(`Unkown ArrayLikeView ${baseLV.constructor.name}`);
                 }
+            } else if (baseLV instanceof MapStorageView) {
+                const key =
+                    indexVal instanceof View
+                        ? this.decode(indexVal, state)
+                        : (indexVal as PrimitiveValue);
+                idxView = baseLV.indexView(key);
             } else {
                 nyi(`Index access base ${ppLValue(baseLV)}`);
             }
@@ -709,7 +741,11 @@ export class Interpreter {
         return res;
     }
 
-    getTempMem(type: sol.TypeNode, state: State, valToHold: BaseValue | undefined): BaseMemoryView<BaseValue, sol.TypeNode> {
+    getTempMem(
+        type: sol.TypeNode,
+        state: State,
+        valToHold: BaseValue | undefined
+    ): BaseMemoryView<BaseValue, sol.TypeNode> {
         const size = PointerMemView.allocSize(valToHold, type);
         const addr = state.allocator.alloc(size);
         return makeMemoryView(type, addr);
@@ -1028,7 +1064,58 @@ export class Interpreter {
             return this.clamp(fromV, toT, lt(state.version, "0.8.0"));
         }
 
+        // string ptr -> bytes
+        if (
+            fromT instanceof sol.PointerType &&
+            fromT.to instanceof sol.StringType &&
+            toT instanceof sol.BytesType
+        ) {
+            this.expect(fromV instanceof View && fromV.type instanceof sol.StringType, ``);
+            if (fromV instanceof StringMemView) {
+                return new BytesMemView(new sol.BytesType(), fromV.offset);
+            } else if (fromV instanceof StringCalldataView) {
+                return new BytesCalldataView(new sol.BytesType(), fromV.offset, fromV.base);
+            } else if (fromV instanceof StringStorageView) {
+                return new BytesStorageView(new sol.BytesType(), [
+                    fromV.key,
+                    fromV.endOffsetInWord
+                ]);
+            }
+        }
+
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
+    }
+
+    detectStructFieldExprs(
+        expr: sol.FunctionCall,
+        struct: ExpStructType
+    ): Array<[string, sol.Expression]> {
+        const res: Array<[string, sol.Expression]> = [];
+
+        if (expr.fieldNames !== undefined) {
+            this.expect(
+                expr.fieldNames.length === expr.vArguments.length,
+                `Mismatch in fieldNames and arguments`
+            );
+        }
+
+        for (let i = 0, j = 0; i < expr.vArguments.length; i++) {
+            let fieldName;
+
+            if (expr.fieldNames !== undefined) {
+                fieldName = expr.fieldNames[i];
+            } else {
+                let fieldT: sol.TypeNode;
+
+                do {
+                    [fieldName, fieldT] = struct.fields[j++];
+                } while (skipFieldDueToMap(fieldT));
+            }
+
+            res.push([fieldName, expr.vArguments[i]]);
+        }
+
+        return res;
     }
 
     /**
@@ -1050,20 +1137,24 @@ export class Interpreter {
                 calleeT.type.definition instanceof sol.StructDefinition,
             `Expected UserDefinedTypeName not ${calleeT.pp()}`
         );
-        this.expect(expr.fieldNames !== undefined, `Should have fieldNames defined`);
 
         const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
         const structView = this.getTempMem(structT, state, undefined) as StructMemView;
 
+        const fieldExprs = this.detectStructFieldExprs(expr, structT);
         const fieldMap = new Map<string, Value>();
 
         // Note we must evalute the arguments in order to get the correct  trace
-        for (let i = 0; i < expr.vArguments.length; i++) {
-            const argVal = this.evalNP(expr.vArguments[i], state);
-            fieldMap.set(expr.fieldNames[i], argVal);
+        for (const [fieldName, fieldExpr] of fieldExprs) {
+            const argVal = this.evalNP(fieldExpr, state);
+            fieldMap.set(fieldName, argVal);
         }
 
-        for (const [fieldName] of structView.type.fields) {
+        for (const [fieldName, fieldT] of structView.type.fields) {
+            if (skipFieldDueToMap(fieldT)) {
+                continue;
+            }
+
             const fieldView = structView.fieldView(fieldName);
             const fieldVal = fieldMap.get(fieldName);
             this.expect(
@@ -1182,6 +1273,13 @@ export class Interpreter {
             }
 
             res = BigInt(baseVal[Number(indexVal)]);
+        } else if (baseVal instanceof MapStorageView) {
+            const key =
+                indexVal instanceof View
+                    ? this.decode(indexVal, state)
+                    : (indexVal as PrimitiveValue);
+            const idxView = baseVal.indexView(key);
+            res = this.lvToValue(idxView, state);
         } else {
             nyi(`Index access base ${baseVal}`);
         }

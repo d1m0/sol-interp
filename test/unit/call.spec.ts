@@ -72,7 +72,9 @@ const samples: Array<
     ["StorageAliasing.sol", "StorageAliasing", "arrays", [], [], []],
     ["StorageAliasing.sol", "StorageAliasing", "arraysInStructs", [], [], []],
     ["StorageAliasing.sol", "StorageAliasing", "maps", [], [], []],
-    ["StorageAliasing.sol", "StorageAliasing", "structInStructCopy", [], [], []]
+    ["StorageAliasing.sol", "StorageAliasing", "structInStructCopy", [], [], []],
+    ["InMemoryStructWithMapping.sol", "Test", "verify", [], [], []],
+    ["InMemoryStructWithMapping.sol", "Test", "verifyMapArr", [], [], []]
 ];
 
 describe("Simple function call tests", () => {

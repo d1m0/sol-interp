@@ -1,4 +1,4 @@
-import { Struct, Value } from "sol-dbg";
+import { Struct, Value, View } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import { loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
@@ -129,7 +129,12 @@ describe("Eval unit tests", () => {
             const expr = new sol.XPath(contract).query(path)[0] as sol.Expression;
             const state = makeState(expr, sample.version, ...defs);
             expect(expr).toBeDefined();
-            const v = interp.eval(expr, state);
+            let v: any = interp.eval(expr, state);
+
+            if (v instanceof View) {
+                v = interp.decode(v, state);
+            }
+
             expect(v).toEqual(expValue);
         });
     }

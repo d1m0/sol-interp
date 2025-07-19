@@ -17,6 +17,7 @@ import { DefaultAllocator } from "sol-dbg/dist/debug/decoding/memory/allocator";
 import { assertBuiltin, encodeConstants } from "../../src";
 import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
+import { gt } from "semver";
 
 export const worldMock: WorldInterface = {
     create: function (): Promise<CallResult> {
@@ -155,7 +156,7 @@ export async function loadSamples(names: string[]): Promise<[ArtifactManager, Sa
             version,
             undefined,
             undefined,
-            { viaIR: true }
+            gt(version, "0.8.0") ? { viaIR: true } : undefined
         );
         compileResults.push([compileResult.data, version]);
     }

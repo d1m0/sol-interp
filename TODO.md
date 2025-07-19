@@ -83,12 +83,16 @@
 75 - pp the whole trace
 76 - get MemoryAliasing to work
 77 - start StorageAliasing
+78 - fix local copy semantics
+79 - implement maps
+80 - add a test with maps to verify that we check strings by value
+81 - handle missing fieldName(s)
+82 - add test with maps in mem structs and struct constructor
+83 - add test with maps in mem structs and assignments storage->mem, mem->mem, mem->storage
+84 - add ctx to InterpError to allow easier tracing of errors.
 
-- fix local copy semantics
-
-- add test with maps in mem structs and struct constructor
-- add test with maps in mem structs and assignments storage->mem, mem->mem, mem->storage
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
+- add a test with array of maps in a struct and push
 
 - jest debug config
 - fix my lint on save to:
@@ -96,28 +100,23 @@
     - actuall remove unused imports ffs
 
 // ---------------
-
 - add internal calls
 - add evalNew
 - add modifiers
-- add ctx to InterpError to allow easier tracing of errors.
-
-Down the line:
 - more coercions
 - cli for playing
 - plan external calls, try/catch etc...
-    - plan tests
+- add builtins
 
-- add (some?) builtins
 
 - make a pass to remove nyi and todos
-
 - add side-by-side execution test :)
 - refactor this.expect to use template strings like sol.assert as an optimization
 
 Eventually:
     - cleanup nyi()s to 0
     - doc all functions
+    - cleanup @todo-s
     - cli
 
 Writing ideas:
