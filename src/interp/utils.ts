@@ -146,3 +146,39 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
 
 export const stringT = new sol.StringType();
 export const bytesT = new sol.BytesType();
+
+/**
+ * Recursively change the location of all pointer in `type` to `loc`.
+ * This duplicates code in `solc-typed-ast` because it needs to handle `ExpStructType`
+ */
+export function changeLocTo(type: sol.TypeNode, loc: sol.DataLocation): sol.TypeNode {
+    if (type instanceof sol.PointerType) {
+        return new sol.PointerType(changeLocTo(type.to, loc), loc);
+    }
+
+    if (type instanceof sol.ArrayType) {
+        return new sol.ArrayType(changeLocTo(type.elementT, loc), type.size);
+    }
+
+    if (type instanceof sol.MappingType) {
+        const genearlKeyT = changeLocTo(type.keyType, loc);
+        const newValueT = changeLocTo(type.valueType, loc);
+
+        return new sol.MappingType(genearlKeyT, newValueT);
+    }
+
+    if (type instanceof sol.TupleType) {
+        return new sol.TupleType(
+            type.elements.map((elT) => (elT === null ? null : changeLocTo(elT, loc)))
+        );
+    }
+
+    if (type instanceof ExpStructType) {
+        return new ExpStructType(
+            type.name,
+            type.fields.map(([name, type]) => [name, changeLocTo(type, loc)])
+        );
+    }
+
+    return type;
+}

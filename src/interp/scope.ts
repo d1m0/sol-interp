@@ -1,7 +1,13 @@
 import * as sol from "solc-typed-ast";
 import { Value } from "./value";
 import { State } from "./state";
-import { ExpStructType, getContractLayoutType, simplifyType, View } from "sol-dbg";
+import {
+    ExpStructType,
+    getContractLayoutType,
+    PointerStorageView,
+    simplifyType,
+    View
+} from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
@@ -281,8 +287,9 @@ export class ContractScope extends BaseScope {
 
     _lookup(name: string): Value | undefined {
         const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
-        if (view.type instanceof sol.PointerType) {
-            return view;
+
+        if (view instanceof PointerStorageView) {
+            return view.toView();
         }
 
         return view.decode(this.state.storage);

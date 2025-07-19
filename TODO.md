@@ -82,8 +82,9 @@
 74 - add them to InterpError(s)
 75 - pp the whole trace
 76 - get MemoryAliasing to work
+77 - start StorageAliasing
 
-- start StorageAliasing
+- fix local copy semantics
 
 - add test with maps in mem structs and struct constructor
 - add test with maps in mem structs and assignments storage->mem, mem->mem, mem->storage

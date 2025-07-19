@@ -22,6 +22,8 @@ import {
     PrimitiveValue,
     ExpStructType,
     makeMemoryView,
+    bigIntToNum,
+    ArrayMemView
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -42,13 +44,7 @@ import {
 } from "./value";
 import { Address } from "@ethereumjs/util";
 import { BaseScope, LocalsScope } from "./scope";
-import {
-    getMsg,
-    isStructView,
-    isValueType,
-    makeZeroValue,
-    printNode
-} from "./utils";
+import { changeLocTo, getMsg, isStructView, isValueType, makeZeroValue, printNode } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
     BaseLocalView,
@@ -211,7 +207,7 @@ export class Interpreter {
 
     ///*********************STATEMENTS*************************************************
     public exec(stmt: sol.Statement, state: State): ControlFlow {
-        // console.error(`exec: ${printNode(stmt)} mem: ${ppMem(state.memory)}`)
+        // console.error(`exec: ${printNode(stmt)}`)
         let res: ControlFlow;
 
         this.nodes.push(stmt);
@@ -274,8 +270,8 @@ export class Interpreter {
 
             varInitialVals =
                 stmt.vInitialValue instanceof sol.TupleExpression &&
-                    stmt.vInitialValue.vOriginalComponents.length > 1 &&
-                    !stmt.vInitialValue.isInlineArray
+                stmt.vInitialValue.vOriginalComponents.length > 1 &&
+                !stmt.vInitialValue.isInlineArray
                     ? (initVal as Value[])
                     : [initVal];
         } else {
@@ -383,8 +379,8 @@ export class Interpreter {
 
         sol.assert(
             fun !== undefined &&
-            (retVals.length === fun.vReturnParameters.vParameters.length ||
-                retVals.length === 0),
+                (retVals.length === fun.vReturnParameters.vParameters.length ||
+                    retVals.length === 0),
             `Mismatch in number of ret vals and formal returns`
         );
 
@@ -713,79 +709,15 @@ export class Interpreter {
         return res;
     }
 
+    getTempMem(type: sol.TypeNode, state: State, valToHold: BaseValue | undefined): BaseMemoryView<BaseValue, sol.TypeNode> {
+        const size = PointerMemView.allocSize(valToHold, type);
+        const addr = state.allocator.alloc(size);
+        return makeMemoryView(type, addr);
+    }
+
     assign(lvalue: LValue, rvalue: Value, state: State): void {
-        // console.error(`Assigning ${ppValue(rvalue)}->${ppLValue(lvalue)}`)
-        // The following ref-type assignments result in a copy of the underlying complex value
-        // - storage-to-storage
-        // - memory-to-storage
-        // - storage-to-memory
-        // - calldata-to-memory
-        // - calldata-to-storage
-        // - array literal-to-storage/memory
-        if (
-            (lvalue instanceof BaseStorageView && rvalue instanceof BaseStorageView) ||
-            (lvalue instanceof BaseStorageView && rvalue instanceof BaseMemoryView) ||
-            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseStorageView) ||
-            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseCalldataView) ||
-            (lvalue instanceof BaseStorageView && rvalue instanceof BaseCalldataView) ||
-            ((lvalue instanceof BaseStorageView || lvalue instanceof BaseMemoryView) &&
-                rvalue instanceof Array)
-        ) {
-            const complexRVal =
-                rvalue instanceof View
-                    ? (this.decode(rvalue, state) as BaseValue)
-                    : (rvalue as BaseValue);
-
-            if (lvalue instanceof BaseMemoryView) {
-                lvalue.encode(complexRVal, state.memory, state.allocator);
-            } else {
-                state.storage = (lvalue as BaseStorageView<BaseValue, sol.TypeNode>).encode(
-                    complexRVal,
-                    state.storage
-                );
-            }
-
-            return;
-        }
-
-        // @todo: uncomment this and figure out what are the cases of copying-vs-aliasing for local var views
-        // @todo add 
-        /*
-        if (lvalue instanceof PointerLocalView) {
-            // Assignment of a pointer of the same type - just assign
-            if (
-                rvalue instanceof View
-            ) {
-                if (!(lvalue.type.to.pp() === rvalue.type.pp() && lvalue.type.location === getViewLocation(rvalue))) {
-                    this.fail(InterpError, `Mismatch in assignment to local: got ${rvalue.type.pp()} expected ${lvalue.type.pp()}`);
-                }
-
-                lvalue.encode(rvalue);
-            } else {
-                this.expect(rvalue instanceof Array, `Expect an array literal`)
-                if (lvalue.type.location === sol.DataLocation.Memory) {
-                    // Assignment to a memory
-                    // @todo replace with encodeInMem
-                    const ptr = state.allocator.alloc(
-                        PointerMemView.allocSize(rvalue as BaseValue, lvalue.type.to)
-                    );
-                    const view = makeMemoryView(lvalue.type.to, ptr);
-                    view.encode(rvalue as BaseValue, state.memory, state.allocator);
-                    lvalue.encode(view);
-                } else {
-                    nyi(`Assigning ${rvalue} to ${lvalue.pp()}`);
-                }
-            }
-            return;
-        }
-            */
-
-        // In all other cases we are either assigning a primitive value, or assigning memory-to-memory (which aliases).
-        if (lvalue instanceof BaseStorageView) {
-            state.storage = lvalue.encode(rvalue, state.storage);
-        } else if (lvalue instanceof BaseMemoryView) {
-            lvalue.encode(rvalue, state.memory, state.allocator);
-        } else if (lvalue instanceof Array) {
+        // Handle tuple assignments first
+        if (lvalue instanceof Array) {
             this.expect(
                 rvalue instanceof Array && rvalue.length === lvalue.length,
                 `Mismatch in tuple assignment`
@@ -794,10 +726,71 @@ export class Interpreter {
             for (let i = 0; i < lvalue.length; i++) {
                 this.assign(lvalue[i], rvalue[i], state);
             }
+            return;
+        }
+
+        if (lvalue === null) {
+            // Nothing to do
+            // This happens when we have tuple assignment where there are missing lvalue components
+            return;
+        }
+
+        // console.error(`Assigning ${ppValue(rvalue)}->${ppLValue(lvalue)} of type ${lvalue.type.pp()}`)
+        this.expect(
+            isPrimitiveValue(rvalue),
+            `Unexpected rvalue ${ppValue(rvalue)} in assignment to ${ppLValue(lvalue)}`
+        );
+        // The following ref-type assignments result in a copy of the underlying complex value
+        // - storage-to-storage
+        // - memory-to-storage
+        // - storage-to-memory
+        // - calldata-to-memory
+        // - calldata-to-storage
+        if (
+            (lvalue instanceof BaseStorageView && rvalue instanceof BaseStorageView) ||
+            (lvalue instanceof BaseStorageView && rvalue instanceof BaseMemoryView) ||
+            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseStorageView) ||
+            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseCalldataView) ||
+            (lvalue instanceof BaseStorageView && rvalue instanceof BaseCalldataView) ||
+            (lvalue instanceof PointerLocalView &&
+                lvalue.type.location === sol.DataLocation.Memory &&
+                (rvalue instanceof BaseStorageView || rvalue instanceof BaseCalldataView))
+        ) {
+            // Types should be equal modulo location
+            const lvT = changeLocTo(lvalue.type.to, sol.DataLocation.Default).pp();
+            const rvT = changeLocTo(rvalue.type, sol.DataLocation.Default).pp();
+            this.expect(
+                lvT === rvT,
+                `Mismatching types in copying ref assignment (modulo location): ${lvT} and ${rvT} `
+            );
+
+            const complexRVal = this.decode(rvalue, state);
+
+            if (lvalue instanceof BaseMemoryView) {
+                lvalue.encode(complexRVal, state.memory, state.allocator);
+            } else if (lvalue instanceof BaseStorageView) {
+                state.storage = lvalue.encode(complexRVal, state.storage);
+            } else {
+                const memView = this.getTempMem(lvalue.type.to, state, complexRVal);
+                memView.encode(complexRVal, state.memory, state.allocator);
+                lvalue.encode(memView);
+            }
+
+            return;
+        }
+
+        // In all other cases we are either:
+        // 1. assigning a primitive value,
+        // 2. assigning memory-to-memory (which aliases),
+        // 3. assigning to a local pointer a reference of the same type (which aliases)
+        if (lvalue instanceof BaseStorageView) {
+            state.storage = lvalue.encode(rvalue, state.storage);
+        } else if (lvalue instanceof BaseMemoryView) {
+            lvalue.encode(rvalue, state.memory, state.allocator);
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
-                isPrimitiveValue(rvalue),
-                `Unexpected value ${rvalue} in assignment to local ${lvalue.name}`
+                !(lvalue.type instanceof sol.PointerType) ||
+                    (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp())
             );
             lvalue.encode(rvalue);
         } else if (lvalue === null) {
@@ -1053,17 +1046,14 @@ export class Interpreter {
 
         this.expect(
             calleeT instanceof sol.TypeNameType &&
-            calleeT.type instanceof sol.UserDefinedType &&
-            calleeT.type.definition instanceof sol.StructDefinition,
+                calleeT.type instanceof sol.UserDefinedType &&
+                calleeT.type.definition instanceof sol.StructDefinition,
             `Expected UserDefinedTypeName not ${calleeT.pp()}`
         );
         this.expect(expr.fieldNames !== undefined, `Should have fieldNames defined`);
 
         const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
-        const structView = new StructMemView(
-            structT,
-            state.allocator.alloc(PointerMemView.allocSize(undefined, structT))
-        );
+        const structView = this.getTempMem(structT, state, undefined) as StructMemView;
 
         const fieldMap = new Map<string, Value>();
 
@@ -1219,8 +1209,8 @@ export class Interpreter {
 
         this.expect(
             expr.kind === sol.LiteralKind.String ||
-            expr.kind === sol.LiteralKind.HexString ||
-            expr.kind === sol.LiteralKind.UnicodeString
+                expr.kind === sol.LiteralKind.HexString ||
+                expr.kind === sol.LiteralKind.UnicodeString
         );
 
         const view = state.constantsMap.get(expr.id);
@@ -1254,7 +1244,7 @@ export class Interpreter {
             return field[0][1];
         }
 
-        nyi(`Member access of ${expr.memberName} in ${baseVal}`);
+        nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
     }
 
     evalTupleExpression(expr: sol.TupleExpression, state: State): Value {
@@ -1266,17 +1256,24 @@ export class Interpreter {
         // Array literals get allocated in memory
         if (expr.isInlineArray) {
             const infer = this.infer(state);
-            const arrT = infer.typeOf(expr);
-            this.expect(arrT instanceof sol.PointerType && arrT.to instanceof sol.ArrayType && arrT.to.size !== undefined, `Expected a fixed size array in memory not ${arrT.pp()}`)
+            const arrPtrT = infer.typeOf(expr);
+            this.expect(
+                arrPtrT instanceof sol.PointerType &&
+                    arrPtrT.to instanceof sol.ArrayType &&
+                    arrPtrT.to.size !== undefined,
+                `Expected a fixed size array in memory not ${arrPtrT.pp()}`
+            );
 
-            const size = PointerMemView.allocSize(undefined, arrT);
-            const addr = state.allocator.alloc(size);
-            const view = makeMemoryView(arrT, addr);
-            view.encode(compVals as PrimitiveValue[], state.memory, state.allocator);
+            const arrView = this.getTempMem(arrPtrT.to, state, undefined);
+            this.expect(arrView instanceof ArrayMemView, ``);
 
-            this.expect(view instanceof PointerMemView, ``)
+            for (let i = 0n; i < arrPtrT.to.size; i++) {
+                const idxView = arrView.indexView(i, state.memory);
+                this.expect(!(idxView instanceof DecodingFailure), ``);
+                this.assign(idxView, compVals[bigIntToNum(i)] as PrimitiveValue, state);
+            }
 
-            return view.toView(state.memory);
+            return arrView;
         }
 
         if (compVals.length === 0) {

@@ -44,7 +44,7 @@ export abstract class BaseLocalView<V extends PrimitiveValue, T extends TypeNode
     }
 }
 
-export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, TypeNode> { }
+export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, TypeNode> {}
 
 export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
     constructor(
@@ -95,7 +95,8 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
 
 export class PointerLocalView
     extends BaseLocalView<View, PointerType>
-    implements PointerView<null, View<any, Value, any, TypeNode>> {
+    implements PointerView<null, View<any, Value, any, TypeNode>>
+{
     toView(): DecodingFailure | View<any, Value, any, TypeNode> {
         const ptr = this.decode();
 
@@ -109,7 +110,8 @@ export class PointerLocalView
 
 export class ArrayLikeLocalView
     extends BaseLocalView<Uint8Array, FixedBytesType>
-    implements ArrayLikeView<any, SingleByteLocalView> {
+    implements ArrayLikeView<any, SingleByteLocalView>
+{
     size(): bigint {
         return BigInt(this.type.size);
     }
