@@ -7,7 +7,8 @@ import {
     PartialSolcOutput,
     PrimitiveValue,
     Storage,
-    Value
+    Value,
+    ZERO_ADDRESS
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
@@ -46,19 +47,10 @@ export function makeState(
     const allocator = new DefaultAllocator();
     const unit = loc.getClosestParentByType(sol.SourceUnit) as sol.SourceUnit;
     const constantsMap = encodeConstants(unit, allocator);
-    const res: State = {
-        storage: ImmMap.fromEntries([]),
-        memory: allocator.memory,
-        allocator,
-        extCallStack: [],
-        intCallStack: [],
-        version,
-        scope: undefined,
-        constantsMap
-    };
 
     let nd: sol.ASTNode | undefined = loc;
     const scopeNodes: sol.ASTNode[] = [];
+    let contract: sol.ContractDefinition | undefined;
 
     while (nd !== undefined) {
         if (
@@ -69,8 +61,32 @@ export function makeState(
         ) {
             scopeNodes.unshift(nd);
         }
+
+        if (nd instanceof sol.ContractDefinition) {
+            contract = nd;
+        }
         nd = nd.parent;
     }
+
+    sol.assert(contract !== undefined, ``);
+
+    const res: State = {
+        storage: ImmMap.fromEntries([]),
+        memory: allocator.memory,
+        allocator,
+        intCallStack: [],
+        version,
+        scope: undefined,
+        constantsMap,
+        mdc: contract,
+        msg: {
+            to: ZERO_ADDRESS,
+            data: new Uint8Array(),
+            gas: 0n,
+            value: 0n,
+            salt: undefined
+        }
+    };
 
     // Builtins
     let scope: BaseScope = new BuiltinsScope(

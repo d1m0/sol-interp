@@ -16,17 +16,14 @@
 14 - add storage map index
 15 - add stroage map index rd tests
 16 - add index write tests
-
 17 - add mem struct field location
 18 - add storage struct field location
 19 - add calldata struct field location
 20 - add field tests
 21 - add recursive walk test
-
 22 - make sol-dbg release
 23 - bump release
 24 - fix imports
-
 25 - add interfaces
 26 - add stack array-like view for fixed bytes
 27 - add associated "isX" functions
@@ -72,7 +69,6 @@
 65    - nested array bug?
 66    - impl evalLV for member access
 67 - implement struct constructor
-
 68 - add match
 69 - add evalC
 70 - go over eval uses and replace with evalC wherever appropriate
@@ -90,23 +86,22 @@
 82 - add test with maps in mem structs and struct constructor
 83 - add test with maps in mem structs and assignments storage->mem, mem->mem, mem->storage
 84 - add ctx to InterpError to allow easier tracing of errors.
+85 - add internal calls
+
+- add modifiers
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-- add a test with array of maps in a struct and push
-
 - jest debug config
-- fix my lint on save to:
-    - not do small shitty changes in sol-dbg repo
-    - actuall remove unused imports ffs
 
 // ---------------
-- add internal calls
 - add evalNew
-- add modifiers
+- external calls
+- emit
 - more coercions
 - cli for playing
-- plan external calls, try/catch etc...
+- try/catch etc...
 - add builtins
+- add a test with array of maps in a struct and push
 
 
 - make a pass to remove nyi and todos

@@ -19,7 +19,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { none } from "./value";
-import { SolMessage, State } from "./state";
+import { State } from "./state";
 import { BaseLocalView } from "./view";
 
 export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
@@ -78,13 +78,8 @@ export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
     nyi(`makeZeroValue(${t.pp()})`);
 }
 
-function topExtFrame(state: State): SolMessage {
-    sol.assert(state.extCallStack.length > 0, `No externall call frames`);
-    return state.extCallStack[state.extCallStack.length - 1];
-}
-
 export function getMsg(state: State): Uint8Array {
-    return topExtFrame(state).data;
+    return state.msg.data;
 }
 
 // @todo move to solc-typed-ast

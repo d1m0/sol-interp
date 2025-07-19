@@ -227,6 +227,8 @@ export class Interpreter {
             }
             return res;
         });
+
+        this.popScope(state);
         this.nodes.pop();
         return results;
     }
@@ -1171,9 +1173,52 @@ export class Interpreter {
         return structView;
     }
 
+    evalBuiltinCall(expr: sol.FunctionCall, state: State): Value {
+        const callee = this.evalNP(expr.vExpression, state);
+        const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
+
+        this.expect(callee instanceof BuiltinFunction);
+        return callee.call(this, state, args);
+    }
+
+    evalExternalCall(expr: sol.FunctionCall, state: State): Value {
+        nyi("External call ${expr.print()}");
+    }
+
+    evalInternalCall(expr: sol.FunctionCall, state: State): Value {
+        const calleeAst = this.getCallee(expr.vExpression);
+        const infer = this.infer(state);
+        this.expect(calleeAst instanceof sol.Identifier || calleeAst instanceof sol.MemberAccess, `Unexpected callee ${printNode(calleeAst)}`)
+        const def = calleeAst.vReferencedDeclaration;
+        this.expect(def instanceof sol.FunctionDefinition || def instanceof sol.VariableDeclaration, `Unexpected callee def ${def}`)
+
+        const resolvedCalleeDef = sol.resolveCallable(state.mdc, def, infer);
+        this.expect(resolvedCalleeDef !== undefined, `Couldn't resolve callee ${def.name} in contract ${state.mdc.name}`);
+
+        const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
+        let results: Value[];
+
+        if (resolvedCalleeDef instanceof sol.FunctionDefinition) {
+            results = this.callInternal(resolvedCalleeDef, argVals, state)
+        } else {
+            nyi(`Calling public getter ${resolvedCalleeDef.name} in ${state.mdc.name}`)
+        }
+
+        if (results.length === 0) {
+            return none;
+        }
+
+        if (results.length === 1) {
+            return results[0];
+        }
+
+        return results;
+    }
+
     evalNewCall(expr: sol.FunctionCall, state: State): Value {
         nyi("");
     }
+
 
     /**
      * Helper to get the callee from a FunctionCall.vExpression. This strips gas,value, salt modifiers.
@@ -1195,23 +1240,25 @@ export class Interpreter {
             return this.evalStructConstructorCall(expr, state);
         }
 
-        const calleeAst = this.getCallee(expr.vExpression);
-        // Actual call
         if (
-            expr.vFunctionCallType === sol.ExternalReferenceType.Builtin &&
-            calleeAst instanceof sol.NewExpression
+            expr.vFunctionCallType === sol.ExternalReferenceType.Builtin
         ) {
-            return this.evalNewCall(expr, state);
+            const calleeAst = this.getCallee(expr.vExpression);
+
+            if (calleeAst instanceof sol.NewExpression) {
+                return this.evalNewCall(expr, state);
+            }
+
+            return this.evalBuiltinCall(expr, state);
         }
 
-        const callee = this.evalNP(expr.vExpression, state);
-        const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
+        const infer = this.infer(state);
 
-        if (callee instanceof BuiltinFunction) {
-            return callee.call(this, state, args);
+        if (infer.isFunctionCallExternal(expr)) {
+            return this.evalExternalCall(expr, state);
         }
 
-        nyi(`Function call ${expr.print()}`);
+        return this.evalInternalCall(expr, state);
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
