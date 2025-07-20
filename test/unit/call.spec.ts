@@ -4,7 +4,6 @@ import * as sol from "solc-typed-ast";
 import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
 import { Assert, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
-import { ppTrace } from "../../src/interp/pp";
 
 type ExceptionConstructors = typeof Assert;
 const samples: Array<
@@ -76,7 +75,8 @@ const samples: Array<
     ["StorageAliasing.sol", "StorageAliasing", "structInStructCopy", [], [], []],
     ["InMemoryStructWithMapping.sol", "Test", "verify", [], [], []],
     ["InMemoryStructWithMapping.sol", "Test", "verifyMapArr", [], [], []],
-    ["calls.sol", "Calls", "main", [], [], []]
+    ["calls.sol", "Calls", "main", [], [], []],
+    ["new.sol", "New", "main", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
@@ -112,14 +112,14 @@ describe("Simple function call tests", () => {
                     expect(decodedReturns).toEqual(expectedReturns);
                 } catch (e) {
                     if (e instanceof InterpError) {
-                        console.error(`Trace: ${ppTrace(e.trace)}`);
+                        //console.error(`Trace: ${ppTrace(e.trace)}`);
                         //console.error(`Memory: ${ppMem(state.memory)}`)
                         console.error(
-                            `Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e} ${e.stack}`
+                            `Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e.stack}`
                         );
                     } else {
                         // console.error(`Trace: ${ppTrace(interp.trace)}`);
-                        console.error(`Unexpected unrelated exception ${e} ${(e as Error).stack}`);
+                        console.error(`Unexpected unrelated exception ${(e as Error).stack}`);
                     }
                     expect(false).toBeTruthy();
                 }

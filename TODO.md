@@ -87,16 +87,19 @@
 83 - add test with maps in mem structs and assignments storage->mem, mem->mem, mem->storage
 84 - add ctx to InterpError to allow easier tracing of errors.
 85 - add internal calls
+86 - add length
+87 - add evalNew for arrays
 
+- emit
 - add modifiers
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 - jest debug config
+- ArrayLikeView interface should include pp()
 
 // ---------------
-- add evalNew
 - external calls
-- emit
+- add evalNew for contracts
 - more coercions
 - cli for playing
 - try/catch etc...

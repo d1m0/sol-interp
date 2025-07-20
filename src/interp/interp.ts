@@ -30,7 +30,9 @@ import {
     StringCalldataView,
     BytesCalldataView,
     StringStorageView,
-    BytesStorageView
+    BytesStorageView,
+    MAX_ARR_DECODE_LIMIT,
+    ArrayLikeView
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -148,11 +150,11 @@ export class Interpreter {
 
     ///*********************EXTERNAL FUNCTION CALLS************************************
     public create(msg: SolMessage, state: State): Address {
-        nyi(`create`);
+        nyi(`create(${msg}, ${state})`);
     }
 
     public call(msg: SolMessage, state: State): Value[] | InternalError {
-        nyi(`create`);
+        nyi(`create(${msg}, ${state})`);
     }
 
     private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
@@ -1025,7 +1027,7 @@ export class Interpreter {
     }
 
     evalElementaryTypeNameExpression(expr: sol.ElementaryTypeNameExpression, state: State): Value {
-        nyi("");
+        nyi(`evalElementaryTypeNameExpression(${expr}, ${state})`);
     }
 
     /**
@@ -1182,26 +1184,35 @@ export class Interpreter {
     }
 
     evalExternalCall(expr: sol.FunctionCall, state: State): Value {
-        nyi("External call ${expr.print()}");
+        nyi(`evalExternalCall(${printNode(expr)}, ${state})`);
     }
 
     evalInternalCall(expr: sol.FunctionCall, state: State): Value {
         const calleeAst = this.getCallee(expr.vExpression);
         const infer = this.infer(state);
-        this.expect(calleeAst instanceof sol.Identifier || calleeAst instanceof sol.MemberAccess, `Unexpected callee ${printNode(calleeAst)}`)
+        this.expect(
+            calleeAst instanceof sol.Identifier || calleeAst instanceof sol.MemberAccess,
+            `Unexpected callee ${printNode(calleeAst)}`
+        );
         const def = calleeAst.vReferencedDeclaration;
-        this.expect(def instanceof sol.FunctionDefinition || def instanceof sol.VariableDeclaration, `Unexpected callee def ${def}`)
+        this.expect(
+            def instanceof sol.FunctionDefinition || def instanceof sol.VariableDeclaration,
+            `Unexpected callee def ${def}`
+        );
 
         const resolvedCalleeDef = sol.resolveCallable(state.mdc, def, infer);
-        this.expect(resolvedCalleeDef !== undefined, `Couldn't resolve callee ${def.name} in contract ${state.mdc.name}`);
+        this.expect(
+            resolvedCalleeDef !== undefined,
+            `Couldn't resolve callee ${def.name} in contract ${state.mdc.name}`
+        );
 
         const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
         let results: Value[];
 
         if (resolvedCalleeDef instanceof sol.FunctionDefinition) {
-            results = this.callInternal(resolvedCalleeDef, argVals, state)
+            results = this.callInternal(resolvedCalleeDef, argVals, state);
         } else {
-            nyi(`Calling public getter ${resolvedCalleeDef.name} in ${state.mdc.name}`)
+            nyi(`Calling public getter ${resolvedCalleeDef.name} in ${state.mdc.name}`);
         }
 
         if (results.length === 0) {
@@ -1216,12 +1227,62 @@ export class Interpreter {
     }
 
     evalNewCall(expr: sol.FunctionCall, state: State): Value {
-        nyi("");
-    }
+        const calleeAST = this.getCallee(expr.vExpression) as sol.NewExpression;
+        const infer = this.infer(state);
+        const newT = infer.typeNameToSpecializedTypeNode(
+            calleeAST.vTypeName,
+            sol.DataLocation.Memory
+        );
 
+        const args = expr.vArguments.map((arg) => this.eval(arg, state));
+
+        if (
+            newT instanceof sol.UserDefinedType &&
+            newT.definition instanceof sol.ContractDefinition
+        ) {
+            // new contract
+            nyi(`Creating a new contract`);
+        }
+
+        let simplifiedT = simplifyType(newT, infer, sol.DataLocation.Memory);
+        this.expect(simplifiedT instanceof sol.PointerType, ``);
+        simplifiedT = simplifiedT.to;
+        this.expect(
+            (simplifiedT instanceof sol.ArrayType || simplifiedT instanceof sol.PackedArrayType) &&
+                args.length === 1 &&
+                typeof args[0] === "bigint",
+            `Expected an array type with a single length argument not ${simplifiedT.pp()} with ${args}`
+        );
+
+        const arrSize = bigIntToNum(args[0], 0n, MAX_ARR_DECODE_LIMIT);
+
+        let initialVal: BaseValue;
+        let addr: bigint;
+
+        if (simplifiedT instanceof sol.ArrayType) {
+            initialVal = [];
+
+            for (let i = 0; i < arrSize; i++) {
+                initialVal.push(makeZeroValue(simplifiedT.elementT, state));
+            }
+
+            addr = state.allocator.alloc(32 * arrSize + 32);
+        } else {
+            initialVal =
+                simplifiedT instanceof sol.BytesType
+                    ? new Uint8Array(arrSize)
+                    : `\x00`.repeat(arrSize);
+            addr = state.allocator.alloc(arrSize + 32);
+        }
+        const view = makeMemoryView(simplifiedT, addr);
+        view.encode(initialVal, state.memory, state.allocator);
+
+        return view;
+    }
 
     /**
      * Helper to get the callee from a FunctionCall.vExpression. This strips gas,value, salt modifiers.
+     * @todo replace this with decodeCallee to get the gas, value and salt
      */
     private getCallee(expr: sol.Expression): sol.Expression {
         while (expr instanceof sol.FunctionCallOptions || expr instanceof sol.FunctionCall) {
@@ -1240,9 +1301,7 @@ export class Interpreter {
             return this.evalStructConstructorCall(expr, state);
         }
 
-        if (
-            expr.vFunctionCallType === sol.ExternalReferenceType.Builtin
-        ) {
+        if (expr.vFunctionCallType === sol.ExternalReferenceType.Builtin) {
             const calleeAst = this.getCallee(expr.vExpression);
 
             if (calleeAst instanceof sol.NewExpression) {
@@ -1340,7 +1399,7 @@ export class Interpreter {
     }
 
     evalIndexRangeAccess(expr: sol.IndexRangeAccess, state: State): Value {
-        nyi("");
+        nyi(`evalIndexRangeAccess(${printNode(expr)}, ${state})`);
     }
 
     evalLiteral(expr: sol.Literal, state: State): Value {
@@ -1387,6 +1446,10 @@ export class Interpreter {
             const field = baseVal.fields.filter(([name]) => name === expr.memberName);
             this.expect(field.length === 1, `Unknown field ${expr.memberName}`);
             return field[0][1];
+        }
+
+        if (isArrayLikeView(baseVal) && expr.memberName === "length") {
+            return this.getSize(baseVal, state);
         }
 
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
@@ -1475,6 +1538,27 @@ export class Interpreter {
         }
 
         nyi(`decode(${lv})`);
+    }
+
+    /**
+     * Given an array-like view get its size
+     */
+    public getSize(lv: ArrayLikeView<any, View>, state: State): bigint {
+        let res: bigint | DecodingFailure;
+        if (isArrayLikeStorageView(lv)) {
+            res = lv.size(state.storage);
+        } else if (isArrayLikeMemView(lv)) {
+            res = lv.size(state.memory);
+        } else if (isArrayLikeCalldataView(lv)) {
+            res = lv.size(getMsg(state));
+        } else if (lv instanceof ArrayLikeLocalView) {
+            res = lv.size();
+        } else {
+            nyi(`getSize(${lv})`);
+        }
+
+        this.expect(typeof res === "bigint", `Error getting the size of ${lv}`);
+        return res;
     }
 
     /**

@@ -1,7 +1,12 @@
 import { Address } from "@ethereumjs/util";
 import { BaseMemoryView, Memory, Storage, Value as BaseValue } from "sol-dbg";
 import { BaseScope } from "./scope";
-import { ContractDefinition, FunctionDefinition, TypeNode, VariableDeclaration } from "solc-typed-ast";
+import {
+    ContractDefinition,
+    FunctionDefinition,
+    TypeNode,
+    VariableDeclaration
+} from "solc-typed-ast";
 import { Value } from "./value";
 import { Allocator } from "sol-dbg";
 
@@ -37,7 +42,7 @@ export interface State {
     storage: Storage;
     memory: Memory;
     allocator: Allocator;
-    mdc: ContractDefinition,
+    mdc: ContractDefinition;
     msg: SolMessage;
     intCallStack: InternalCallFrame[];
     scope: BaseScope | undefined;
