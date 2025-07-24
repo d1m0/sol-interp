@@ -89,13 +89,47 @@
 85 - add internal calls
 86 - add length
 87 - add evalNew for arrays
+88 - emit
+89 - start modifiers
 
-- emit
-- add modifiers
+90 - add a "constant" store in the state. Make it a memory to allow for bytes/string constants. Maybe move literals there as well!
+91 - build constant evaluation graph
+92    - for each cosntant vardecl
+93        - walk over children, and for everything with a vReferenced declaration add a dependency
+94 - do topoSort() of the constant vars over all units
+95 - add a GlobalScope that knows about global vars. It has a map from name->astNode. Its lookup/lookupLocation just lookup the view in state.constantMap based on node id
+
+- make a "createGlobalScope(unit)" -> GlobalScope
+- add constant vars to ContractScope
+- add makeScope(node, state) -> scope where node in (SourceUnit, ContractDefinition, FunctionDefinition, BuiltinFunction, ModifierInvocation)
+- make empty state
+- for each var in the topoSort 
+    eval the init expression in makeScope(var.vScope, state) and set it
+
+- add a DefVal value
+- add all defs to unit scope
+- add all defs to contract scope
+- add tests for Contract.Variable, Unit.Contract.Variable
+
+- add test with AnotherContract.ConstantVariable and ThisContract.NonConstantVariable
+
+
+- add baseCall()
+    - save scope
+    - set new scope to makeScope(...)
+    - exec
+    - restore scope
+- add test notes from other branch
+
+
+
+- need an "immutable" var space somewhere in the state
+
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 - jest debug config
 - ArrayLikeView interface should include pp()
+- add units getter to ArtifactManager
 
 // ---------------
 - external calls

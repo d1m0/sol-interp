@@ -41,6 +41,7 @@ export interface State {
     version: string;
     storage: Storage;
     memory: Memory;
+    constants: Memory;
     allocator: Allocator;
     mdc: ContractDefinition;
     msg: SolMessage;

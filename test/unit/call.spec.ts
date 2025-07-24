@@ -1,9 +1,10 @@
 import { View, Value, zip } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
-import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
+import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
 import { Assert, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
+import { worldFailMock } from "../../src/interp/utils";
 
 type ExceptionConstructors = typeof Assert;
 const samples: Array<
@@ -88,7 +89,7 @@ describe("Simple function call tests", () => {
 
     beforeAll(async () => {
         [artifactManager, sampleMap] = await loadSamples(fileNames);
-        interp = new Interpreter(worldMock, artifactManager);
+        interp = new Interpreter(worldFailMock, artifactManager);
     }, 10000);
 
     for (const [fileName, contract, funName, stateVals, argVals, expectedReturns] of samples) {

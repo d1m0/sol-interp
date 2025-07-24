@@ -15,12 +15,21 @@ import {
     View,
     BaseMemoryView,
     BaseCalldataView,
-    BaseStorageView
+    BaseStorageView,
+    Storage
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { none } from "./value";
-import { State } from "./state";
+import { CallResult, State, WorldInterface } from "./state";
 import { BaseLocalView } from "./view";
+
+/**
+ * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
+ * not missing functionality.
+ */
+export function panic(msg: string): never {
+    sol.assert(false, `Panic: ${msg}`);
+}
 
 export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
     if (t instanceof sol.IntType) {
@@ -177,3 +186,85 @@ export function changeLocTo(type: sol.TypeNode, loc: sol.DataLocation): sol.Type
 
     return type;
 }
+
+/**
+ * Given a list of T's `things` and a partial ordering between them `order` return
+ * a topologically sorted version of `things`. For any pair `[a,b]` in `order` we assume
+ * that `a` has to come before `b`.
+ * 
+ * Shamelessly stolen from
+ */
+export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Set<T>>): T[] {
+    const nPreds = new Map<T, number>();
+
+    // Initialize datastructures
+    for (const thing of things) {
+        nPreds.set(thing, 0);
+    }
+
+    // Populate nPreds and successors according to the partial order `order`
+    for (const [, succs] of successors) {
+        for(const succ of succs) {
+            nPreds.set(succ, (nPreds.get(succ) as number) + 1);
+        }
+    }
+
+    // Compute the initial roots and add them to res
+    const res: T[] = [];
+
+    for (const thing of things) {
+        if ((nPreds.get(thing) as number) === 0) {
+            res.push(thing);
+        }
+    }
+
+    sol.assert(res.length > 0, "Dep graph {0} is not a proper dep graph");
+
+    let i = 0;
+
+    // Add nodes to the order until all are added
+    while (res.length < things.length) {
+        const curLength = res.length;
+
+        // For every newly added node N from last iteration ([i...curLength-1]),
+        // and for all successors S of N, reduce nPreds[S]. If nPreds[S] == 0 add to res.
+        for (; i < curLength; i++) {
+            for (const successor of successors.get(res[i]) as Set<T>) {
+                const newCount = (nPreds.get(successor) as number) - 1;
+
+                nPreds.set(successor, newCount);
+
+                if (newCount === 0) {
+                    res.push(successor);
+                }
+            }
+        }
+
+        sol.assert(
+            res.length > curLength,
+            "Dep graph is not a valid partial order. Topo sort stalled at {1} out of {2}",
+            res.length,
+            things.length
+        );
+    }
+
+    return res;
+}
+
+export const worldFailMock: WorldInterface = {
+    create: function (): Promise<CallResult> {
+        throw new Error("Function not implemented.");
+    },
+    call: function (): Promise<CallResult> {
+        throw new Error("Function not implemented.");
+    },
+    staticcall: function (): Promise<CallResult> {
+        throw new Error("Function not implemented.");
+    },
+    delegatecall: function (): Promise<CallResult> {
+        throw new Error("Function not implemented.");
+    },
+    getStorage: function (): Storage {
+        throw new Error("Function not implemented.");
+    }
+};

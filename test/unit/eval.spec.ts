@@ -1,7 +1,8 @@
 import { Struct, Value, View } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
-import { loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
+import { loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
+import { worldFailMock } from "../../src/interp/utils";
 
 const samples: Array<[string, string, Array<[string, Value]>, Value]> = [
     ["expressions.sol", "//ContractDefinition/VariableDeclaration[@name='a']/*[2]", [], 1n],
@@ -119,7 +120,7 @@ describe("Eval unit tests", () => {
 
     beforeAll(async () => {
         [artifactManager, sampleMap] = await loadSamples(fileNames);
-        interp = new Interpreter(worldMock, artifactManager);
+        interp = new Interpreter(worldFailMock, artifactManager);
     }, 10000);
 
     for (const [fileName, path, defs, expValue] of samples) {

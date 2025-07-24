@@ -1,16 +1,22 @@
 import * as sol from "solc-typed-ast";
-import { Value } from "./value";
+import { isPrimitiveValue, Value } from "./value";
 import { State } from "./state";
 import {
+    BaseMemoryView,
     ExpStructType,
     getContractLayoutType,
     PointerStorageView,
     simplifyType,
-    View
+    View,
+    Value as BaseValue,
+    DecodingFailure,
+    PrimitiveValue,
+    nyi,
 } from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
+import { panic } from "./utils";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -237,48 +243,6 @@ export class ContractScope extends BaseScope {
         const [layoutType] = getContractLayoutType(contract, infer);
         const defTypes = new Map<string, sol.TypeNode>(layoutType.fields);
 
-        // On top of state vars also add function, enum, struct, user defined value type, event and error names.
-        for (const base of contract.vLinearizedBaseContracts) {
-            for (const fun of contract.vFunctions) {
-                if (base == contract) {
-                    defTypes.set(fun.name, infer.funDefToType(fun));
-                } else {
-                    if (fun.visibility !== sol.FunctionVisibility.Private) {
-                        defTypes.set(fun.name, infer.funDefToType(fun));
-                    }
-                }
-            }
-
-            for (const enumDef of contract.vEnums) {
-                defTypes.set(
-                    enumDef.name,
-                    new sol.TypeNameType(new sol.UserDefinedType(enumDef.name, enumDef))
-                );
-            }
-
-            for (const structDef of contract.vStructs) {
-                defTypes.set(
-                    structDef.name,
-                    new sol.TypeNameType(new sol.UserDefinedType(structDef.name, structDef))
-                );
-            }
-
-            for (const event of contract.vEvents) {
-                defTypes.set(event.name, infer.eventDefToType(event));
-            }
-
-            for (const error of contract.vErrors) {
-                defTypes.set(error.name, infer.errDefToType(error));
-            }
-
-            for (const typeDef of contract.vUserDefinedValueTypes) {
-                defTypes.set(
-                    typeDef.name,
-                    new sol.TypeNameType(new sol.UserDefinedType(typeDef.name, typeDef))
-                );
-            }
-        }
-
         super(`<contract ${contract.name}>`, defTypes, state, _next);
         this.layoutType = layoutType;
         this.layout = makeStorageView(this.layoutType, [0n, 32]) as StructStorageView;
@@ -303,6 +267,80 @@ export class ContractScope extends BaseScope {
         const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
         console.error(`Encode ${v} in ${view.type.pp()}`);
         this.state.storage = view.encode(v, this.state.storage);
+    }
+}
+
+export class GlobalsScope extends BaseScope {
+    private viewMap: Map<string, BaseMemoryView<BaseValue, sol.TypeNode>>;
+    private _initialized: boolean = false;
+
+    private static gatherDefs(unit: sol.SourceUnit, res = new Map<string, sol.VariableDeclaration>()): Map<string, sol.VariableDeclaration> {
+        for (const v of unit.vVariables) {
+            res.set(v.name, v)
+        }
+
+        for (const imp of unit.vImportDirectives) {
+            // import * as foo from "..."
+            if (imp.unitAlias) {
+                nyi(`unit alias imports. These require DefValues to support Contract.Var and Unit.Contract.Var`)
+            } else if (imp.symbolAliases.length > 0) {
+                // import { a, b as c, ...} from "..."
+                nyi(`alias imports. These require DefValues to support Contract.Var and Unit.Contract.Var`)
+            } else {
+                // import "foo"
+                res = GlobalsScope.gatherDefs(imp.vSourceUnit, res);
+            }
+        }
+
+        return res;
+    }
+
+    constructor(
+        public readonly unit: sol.SourceUnit,
+        state: State,
+        _next: BaseScope | undefined
+    ) {
+        const defMap = new Map<string, sol.TypeNode>();
+        const infer = new sol.InferType(state.version);
+
+        const declMap = GlobalsScope.gatherDefs(unit);
+        for (const [name, decl] of declMap) {
+            defMap.set(name, infer.variableDeclarationToTypeNode(decl));
+        } 
+
+        super(`<global scope ${unit.sourceEntryKey}>`, defMap, state, _next);
+        this.viewMap = new Map();
+    }
+
+    _lookup(name: string): Value | undefined {
+        const view = this.viewMap.get(name);
+        if (view === undefined) {
+            return view;
+        }
+
+        if (isPrimitiveValue(view.type)) {
+            const res = view.decode(this.state.constants)
+            sol.assert(!(res instanceof DecodingFailure), `Unexpected failure decoding constant ${name}`)
+            return res as PrimitiveValue;
+        }
+
+        return view;
+    }
+
+    _lookupLocation(name: string): View | undefined {
+        panic(`Can't get location of ${name} in GlobalScope`)
+    }
+
+    _set(name: string, v: BaseMemoryView<BaseValue, sol.TypeNode>): void {
+        if (this._initialized) {
+            panic(`Can't set ${name} in GlobalScope after initialization is complete.`);
+        }
+
+        this.viewMap.set(name, v);
+    }
+
+    setInitialized(): void {
+        this._initialized = true;
     }
 }
 

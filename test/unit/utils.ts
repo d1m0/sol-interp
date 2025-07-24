@@ -20,24 +20,6 @@ import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
 import { gt } from "semver";
 
-export const worldMock: WorldInterface = {
-    create: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    call: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    staticcall: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    delegatecall: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    getStorage: function (): Storage {
-        throw new Error("Function not implemented.");
-    }
-};
-
 export function makeState(
     loc: sol.ASTNode,
     version: string,
