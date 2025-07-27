@@ -98,38 +98,85 @@
 93        - walk over children, and for everything with a vReferenced declaration add a dependency
 94 - do topoSort() of the constant vars over all units
 95 - add a GlobalScope that knows about global vars. It has a map from name->astNode. Its lookup/lookupLocation just lookup the view in state.constantMap based on node id
+96 - make a "createGlobalScope(unit)" -> GlobalScope
+97 - add makeScope(node, state) -> scope where node in (SourceUnit, ContractDefinition, FunctionDefinition, BuiltinFunction, ModifierInvocation)
+98 - make empty state
+99 - for each var in the topoSort 
+99    eval the init expression in makeScope(var.vScope, state) and set it
 
-- make a "createGlobalScope(unit)" -> GlobalScope
+100 - subclass ArtifactManager
+101 - add unit->ArtifactInfo mapping
+102 - add getConstants(artifactInfo): Map<string, View>, memory
+103 - move "gatherConstants" half-baked thing in there
+104 - finish gatherConstants
+105 - undo constants memory space
+106 - get original tests to run
+
+107 - ArrayLikeView interface should include pp()
+108 - fix bug in PointerMemView.allocSize() for bytes/string
+109 - or AstNode->Artifact and AstNode->ContractArtifact mapping?
+110 - move getMemFor to PointerMemView
+111 - expose Allocator.baseOffset()
+112 - get test with only global consts to run
+113 - fix nit in intrp.evalTypeConversion due to base being protected
+114 - replace getTempMem with getMemFor and go through other uses of alloc
+
+
 - add constant vars to ContractScope
-- add makeScope(node, state) -> scope where node in (SourceUnit, ContractDefinition, FunctionDefinition, BuiltinFunction, ModifierInvocation)
-- make empty state
-- for each var in the topoSort 
-    eval the init expression in makeScope(var.vScope, state) and set it
+- get test with contract constants to run
 
-- add a DefVal value
-- add all defs to unit scope
-- add all defs to contract scope
-- add tests for Contract.Variable, Unit.Contract.Variable
-
-- add test with AnotherContract.ConstantVariable and ThisContract.NonConstantVariable
-
+- add constants tests from other repo
 
 - add baseCall()
     - save scope
     - set new scope to makeScope(...)
     - exec
     - restore scope
+    - add test global calling a global
+
+- Idea: Tying it all toghether at the top-level:
+    - interface PersistentState {
+        artifact: ArtifactInfo;
+        mdc: ContractDefinition;
+        storage: Storage;
+        immutable: Memory;
+        balance: bigint;
+        ...
+      }
+    - World class has an ArtifactManager
+        states: map<Address, PersistentState>
+        makeCallState(msg: SolMessage) -> State
+            - ai = states[msg.to]
+            - construct memory and constant map from artifactManager.gatherConstants(ai)
+            - fill out State - {intCallStack, scope,)
+            
+        makeCreateState(msg: SolMessage) -> State
+            - nyi
+
+    - Implement Interpreter.call
+    - add `msg` builtin struct
+
+    - add a full call test that accesses msg builtin
+    
+    
+
+- Idea: Add non-value defs to scopes
+    - add a DefVal value
+    - add all defs to unit scope
+    - add all defs to contract scope
+    - add tests for Contract.Variable, Unit.Contract.Variable
+
+- add test with AnotherContract.ConstantVariable and ThisContract.NonConstantVariable
+
 - add test notes from other branch
-
-
+- add BaseWorld class that has an ArtifactManager
 
 - need an "immutable" var space somewhere in the state
 
-
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 - jest debug config
-- ArrayLikeView interface should include pp()
-- add units getter to ArtifactManager
+
+- make an exhaustive test for coercions from old code
 
 // ---------------
 - external calls

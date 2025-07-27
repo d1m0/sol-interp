@@ -1,5 +1,5 @@
 import * as sol from "solc-typed-ast";
-import { isPrimitiveValue, Value } from "./value";
+import { Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -16,7 +16,8 @@ import {
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
-import { panic } from "./utils";
+import { isValueType, panic } from "./utils";
+import { assertBuiltin } from "./builtins";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -45,7 +46,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<string, sol.TypeNode>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) {}
+    ) { }
 
     abstract _lookup(name: string): Value | undefined;
     abstract _lookupLocation(name: string): View | undefined;
@@ -233,6 +234,7 @@ export class ContractScope extends BaseScope {
     private readonly layoutType: ExpStructType;
     private readonly layout: StructStorageView;
     private fieldToView: Map<string, BaseStorageView<any, sol.TypeNode>>;
+    private constFieldToView: Map<string, BaseMemoryView<any, sol.TypeNode>>;
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
@@ -243,14 +245,50 @@ export class ContractScope extends BaseScope {
         const [layoutType] = getContractLayoutType(contract, infer);
         const defTypes = new Map<string, sol.TypeNode>(layoutType.fields);
 
+        const constVars = contract.vStateVariables.filter((decl) => decl.mutability === sol.Mutability.Constant)
+
+        for (const v of constVars) {
+            defTypes.set(v.name, simplifyType(infer.variableDeclarationToTypeNode(v), infer, sol.DataLocation.Memory))
+        }
+
         super(`<contract ${contract.name}>`, defTypes, state, _next);
         this.layoutType = layoutType;
         this.layout = makeStorageView(this.layoutType, [0n, 32]) as StructStorageView;
         this.fieldToView = new Map(this.layout.fieldViews);
+
+        this.constFieldToView = new Map();
+        for (const v of constVars) {
+            const constView = state.constantsMap.get(v.id);
+            sol.assert(constView !== undefined, `Missing value for constant state var ${contract.name}.${v.name}`)
+            this.constFieldToView.set(v.name, constView)
+        }
+    }
+
+    private _lookupConst(name: string): Value | undefined {
+        const view = this.constFieldToView.get(name);
+
+        if (view === undefined) {
+            return undefined;
+        }
+
+        if (isValueType(view.type)) {
+            const res = view.decode(this.state.memory);
+            sol.assert(
+                !(res instanceof DecodingFailure),
+                `Unexpected failure decoding constant ${name}`
+            );
+            return res as PrimitiveValue;
+        }
+
+        return view;
     }
 
     _lookup(name: string): Value | undefined {
-        const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
+        const view = this.fieldToView.get(name);
+
+        if (view === undefined) {
+            return this._lookupConst(name);
+        }
 
         if (view instanceof PointerStorageView) {
             return view.toView();
@@ -265,30 +303,36 @@ export class ContractScope extends BaseScope {
 
     _set(name: string, v: Value): void {
         const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
-        console.error(`Encode ${v} in ${view.type.pp()}`);
         this.state.storage = view.encode(v, this.state.storage);
+    }
+
+    public setConst(name: string, v: BaseMemoryView<BaseValue, sol.TypeNode>): void {
+        this.constFieldToView.set(name, v);
     }
 }
 
-export class GlobalsScope extends BaseScope {
+export class GlobalScope extends BaseScope {
     private viewMap: Map<string, BaseMemoryView<BaseValue, sol.TypeNode>>;
-    private _initialized: boolean = false;
-
-    private static gatherDefs(unit: sol.SourceUnit, res = new Map<string, sol.VariableDeclaration>()): Map<string, sol.VariableDeclaration> {
+    private static gatherDefs(
+        unit: sol.SourceUnit,
+        res = new Map<string, sol.VariableDeclaration>()
+    ): Map<string, sol.VariableDeclaration> {
         for (const v of unit.vVariables) {
-            res.set(v.name, v)
+            res.set(v.name, v);
         }
 
         for (const imp of unit.vImportDirectives) {
             // import * as foo from "..."
             if (imp.unitAlias) {
-                nyi(`unit alias imports. These require DefValues to support Contract.Var and Unit.Contract.Var`)
+                // Nothing to do - constants get resolved by evalMemberAccess
             } else if (imp.symbolAliases.length > 0) {
                 // import { a, b as c, ...} from "..."
-                nyi(`alias imports. These require DefValues to support Contract.Var and Unit.Contract.Var`)
+                nyi(
+                    `alias imports. These require DefValues to support Contract.Var and Unit.Contract.Var`
+                );
             } else {
                 // import "foo"
-                res = GlobalsScope.gatherDefs(imp.vSourceUnit, res);
+                res = GlobalScope.gatherDefs(imp.vSourceUnit, res);
             }
         }
 
@@ -303,13 +347,19 @@ export class GlobalsScope extends BaseScope {
         const defMap = new Map<string, sol.TypeNode>();
         const infer = new sol.InferType(state.version);
 
-        const declMap = GlobalsScope.gatherDefs(unit);
+        const declMap = GlobalScope.gatherDefs(unit);
         for (const [name, decl] of declMap) {
             defMap.set(name, infer.variableDeclarationToTypeNode(decl));
-        } 
+        }
 
         super(`<global scope ${unit.sourceEntryKey}>`, defMap, state, _next);
         this.viewMap = new Map();
+
+        for (const [name, decl] of declMap) {
+            const view = state.constantsMap.get(decl.id);
+            sol.assert(view !== undefined, `Missing view for global constant ${name}`)
+            this.viewMap.set(name, view);
+        }
     }
 
     _lookup(name: string): Value | undefined {
@@ -318,9 +368,12 @@ export class GlobalsScope extends BaseScope {
             return view;
         }
 
-        if (isPrimitiveValue(view.type)) {
-            const res = view.decode(this.state.constants)
-            sol.assert(!(res instanceof DecodingFailure), `Unexpected failure decoding constant ${name}`)
+        if (isValueType(view.type)) {
+            const res = view.decode(this.state.memory);
+            sol.assert(
+                !(res instanceof DecodingFailure),
+                `Unexpected failure decoding constant ${name}`
+            );
             return res as PrimitiveValue;
         }
 
@@ -328,19 +381,18 @@ export class GlobalsScope extends BaseScope {
     }
 
     _lookupLocation(name: string): View | undefined {
-        panic(`Can't get location of ${name} in GlobalScope`)
+        panic(`Can't get location of ${name} in GlobalScope`);
     }
 
     _set(name: string, v: BaseMemoryView<BaseValue, sol.TypeNode>): void {
-        if (this._initialized) {
-            panic(`Can't set ${name} in GlobalScope after initialization is complete.`);
-        }
-
-        this.viewMap.set(name, v);
+        panic(`Can't set ${name} in GlobalScope`);
     }
 
-    setInitialized(): void {
-        this._initialized = true;
+    /**
+     * Only called from gatherConstant during constant eval.
+     */
+    public setConst(name: string, v: BaseMemoryView<BaseValue, sol.TypeNode>): void {
+        this.viewMap.set(name, v);
     }
 }
 
@@ -367,4 +419,47 @@ export class BuiltinsScope extends BaseScope {
     _set(): void {
         sol.assert(false, `Can't set a builtin after initialization`);
     }
+}
+
+export function makeBuiltinScope(state: State): BuiltinsScope {
+    const builtins = [assertBuiltin];
+    return new BuiltinsScope(
+        builtins.map((b) => [b.name, b.type, b]),
+        state,
+        undefined
+    );
+}
+
+/**
+ * Given a node make a scope for it up to the containing contract.
+ * This will include the builtins, globals and contract scopes.
+ *
+ * This scope is used to:
+ * 1. Compute constant expressions
+ * 2. As a basis for dynamic runtime scopes. Those build on this scope with LocalScopes for function args, locals, etc..
+ */
+export function makeStaticScope(nd: sol.ASTNode | undefined, state: State): BaseScope {
+    const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
+
+    while (nd !== undefined) {
+        if (nd instanceof sol.SourceUnit || nd instanceof sol.ContractDefinition) {
+            scopeNodes.push(nd);
+        }
+
+        nd = nd.parent;
+    }
+
+    scopeNodes.reverse();
+    let scope: BaseScope = makeBuiltinScope(state);
+
+    for (const nd of scopeNodes) {
+        if (nd instanceof sol.SourceUnit) {
+            scope = new GlobalScope(nd, state, scope);
+        } else {
+            const infer = new sol.InferType(state.version);
+            scope = new ContractScope(nd, infer, state, scope);
+        }
+    }
+
+    return scope;
 }

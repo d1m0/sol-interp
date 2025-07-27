@@ -16,7 +16,7 @@ import {
     BaseMemoryView,
     BaseCalldataView,
     BaseStorageView,
-    Storage
+    Storage,
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { none } from "./value";
@@ -73,9 +73,9 @@ export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
                 nyi(`makeZeroValue of memory pointer type ${t.pp()}`);
             }
 
-            const addr = state.allocator.alloc(PointerMemView.allocSize(zeroValue, t.to));
+            const addr = state.memAllocator.alloc(PointerMemView.allocSize(zeroValue, t.to));
             const res = makeMemoryView(t.to, addr);
-            res.encode(zeroValue, state.memory, state.allocator);
+            res.encode(zeroValue, state.memory, state.memAllocator);
 
             return res;
         }
@@ -191,10 +191,14 @@ export function changeLocTo(type: sol.TypeNode, loc: sol.DataLocation): sol.Type
  * Given a list of T's `things` and a partial ordering between them `order` return
  * a topologically sorted version of `things`. For any pair `[a,b]` in `order` we assume
  * that `a` has to come before `b`.
- * 
+ *
  * Shamelessly stolen from
  */
 export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Set<T>>): T[] {
+    if (things.length === 0) {
+        return things;
+    }
+
     const nPreds = new Map<T, number>();
 
     // Initialize datastructures
@@ -204,7 +208,7 @@ export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Se
 
     // Populate nPreds and successors according to the partial order `order`
     for (const [, succs] of successors) {
-        for(const succ of succs) {
+        for (const succ of succs) {
             nPreds.set(succ, (nPreds.get(succ) as number) + 1);
         }
     }

@@ -1,5 +1,13 @@
 import { Address } from "@ethereumjs/util";
-import { BaseMemoryView, Memory, Storage, Value as BaseValue } from "sol-dbg";
+import {
+    BaseMemoryView,
+    Memory,
+    Storage,
+    Value as BaseValue,
+    ImmMap,
+    DefaultAllocator,
+    ZERO_ADDRESS
+} from "sol-dbg";
 import { BaseScope } from "./scope";
 import {
     ContractDefinition,
@@ -41,11 +49,31 @@ export interface State {
     version: string;
     storage: Storage;
     memory: Memory;
-    constants: Memory;
-    allocator: Allocator;
-    mdc: ContractDefinition;
+    memAllocator: Allocator;
+    mdc: ContractDefinition | undefined;
     msg: SolMessage;
     intCallStack: InternalCallFrame[];
     scope: BaseScope | undefined;
     constantsMap: Map<number, BaseMemoryView<BaseValue, TypeNode>>;
+}
+
+export function makeEmptyState(version: string): State {
+    const memAllocator = new DefaultAllocator();
+    return {
+        version,
+        storage: ImmMap.fromEntries([]),
+        memory: memAllocator.memory,
+        memAllocator,
+        mdc: undefined,
+        msg: {
+            to: ZERO_ADDRESS,
+            data: new Uint8Array(),
+            gas: 0n,
+            value: 0n,
+            salt: undefined
+        },
+        intCallStack: [],
+        scope: undefined,
+        constantsMap: new Map()
+    };
 }

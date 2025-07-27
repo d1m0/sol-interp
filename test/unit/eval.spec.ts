@@ -3,6 +3,7 @@ import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import { loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
 import { worldFailMock } from "../../src/interp/utils";
+import { ArtifactManager } from "../../src/interp/artifactManager";
 
 const samples: Array<[string, string, Array<[string, Value]>, Value]> = [
     ["expressions.sol", "//ContractDefinition/VariableDeclaration[@name='a']/*[2]", [], 1n],
@@ -112,7 +113,7 @@ const samples: Array<[string, string, Array<[string, Value]>, Value]> = [
 ];
 
 describe("Eval unit tests", () => {
-    let artifactManager;
+    let artifactManager: ArtifactManager;
     let interp: Interpreter;
     let sampleMap: SampleMap;
 
@@ -128,7 +129,7 @@ describe("Eval unit tests", () => {
             const sample = sampleMap.get(fileName) as SampleInfo;
             const contract = sample.unit.vContracts[0];
             const expr = new sol.XPath(contract).query(path)[0] as sol.Expression;
-            const state = makeState(expr, sample.version, ...defs);
+            const state = makeState(expr, artifactManager, ...defs);
             expect(expr).toBeDefined();
             let v: any = interp.eval(expr, state);
 
