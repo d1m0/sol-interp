@@ -20,7 +20,7 @@
     },
     "dependencies": {
         "solc-typed-ast": "^18.2.5",
-        "sol-dbg": "0.7.16",
+        "sol-dbg": "0.7.17",
         "@ethereumjs/util": "10.0.0",
         "semver": "^7.6.3"
     },

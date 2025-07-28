@@ -16,17 +16,14 @@
 14 - add storage map index
 15 - add stroage map index rd tests
 16 - add index write tests
-
 17 - add mem struct field location
 18 - add storage struct field location
 19 - add calldata struct field location
 20 - add field tests
 21 - add recursive walk test
-
 22 - make sol-dbg release
 23 - bump release
 24 - fix imports
-
 25 - add interfaces
 26 - add stack array-like view for fixed bytes
 27 - add associated "isX" functions
@@ -72,7 +69,6 @@
 65    - nested array bug?
 66    - impl evalLV for member access
 67 - implement struct constructor
-
 68 - add match
 69 - add evalC
 70 - go over eval uses and replace with evalC wherever appropriate
@@ -90,23 +86,102 @@
 82 - add test with maps in mem structs and struct constructor
 83 - add test with maps in mem structs and assignments storage->mem, mem->mem, mem->storage
 84 - add ctx to InterpError to allow easier tracing of errors.
+85 - add internal calls
+86 - add length
+87 - add evalNew for arrays
+88 - emit
+89 - start modifiers
+
+90 - add a "constant" store in the state. Make it a memory to allow for bytes/string constants. Maybe move literals there as well!
+91 - build constant evaluation graph
+92    - for each cosntant vardecl
+93        - walk over children, and for everything with a vReferenced declaration add a dependency
+94 - do topoSort() of the constant vars over all units
+95 - add a GlobalScope that knows about global vars. It has a map from name->astNode. Its lookup/lookupLocation just lookup the view in state.constantMap based on node id
+96 - make a "createGlobalScope(unit)" -> GlobalScope
+97 - add makeScope(node, state) -> scope where node in (SourceUnit, ContractDefinition, FunctionDefinition, BuiltinFunction, ModifierInvocation)
+98 - make empty state
+99 - for each var in the topoSort 
+99    eval the init expression in makeScope(var.vScope, state) and set it
+
+100 - subclass ArtifactManager
+101 - add unit->ArtifactInfo mapping
+102 - add getConstants(artifactInfo): Map<string, View>, memory
+103 - move "gatherConstants" half-baked thing in there
+104 - finish gatherConstants
+105 - undo constants memory space
+106 - get original tests to run
+
+107 - ArrayLikeView interface should include pp()
+108 - fix bug in PointerMemView.allocSize() for bytes/string
+109 - or AstNode->Artifact and AstNode->ContractArtifact mapping?
+110 - move getMemFor to PointerMemView
+111 - expose Allocator.baseOffset()
+112 - get test with only global consts to run
+113 - fix nit in intrp.evalTypeConversion due to base being protected
+114 - replace getTempMem with getMemFor and go through other uses of alloc
+115 - add constant vars to ContractScope
+116 - get test with contract constants to run
+117 - add constants tests from other repo
+118 - add a DefVal value
+119 - add all defs to unit scope (minus struct/enum type defs)
+120 - add all defs to contract scope (minus struct/enum type defs)
+121 - add tests for Contract.Variable, Unit.Contract.Variable
+122 - add test with AnotherContract.ConstantVariable and ThisContract.NonConstantVariable
+
+- add baseCall()
+    - save scope
+    - set new scope to makeScope(...)
+    - exec
+    - restore scope
+    - add test global calling a global
+
+- Idea: Tying it all toghether at the top-level:
+    - interface PersistentState {
+        artifact: ArtifactInfo;
+        mdc: ContractDefinition;
+        storage: Storage;
+        immutable: Memory;
+        balance: bigint;
+        ...
+      }
+    - World class has an ArtifactManager
+        states: map<Address, PersistentState>
+        makeCallState(msg: SolMessage) -> State
+            - ai = states[msg.to]
+            - construct memory and constant map from artifactManager.gatherConstants(ai)
+            - fill out State - {intCallStack, scope,)
+            
+        makeCreateState(msg: SolMessage) -> State
+            - nyi
+
+    - Implement Interpreter.call
+    - add `msg` builtin struct
+
+    - add a full call test that accesses msg builtin
+
+- Idea: remove reliance on solc-typed-ast's resolve:
+    - add remaining named defs to global and struct scopes
+    - update member access to handle Enum.Option
+
+- add test notes from other branch
+- add BaseWorld class that has an ArtifactManager
+
+- need an "immutable" var space somewhere in the state
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-- add a test with array of maps in a struct and push
-
 - jest debug config
-- fix my lint on save to:
-    - not do small shitty changes in sol-dbg repo
-    - actuall remove unused imports ffs
+
+- make an exhaustive test for coercions from old code
 
 // ---------------
-- add internal calls
-- add evalNew
-- add modifiers
+- external calls
+- add evalNew for contracts
 - more coercions
 - cli for playing
-- plan external calls, try/catch etc...
+- try/catch etc...
 - add builtins
+- add a test with array of maps in a struct and push
 
 
 - make a pass to remove nyi and todos

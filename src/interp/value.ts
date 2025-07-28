@@ -9,24 +9,71 @@ import {
     Slice
 } from "sol-dbg";
 import { StateArea, View } from "sol-dbg";
-import { BuiltinFunctionType, TypeNode } from "solc-typed-ast";
+import * as sol from "solc-typed-ast";
 import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
 
-export class BuiltinFunction {
-    constructor(
-        public readonly name: string,
-        public readonly type: BuiltinFunctionType,
-        public readonly call: (interp: Interpreter, state: State, args: Value[]) => Value[]
-    ) {}
+export abstract class BaseInterpValue implements sol.PPAble {
+    abstract pp(): string;
 }
 
-export class BuiltinStruct {
+export class BuiltinFunction extends BaseInterpValue {
+    constructor(
+        public readonly name: string,
+        public readonly type: sol.BuiltinFunctionType,
+        public readonly call: (interp: Interpreter, state: State, args: Value[]) => Value[]
+    ) {
+        super();
+    }
+
+    pp(): string {
+        return `<builtin fun ${this.type.pp()}>`;
+    }
+}
+
+export class BuiltinStruct extends BaseInterpValue {
     constructor(
         public readonly name: string,
         public readonly fields: Array<[string, Value]>
-    ) {}
+    ) {
+        super();
+    }
+
+    pp(): string {
+        return `<builtin struct ${this.name}>`;
+    }
+}
+
+/**
+ * Value corresponding to a contract our source unit definition. For example in this code:
+ * ```
+ *   contract Foo {
+ *      uint x;
+ *      funciton main() {
+ *          ... Foo.x ...
+ *      }
+ *   }
+ * ```
+ *
+ * The `Foo` identifier in the `Foo.x` member access evaluates to a `DefValue`.
+ */
+export class DefValue extends BaseInterpValue {
+    constructor(
+        public readonly def:
+            | sol.ContractDefinition
+            | sol.SourceUnit
+            | sol.FunctionDefinition
+            | sol.EventDefinition
+            | sol.ErrorDefinition
+    ) {
+        super();
+    }
+
+    pp(): string {
+        const name = this.def instanceof sol.SourceUnit ? this.def.sourceEntryKey : this.def.name;
+        return `<${this.def.constructor.name} ${name}>`;
+    }
 }
 
 /**
@@ -44,7 +91,7 @@ export class NoneValue extends Poison {
 
 export const none = new NoneValue();
 
-export type Value = PrimitiveValue | BuiltinFunction | BuiltinStruct | Value[];
+export type Value = PrimitiveValue | BuiltinFunction | BuiltinStruct | DefValue | Value[];
 
 // @todo migrate to sol-dbg
 type NonPoisonPrimitiveValue =
@@ -54,11 +101,16 @@ type NonPoisonPrimitiveValue =
     | Address // address
     | FunctionValue // function types
     | Slice // array slices
-    | View<any, BaseValue, any, TypeNode>; // Pointer Values
-export type NonPoisonValue = NonPoisonPrimitiveValue | BuiltinFunction | BuiltinStruct | Value[];
+    | View<any, BaseValue, any, sol.TypeNode>; // Pointer Values
+export type NonPoisonValue =
+    | NonPoisonPrimitiveValue
+    | BuiltinFunction
+    | BuiltinStruct
+    | DefValue
+    | Value[];
 
 export type LValue =
-    | View<StateArea, BaseValue, any, TypeNode>
+    | View<StateArea, BaseValue, any, sol.TypeNode>
     | null // empty components of tuple assignments
     | LValue[]; // Tuple assignments
 

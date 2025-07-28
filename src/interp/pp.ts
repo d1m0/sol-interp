@@ -1,5 +1,12 @@
 import { ExternalFunRef, InternalFunRef, Poison, Slice, toHexString, View } from "sol-dbg";
-import { BuiltinFunction, BuiltinStruct, LValue, Value, ValueTypeConstructors } from "./value";
+import {
+    BuiltinFunction,
+    BuiltinStruct,
+    DefValue,
+    LValue,
+    Value,
+    ValueTypeConstructors
+} from "./value";
 import { Address, bytesToHex } from "@ethereumjs/util";
 import { EvalStep, ExecStep, Trace } from "./step";
 import { printNode } from "./utils";
@@ -35,6 +42,8 @@ export function ppValue(v: Value): string {
         return `<internal fun ref to ${v.fun.name}>`;
     } else if (v instanceof Slice) {
         return `<slice [${v.start}:${v.end}]>`;
+    } else if (v instanceof DefValue) {
+        return v.pp();
     } else {
         return `${v}`;
     }

@@ -1,95 +1,84 @@
 import {
-    ArtifactManager,
     BaseMemoryView,
     BaseStorageView,
     ImmMap,
     nyi,
     PartialSolcOutput,
     PrimitiveValue,
-    Storage,
-    Value
+    Value,
+    ZERO_ADDRESS
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
-import { BaseScope, BuiltinsScope, ContractScope, LocalsScope } from "../../src/interp/scope";
-import { WorldInterface, CallResult, State } from "../../src/interp/state";
+import { BaseScope, LocalsScope, makeStaticScope } from "../../src/interp/scope";
+import { State } from "../../src/interp/state";
 import { DefaultAllocator } from "sol-dbg/dist/debug/decoding/memory/allocator";
-import { assertBuiltin, encodeConstants } from "../../src";
 import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
 import { gt } from "semver";
-
-export const worldMock: WorldInterface = {
-    create: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    call: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    staticcall: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    delegatecall: function (): Promise<CallResult> {
-        throw new Error("Function not implemented.");
-    },
-    getStorage: function (): Storage {
-        throw new Error("Function not implemented.");
-    }
-};
+import { ArtifactManager } from "../../src/interp/artifactManager";
 
 export function makeState(
     loc: sol.ASTNode,
-    version: string,
+    artifactManager: ArtifactManager,
     ...vals: Array<[string, Value]>
 ): State {
-    const infer = new sol.InferType(version);
+    const artifact = artifactManager.getArtifact(loc);
+
+    const [constantsMap, constMem] = artifactManager.getConstants(artifact);
+    /*
+    console.error(
+        `Constants for ${(loc.getClosestParentByType(sol.SourceUnit) as sol.SourceUnit).sourceEntryKey}: {${[...constantsMap.entries()].map(([k, v]) => `${k}: ${v.pp()}`).join(", ")}} in mem ${bytesToHex(constMem)}`
+    );
+    */
+
     const allocator = new DefaultAllocator();
-    const unit = loc.getClosestParentByType(sol.SourceUnit) as sol.SourceUnit;
-    const constantsMap = encodeConstants(unit, allocator);
-    const res: State = {
-        storage: ImmMap.fromEntries([]),
-        memory: allocator.memory,
-        allocator,
-        extCallStack: [],
-        intCallStack: [],
-        version,
-        scope: undefined,
-        constantsMap
-    };
+
+    // Copy over the constants into the new memory
+    allocator.alloc(constMem.length);
+    allocator.memory.set(constMem, 0x80);
 
     let nd: sol.ASTNode | undefined = loc;
-    const scopeNodes: sol.ASTNode[] = [];
+    const scopeNodes: Array<sol.FunctionDefinition | sol.Block | sol.UncheckedBlock> = [];
 
+    // Create only the dynamic part of the scope (function and blocks)
     while (nd !== undefined) {
         if (
-            nd instanceof sol.ContractDefinition ||
             nd instanceof sol.FunctionDefinition ||
             nd instanceof sol.Block ||
             nd instanceof sol.UncheckedBlock
         ) {
             scopeNodes.unshift(nd);
         }
+
         nd = nd.parent;
     }
 
-    // Builtins
-    let scope: BaseScope = new BuiltinsScope(
-        [["assert", assertBuiltin.type, assertBuiltin]],
-        res,
-        undefined
-    );
-    for (const nd of scopeNodes) {
-        if (nd instanceof sol.ContractDefinition) {
-            scope = new ContractScope(nd, infer, res, scope);
-        } else if (
-            nd instanceof sol.FunctionDefinition ||
-            nd instanceof sol.Block ||
-            nd instanceof sol.UncheckedBlock
-        ) {
-            scope = new LocalsScope(nd, res, scope);
-        } else {
-            nyi(`Scope nd ${nd.print()}`);
+    const contract = loc.getClosestParentByType(sol.ContractDefinition);
+    sol.assert(contract !== undefined, ``);
+
+    const res: State = {
+        storage: ImmMap.fromEntries([]),
+        memory: allocator.memory,
+        memAllocator: allocator,
+        intCallStack: [],
+        version: artifact.compilerVersion,
+        scope: undefined,
+        constantsMap,
+        mdc: contract,
+        msg: {
+            to: ZERO_ADDRESS,
+            data: new Uint8Array(),
+            gas: 0n,
+            value: 0n,
+            salt: undefined
         }
+    };
+
+    // Builtins
+    let scope: BaseScope = makeStaticScope(loc, res);
+    for (const nd of scopeNodes) {
+        scope = new LocalsScope(nd, res, scope);
     }
 
     res.scope = scope as BaseScope;
@@ -97,7 +86,7 @@ export function makeState(
     for (const [name, val] of vals) {
         const view = res.scope.lookupLocation(name);
         if (view instanceof BaseMemoryView) {
-            view.encode(val, res.memory, res.allocator);
+            view.encode(val, res.memory, res.memAllocator);
         } else if (view instanceof BaseStorageView) {
             res.storage = view.encode(val, res.storage);
         } else {
@@ -121,7 +110,7 @@ export function encodeMemArgs(args: Array<[string, Value]>, state: State): Inter
                 view instanceof BaseMemoryView,
                 `Unexpected arg view: ${view.constructor.name}`
             );
-            view.encode(val, state.memory, state.allocator);
+            view.encode(val, state.memory, state.memAllocator);
             res.push(view);
         }
     }
@@ -137,7 +126,7 @@ function getVersion(source: string): string {
 
 export interface SampleInfo {
     version: string;
-    unit: sol.SourceUnit;
+    units: sol.SourceUnit[];
 }
 
 export type SampleMap = Map<string, SampleInfo>;
@@ -150,9 +139,8 @@ export async function loadSamples(names: string[]): Promise<[ArtifactManager, Sa
             encoding: "utf-8"
         });
         const version = getVersion(file);
-        const compileResult = await sol.compileSourceString(
-            fileName,
-            file,
+        const compileResult = await sol.compileSol(
+            `test/samples/${fileName}`,
             version,
             undefined,
             undefined,
@@ -164,7 +152,7 @@ export async function loadSamples(names: string[]): Promise<[ArtifactManager, Sa
     const artifactManager = new ArtifactManager(compileResults);
     for (let i = 0; i < names.length; i++) {
         const artifact = artifactManager.artifacts()[i];
-        res.set(names[i], { version: artifact.compilerVersion, unit: artifact.units[0] });
+        res.set(names[i], { version: artifact.compilerVersion, units: artifact.units });
     }
 
     return [artifactManager, res];

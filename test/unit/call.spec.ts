@@ -1,9 +1,11 @@
 import { View, Value, zip } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
-import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap, worldMock } from "./utils";
+import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
 import { Assert, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
+import { worldFailMock } from "../../src/interp/utils";
+import { ArtifactManager } from "../../src/interp/artifactManager";
 
 type ExceptionConstructors = typeof Assert;
 const samples: Array<
@@ -74,11 +76,20 @@ const samples: Array<
     ["StorageAliasing.sol", "StorageAliasing", "maps", [], [], []],
     ["StorageAliasing.sol", "StorageAliasing", "structInStructCopy", [], [], []],
     ["InMemoryStructWithMapping.sol", "Test", "verify", [], [], []],
-    ["InMemoryStructWithMapping.sol", "Test", "verifyMapArr", [], [], []]
+    ["InMemoryStructWithMapping.sol", "Test", "verifyMapArr", [], [], []],
+    ["calls.sol", "Calls", "main", [], [], []],
+    ["new.sol", "New", "main", [], [], []],
+    ["global_constants.sol", "Foo", "main", [], [], []],
+    ["contract_constants.sol", "Foo", "main", [["s", 1n]], [], []],
+    ["def_value.sol", "Bar", "main", [], [], []],
+    ["selectors.sol", "Foo", "main", [], [], []],
+    ["cross_file_constant_deps1.sol", "Main", "main", [], [], []],
+    ["type_conversions_more.sol", "Foo", "main", [], [], []],
+    ["type_conversions_more.sol", "Foo", "binops", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
-    let artifactManager;
+    let artifactManager: ArtifactManager;
     let interp: Interpreter;
     let sampleMap: SampleMap;
 
@@ -86,16 +97,26 @@ describe("Simple function call tests", () => {
 
     beforeAll(async () => {
         [artifactManager, sampleMap] = await loadSamples(fileNames);
-        interp = new Interpreter(worldMock, artifactManager);
+        interp = new Interpreter(worldFailMock, artifactManager);
     }, 10000);
 
     for (const [fileName, contract, funName, stateVals, argVals, expectedReturns] of samples) {
         it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, () => {
-            const { unit, version } = sampleMap.get(fileName) as SampleInfo;
-            const fun = new sol.XPath(unit).query(
-                `//ContractDefinition[@name='${contract}']/FunctionDefinition[@name='${funName}']`
-            )[0] as sol.FunctionDefinition;
-            const state = makeState(fun, version, ...stateVals);
+            const { units } = sampleMap.get(fileName) as SampleInfo;
+            let fun: sol.FunctionDefinition | undefined = undefined;
+
+            for (const unit of units) {
+                fun = new sol.XPath(unit).query(
+                    `//ContractDefinition[@name='${contract}']/FunctionDefinition[@name='${funName}']`
+                )[0];
+
+                if (fun !== undefined) {
+                    break;
+                }
+            }
+
+            sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
+            const state = makeState(fun, artifactManager, ...stateVals);
 
             const args = zip(
                 fun.vParameters.vParameters.map((d) => d.name),
@@ -113,11 +134,11 @@ describe("Simple function call tests", () => {
                         //console.error(`Trace: ${ppTrace(e.trace)}`);
                         //console.error(`Memory: ${ppMem(state.memory)}`)
                         console.error(
-                            `Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e}`
+                            `Unexpected ${e instanceof RuntimeError ? "runtime" : "internal"} error: ${e.stack}`
                         );
                     } else {
                         // console.error(`Trace: ${ppTrace(interp.trace)}`);
-                        console.error(`Unexpected unrelated exception ${e} ${(e as Error).stack}`);
+                        console.error(`Unexpected unrelated exception ${(e as Error).stack}`);
                     }
                     expect(false).toBeTruthy();
                 }

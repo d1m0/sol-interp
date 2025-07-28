@@ -28,18 +28,29 @@ import {
     StringMemView,
     BytesMemView,
     StringCalldataView,
-    BytesCalldataView,
     StringStorageView,
-    BytesStorageView
+    BytesStorageView,
+    MAX_ARR_DECODE_LIMIT,
+    ArrayLikeView,
+    BytesCalldataView
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
 import { EvalStep, ExecStep, Trace } from "./step";
-import { InternalError, NoScope, NotDefined, OOB, Overflow, RuntimeError } from "./exceptions";
+import {
+    InternalError,
+    InterpError,
+    NoScope,
+    NotDefined,
+    OOB,
+    Overflow,
+    RuntimeError
+} from "./exceptions";
 import { gte, lt } from "semver";
 import {
     BuiltinFunction,
     BuiltinStruct,
+    DefValue,
     isPrimitiveValue,
     LValue,
     match,
@@ -49,8 +60,8 @@ import {
     Value,
     ValueTypeConstructors
 } from "./value";
-import { Address } from "@ethereumjs/util";
-import { BaseScope, LocalsScope } from "./scope";
+import { Address, bigIntToBytes, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
+import { BaseScope, LocalsScope, makeStaticScope } from "./scope";
 import { changeLocTo, getMsg, isStructView, isValueType, makeZeroValue, printNode } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
@@ -148,11 +159,11 @@ export class Interpreter {
 
     ///*********************EXTERNAL FUNCTION CALLS************************************
     public create(msg: SolMessage, state: State): Address {
-        nyi(`create`);
+        nyi(`create(${msg}, ${state})`);
     }
 
     public call(msg: SolMessage, state: State): Value[] | InternalError {
-        nyi(`create`);
+        nyi(`create(${msg}, ${state})`);
     }
 
     private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
@@ -227,6 +238,8 @@ export class Interpreter {
             }
             return res;
         });
+
+        this.popScope(state);
         this.nodes.pop();
         return results;
     }
@@ -741,16 +754,6 @@ export class Interpreter {
         return res;
     }
 
-    getTempMem(
-        type: sol.TypeNode,
-        state: State,
-        valToHold: BaseValue | undefined
-    ): BaseMemoryView<BaseValue, sol.TypeNode> {
-        const size = PointerMemView.allocSize(valToHold, type);
-        const addr = state.allocator.alloc(size);
-        return makeMemoryView(type, addr);
-    }
-
     assign(lvalue: LValue, rvalue: Value, state: State): void {
         // Handle tuple assignments first
         if (lvalue instanceof Array) {
@@ -803,12 +806,16 @@ export class Interpreter {
             const complexRVal = this.decode(rvalue, state);
 
             if (lvalue instanceof BaseMemoryView) {
-                lvalue.encode(complexRVal, state.memory, state.allocator);
+                lvalue.encode(complexRVal, state.memory, state.memAllocator);
             } else if (lvalue instanceof BaseStorageView) {
                 state.storage = lvalue.encode(complexRVal, state.storage);
             } else {
-                const memView = this.getTempMem(lvalue.type.to, state, complexRVal);
-                memView.encode(complexRVal, state.memory, state.allocator);
+                const memView = PointerMemView.allocMemFor(
+                    complexRVal,
+                    lvalue.type.to,
+                    state.memAllocator
+                );
+                memView.encode(complexRVal, state.memory, state.memAllocator);
                 lvalue.encode(memView);
             }
 
@@ -822,7 +829,7 @@ export class Interpreter {
         if (lvalue instanceof BaseStorageView) {
             state.storage = lvalue.encode(rvalue, state.storage);
         } else if (lvalue instanceof BaseMemoryView) {
-            lvalue.encode(rvalue, state.memory, state.allocator);
+            lvalue.encode(rvalue, state.memory, state.memAllocator);
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
                 !(lvalue.type instanceof sol.PointerType) ||
@@ -840,9 +847,6 @@ export class Interpreter {
         let rvalue = this.evalNP(expr.vRightHandSide, state);
         const lv = this.evalLV(expr.vLeftHandSide, state);
 
-        // @todo handle coercions
-        // @todo handle memory to storage copy
-        // @todo handle storage to storage copy assignments
         // @todo after indexaccess is fixed, add a test of the shape a[i++] = i++; and (a[i++], a[i++]) = [1,2]; to see order of evaluation.
 
         // Assignment with a combined binary operator
@@ -880,6 +884,24 @@ export class Interpreter {
         return clampedVal;
     }
 
+    private coerceIntLiteralsToBytes(left: Value, right: Value): [Value, Value] {
+        if (typeof left === typeof right) {
+            return [left, right];
+        }
+
+        if (typeof left === "bigint" && right instanceof Uint8Array) {
+            const t = left;
+            left = right;
+            right = t;
+        }
+
+        if (left instanceof Uint8Array && typeof right === "bigint") {
+            return [left, bigIntToBytes(right)];
+        }
+
+        this.fail(InterpError, `Unexpected values ${ppValue(left)} and ${ppValue(right)}`);
+    }
+
     private computeBinary(
         left: Value,
         operator: string,
@@ -909,10 +931,14 @@ export class Interpreter {
         if (sol.BINARY_OPERATOR_GROUPS.Equality.includes(operator)) {
             let isEqual: boolean;
 
+            [left, right] = this.coerceIntLiteralsToBytes(left, right);
+
             if (typeof left === "boolean" && typeof right === "boolean") {
                 isEqual = left === right;
             } else if (typeof left === "bigint" && typeof right === "bigint") {
                 isEqual = left === right;
+            } else if (left instanceof Uint8Array && right instanceof Uint8Array) {
+                isEqual = equalsBytes(left, right);
             } else {
                 nyi(`${left} ${operator} ${right}`);
             }
@@ -929,7 +955,19 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Comparison.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint");
+            let [sleft, sright]: [any, any] = this.coerceIntLiteralsToBytes(left, right);
+
+            if (sleft instanceof Uint8Array && sright instanceof Uint8Array) {
+                // Perform lexicographical comparison
+                sleft = bytesToHex(sleft);
+                sright = bytesToHex(sright);
+            }
+
+            this.expect(
+                (typeof sleft === "bigint" && typeof sright === "bigint") ||
+                    (typeof sleft === "string" && typeof sright === "string")
+            );
+
             if (operator === "<") {
                 return left < right;
             }
@@ -973,29 +1011,36 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint");
+            if (operator === "<<" || operator === ">>") {
+                this.expect(typeof right === "bigint");
 
-            if (operator === "<<") {
-                return left << right;
+                if (typeof left === "bigint") {
+                    return operator === "<<" ? left << right : left >> right;
+                }
+
+                this.expect(left instanceof Uint8Array);
+                nyi(`Bitshift of fixed bytes`);
             }
 
-            if (operator === ">>") {
-                return left >> right;
+            [left, right] = this.coerceIntLiteralsToBytes(left, right);
+
+            if (typeof left === "bigint" && typeof right === "bigint") {
+                if (operator === "|") {
+                    return left | right;
+                }
+
+                if (operator === "&") {
+                    return left & right;
+                }
+
+                if (operator === "^") {
+                    return left ^ right;
+                }
+
+                nyi(`Unknown bitwise operator ${operator}`);
             }
 
-            if (operator === "|") {
-                return left | right;
-            }
-
-            if (operator === "&") {
-                return left & right;
-            }
-
-            if (operator === "^") {
-                return left ^ right;
-            }
-
-            nyi(`Unknown bitwise operator ${operator}`);
+            nyi(`Bitwise ${operator} on fixed bytes`);
         }
 
         nyi(`${left} ${operator} ${right}`);
@@ -1023,7 +1068,7 @@ export class Interpreter {
     }
 
     evalElementaryTypeNameExpression(expr: sol.ElementaryTypeNameExpression, state: State): Value {
-        nyi("");
+        nyi(`evalElementaryTypeNameExpression(${expr}, ${state})`);
     }
 
     /**
@@ -1043,6 +1088,7 @@ export class Interpreter {
 
         const fromV = this.evalNP(expr.vArguments[0], state);
 
+        // int -> fixed bytes
         if (fromT instanceof sol.IntType && toT instanceof sol.FixedBytesType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
             this.expect(
@@ -1052,6 +1098,17 @@ export class Interpreter {
 
             scratchWord.fill(0);
             const view = new IntMemView(fromT, 0n);
+            view.encode(fromV, scratchWord);
+
+            return scratchWord.slice(32 - toT.size, 32);
+        }
+
+        // int literal -> fixed bytes
+        if (fromT instanceof sol.IntLiteralType && toT instanceof sol.FixedBytesType) {
+            this.expect(typeof fromV === "bigint", `Expected a bigint`);
+
+            scratchWord.fill(0);
+            const view = new IntMemView(new sol.IntType(toT.size * 8, false), 0n);
             view.encode(fromV, scratchWord);
 
             return scratchWord.slice(32 - toT.size, 32);
@@ -1070,7 +1127,10 @@ export class Interpreter {
             fromT.to instanceof sol.StringType &&
             toT instanceof sol.BytesType
         ) {
-            this.expect(fromV instanceof View && fromV.type instanceof sol.StringType, ``);
+            this.expect(
+                fromV instanceof View && fromV.type instanceof sol.StringType,
+                `Expected string pointer not ${ppValue(fromV)}`
+            );
             if (fromV instanceof StringMemView) {
                 return new BytesMemView(new sol.BytesType(), fromV.offset);
             } else if (fromV instanceof StringCalldataView) {
@@ -1123,7 +1183,6 @@ export class Interpreter {
      * evaluates all field expressions and assigns them to the relevant fiels in the memory struct.
      * Returns a view to the struct in memory.
      *
-     * @todo handle the case with mappings in structs. Those get silently ignored in initializers
      * @param expr
      * @param state
      */
@@ -1139,7 +1198,11 @@ export class Interpreter {
         );
 
         const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
-        const structView = this.getTempMem(structT, state, undefined) as StructMemView;
+        const structView = PointerMemView.allocMemFor(
+            undefined,
+            structT,
+            state.memAllocator
+        ) as StructMemView;
 
         const fieldExprs = this.detectStructFieldExprs(expr, structT);
         const fieldMap = new Map<string, Value>();
@@ -1171,12 +1234,118 @@ export class Interpreter {
         return structView;
     }
 
+    evalBuiltinCall(expr: sol.FunctionCall, state: State): Value {
+        const callee = this.evalNP(expr.vExpression, state);
+        const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
+
+        this.expect(callee instanceof BuiltinFunction);
+        return callee.call(this, state, args);
+    }
+
+    evalExternalCall(expr: sol.FunctionCall, state: State): Value {
+        nyi(`evalExternalCall(${printNode(expr)}, ${state})`);
+    }
+
+    evalInternalCall(expr: sol.FunctionCall, state: State): Value {
+        const calleeAst = this.getCallee(expr.vExpression);
+        const infer = this.infer(state);
+        this.expect(
+            calleeAst instanceof sol.Identifier || calleeAst instanceof sol.MemberAccess,
+            `Unexpected callee ${printNode(calleeAst)}`
+        );
+        const def = calleeAst.vReferencedDeclaration;
+        this.expect(
+            def instanceof sol.FunctionDefinition || def instanceof sol.VariableDeclaration,
+            `Unexpected callee def ${def}`
+        );
+
+        this.expect(
+            state.mdc !== undefined,
+            `NYI calling a global function from another global function`
+        );
+        const resolvedCalleeDef = sol.resolveCallable(state.mdc, def, infer);
+        this.expect(
+            resolvedCalleeDef !== undefined,
+            `Couldn't resolve callee ${def.name} in contract ${state.mdc}`
+        );
+
+        const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
+        let results: Value[];
+
+        if (resolvedCalleeDef instanceof sol.FunctionDefinition) {
+            results = this.callInternal(resolvedCalleeDef, argVals, state);
+        } else {
+            nyi(`Calling public getter ${resolvedCalleeDef.name} in ${state.mdc}`);
+        }
+
+        if (results.length === 0) {
+            return none;
+        }
+
+        if (results.length === 1) {
+            return results[0];
+        }
+
+        return results;
+    }
+
     evalNewCall(expr: sol.FunctionCall, state: State): Value {
-        nyi("");
+        const calleeAST = this.getCallee(expr.vExpression) as sol.NewExpression;
+        const infer = this.infer(state);
+        const newT = infer.typeNameToSpecializedTypeNode(
+            calleeAST.vTypeName,
+            sol.DataLocation.Memory
+        );
+
+        const args = expr.vArguments.map((arg) => this.eval(arg, state));
+
+        if (
+            newT instanceof sol.UserDefinedType &&
+            newT.definition instanceof sol.ContractDefinition
+        ) {
+            // new contract
+            nyi(`Creating a new contract`);
+        }
+
+        let simplifiedT = simplifyType(newT, infer, sol.DataLocation.Memory);
+        this.expect(simplifiedT instanceof sol.PointerType, ``);
+        simplifiedT = simplifiedT.to;
+        this.expect(
+            (simplifiedT instanceof sol.ArrayType || simplifiedT instanceof sol.PackedArrayType) &&
+                args.length === 1 &&
+                typeof args[0] === "bigint",
+            `Expected an array type with a single length argument not ${simplifiedT.pp()} with ${args}`
+        );
+
+        const arrSize = bigIntToNum(args[0], 0n, MAX_ARR_DECODE_LIMIT);
+
+        let initialVal: BaseValue;
+        let addr: bigint;
+
+        if (simplifiedT instanceof sol.ArrayType) {
+            initialVal = [];
+
+            for (let i = 0; i < arrSize; i++) {
+                initialVal.push(makeZeroValue(simplifiedT.elementT, state));
+            }
+
+            addr = state.memAllocator.alloc(32 * arrSize + 32);
+        } else {
+            initialVal =
+                simplifiedT instanceof sol.BytesType
+                    ? new Uint8Array(arrSize)
+                    : `\x00`.repeat(arrSize);
+            addr = state.memAllocator.alloc(arrSize + 32);
+        }
+        const view = makeMemoryView(simplifiedT, addr);
+        view.encode(initialVal, state.memory, state.memAllocator);
+
+        return view;
     }
 
     /**
      * Helper to get the callee from a FunctionCall.vExpression. This strips gas,value, salt modifiers.
+     * @todo replace this with decodeCallee to get the gas, value and salt
      */
     private getCallee(expr: sol.Expression): sol.Expression {
         while (expr instanceof sol.FunctionCallOptions || expr instanceof sol.FunctionCall) {
@@ -1195,26 +1364,40 @@ export class Interpreter {
             return this.evalStructConstructorCall(expr, state);
         }
 
-        const calleeAst = this.getCallee(expr.vExpression);
-        // Actual call
-        if (
-            expr.vFunctionCallType === sol.ExternalReferenceType.Builtin &&
-            calleeAst instanceof sol.NewExpression
-        ) {
-            return this.evalNewCall(expr, state);
+        if (expr.vFunctionCallType === sol.ExternalReferenceType.Builtin) {
+            const calleeAst = this.getCallee(expr.vExpression);
+
+            if (calleeAst instanceof sol.NewExpression) {
+                return this.evalNewCall(expr, state);
+            }
+
+            return this.evalBuiltinCall(expr, state);
         }
 
-        const callee = this.evalNP(expr.vExpression, state);
-        const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
+        const infer = this.infer(state);
 
-        if (callee instanceof BuiltinFunction) {
-            return callee.call(this, state, args);
+        if (infer.isFunctionCallExternal(expr)) {
+            return this.evalExternalCall(expr, state);
         }
 
-        nyi(`Function call ${expr.print()}`);
+        return this.evalInternalCall(expr, state);
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
+        // contract name
+        if (expr.vReferencedDeclaration instanceof sol.ContractDefinition) {
+            return new DefValue(expr.vReferencedDeclaration);
+        }
+
+        // named SourceUnit import
+        if (expr.vReferencedDeclaration instanceof sol.ImportDirective) {
+            this.expect(
+                expr.vReferencedDeclaration.unitAlias !== "",
+                `Unexpected identifier of an unnamed import`
+            );
+            return new DefValue(expr.vReferencedDeclaration.vSourceUnit);
+        }
+
         if (!state.scope) {
             this.fail(NoScope, ``);
         }
@@ -1293,7 +1476,7 @@ export class Interpreter {
     }
 
     evalIndexRangeAccess(expr: sol.IndexRangeAccess, state: State): Value {
-        nyi("");
+        nyi(`evalIndexRangeAccess(${printNode(expr)}, ${state})`);
     }
 
     evalLiteral(expr: sol.Literal, state: State): Value {
@@ -1342,6 +1525,34 @@ export class Interpreter {
             return field[0][1];
         }
 
+        if (isArrayLikeView(baseVal) && expr.memberName === "length") {
+            return this.getSize(baseVal, state);
+        }
+
+        if (baseVal instanceof DefValue) {
+            if (
+                baseVal.def instanceof sol.EventDefinition ||
+                baseVal.def instanceof sol.ErrorDefinition
+            ) {
+                const infer = this.infer(state);
+                return hexToBytes(`0x${infer.signatureHash(baseVal.def)}`);
+            }
+
+            if (
+                baseVal.def instanceof sol.SourceUnit ||
+                baseVal.def instanceof sol.ContractDefinition
+            ) {
+                const scope = makeStaticScope(baseVal.def, state);
+                const res = scope.lookup(expr.memberName);
+                this.expect(
+                    res !== undefined,
+                    `Couldnt find ${expr.memberName} in ${ppValue(baseVal)}`
+                );
+
+                return res;
+            }
+        }
+
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
     }
 
@@ -1362,7 +1573,7 @@ export class Interpreter {
                 `Expected a fixed size array in memory not ${arrPtrT.pp()}`
             );
 
-            const arrView = this.getTempMem(arrPtrT.to, state, undefined);
+            const arrView = PointerMemView.allocMemFor(undefined, arrPtrT.to, state.memAllocator);
             this.expect(arrView instanceof ArrayMemView, ``);
 
             for (let i = 0n; i < arrPtrT.to.size; i++) {
@@ -1428,6 +1639,27 @@ export class Interpreter {
         }
 
         nyi(`decode(${lv})`);
+    }
+
+    /**
+     * Given an array-like view get its size
+     */
+    public getSize(lv: ArrayLikeView<any, View>, state: State): bigint {
+        let res: bigint | DecodingFailure;
+        if (isArrayLikeStorageView(lv)) {
+            res = lv.size(state.storage);
+        } else if (isArrayLikeMemView(lv)) {
+            res = lv.size(state.memory);
+        } else if (isArrayLikeCalldataView(lv)) {
+            res = lv.size(getMsg(state));
+        } else if (lv instanceof ArrayLikeLocalView) {
+            res = lv.size();
+        } else {
+            nyi(`getSize(${lv})`);
+        }
+
+        this.expect(typeof res === "bigint", `Error getting the size of ${lv}`);
+        return res;
     }
 
     /**
@@ -1497,7 +1729,7 @@ export class Interpreter {
         } else if (expr.operator === "~") {
             res = ~subVal;
         } else {
-            // @todo implement ++, --, delete
+            // @todo implement delete
             nyi(`Unary operator ${expr.operator}`);
         }
 
