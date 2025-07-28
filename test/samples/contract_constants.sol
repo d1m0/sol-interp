@@ -18,6 +18,6 @@ contract Foo {
 		assert(Foo.w.length == 2 && Foo.w[0] == 0x61 && Foo.w[1] == 0x62);
 
 		assert(s == x);
-		assert(Foo.s == Foo.x);
+		assert(s == Foo.x);
 	}
 }

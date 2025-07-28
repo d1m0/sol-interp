@@ -120,12 +120,14 @@
 112 - get test with only global consts to run
 113 - fix nit in intrp.evalTypeConversion due to base being protected
 114 - replace getTempMem with getMemFor and go through other uses of alloc
-
-
-- add constant vars to ContractScope
-- get test with contract constants to run
-
-- add constants tests from other repo
+115 - add constant vars to ContractScope
+116 - get test with contract constants to run
+117 - add constants tests from other repo
+118 - add a DefVal value
+119 - add all defs to unit scope (minus struct/enum type defs)
+120 - add all defs to contract scope (minus struct/enum type defs)
+121 - add tests for Contract.Variable, Unit.Contract.Variable
+122 - add test with AnotherContract.ConstantVariable and ThisContract.NonConstantVariable
 
 - add baseCall()
     - save scope
@@ -157,16 +159,10 @@
     - add `msg` builtin struct
 
     - add a full call test that accesses msg builtin
-    
-    
 
-- Idea: Add non-value defs to scopes
-    - add a DefVal value
-    - add all defs to unit scope
-    - add all defs to contract scope
-    - add tests for Contract.Variable, Unit.Contract.Variable
-
-- add test with AnotherContract.ConstantVariable and ThisContract.NonConstantVariable
+- Idea: remove reliance on solc-typed-ast's resolve:
+    - add remaining named defs to global and struct scopes
+    - update member access to handle Enum.Option
 
 - add test notes from other branch
 - add BaseWorld class that has an ArtifactManager

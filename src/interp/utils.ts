@@ -16,7 +16,7 @@ import {
     BaseMemoryView,
     BaseCalldataView,
     BaseStorageView,
-    Storage,
+    Storage
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { none } from "./value";

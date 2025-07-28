@@ -1,5 +1,14 @@
 import { hexToBytes } from "@ethereumjs/util";
-import { ArtifactInfo, BaseMemoryView, BytesMemView, DecodingFailure, Memory, PointerMemView, simplifyType, Value } from "sol-dbg";
+import {
+    ArtifactInfo,
+    BaseMemoryView,
+    BytesMemView,
+    DecodingFailure,
+    Memory,
+    PointerMemView,
+    simplifyType,
+    Value
+} from "sol-dbg";
 import { StringMemView } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { topoSort, worldFailMock } from "./utils";
@@ -85,7 +94,7 @@ class NoneView extends BaseMemoryView<NoneValue, sol.TupleType> {
         throw new Error("Can't decode NoneView.");
     }
     constructor() {
-        super(NoneT, 0n)
+        super(NoneT, 0n);
     }
 }
 
@@ -156,13 +165,17 @@ export function gatherConstants(
 
     // Pre-init constantMap with NoneViews to appease Scope constructors
     for (const nd of sortedNodes) {
-        state.constantsMap.set(nd.id, new NoneView())
+        state.constantsMap.set(nd.id, new NoneView());
     }
 
     for (const nd of sortedNodes) {
-        const typ = simplifyType(infer.variableDeclarationToTypeNode(nd), infer, sol.DataLocation.Memory)
+        const typ = simplifyType(
+            infer.variableDeclarationToTypeNode(nd),
+            infer,
+            sol.DataLocation.Memory
+        );
         const scope = makeStaticScope(nd, state);
-        sol.assert(scope instanceof GlobalScope || scope instanceof ContractScope, ``)
+        sol.assert(scope instanceof GlobalScope || scope instanceof ContractScope, ``);
         state.scope = scope;
 
         sol.assert(nd.vValue !== undefined, `Unexpected constant variable with no initializer`);
@@ -175,7 +188,7 @@ export function gatherConstants(
         } else {
             sol.assert(isPrimitiveValue(val), `Unexpected constant value ${ppValue(val)}`);
             view = PointerMemView.allocMemFor(val, typ, state.memAllocator);
-            view.encode(val, state.memory, state.memAllocator)
+            view.encode(val, state.memory, state.memAllocator);
         }
 
         state.constantsMap.set(nd.id, view);

@@ -1,5 +1,5 @@
 import * as sol from "solc-typed-ast";
-import { Value } from "./value";
+import { DefValue, Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -10,8 +10,7 @@ import {
     View,
     Value as BaseValue,
     DecodingFailure,
-    PrimitiveValue,
-    nyi,
+    PrimitiveValue
 } from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
@@ -46,7 +45,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<string, sol.TypeNode>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) { }
+    ) {}
 
     abstract _lookup(name: string): Value | undefined;
     abstract _lookupLocation(name: string): View | undefined;
@@ -230,11 +229,54 @@ export class LocalsScope extends BaseScope {
     }
 }
 
+function defToType(decl: UnitDef, infer: sol.InferType): sol.TypeNode {
+    if (decl instanceof sol.VariableDeclaration) {
+        return infer.variableDeclarationToTypeNode(decl);
+    } else if (decl instanceof sol.ContractDefinition) {
+        return new sol.TypeNameType(new sol.UserDefinedType(decl.name, decl));
+    } else if (decl instanceof sol.FunctionDefinition) {
+        return infer.funDefToType(decl);
+    } else if (decl instanceof sol.EventDefinition) {
+        return infer.eventDefToType(decl);
+    } else if (decl instanceof sol.ErrorDefinition) {
+        return infer.errDefToType(decl);
+    } else {
+        return new sol.ImportRefType(decl);
+    }
+}
+
+function defToValue(decl: UnitDef): DefValue {
+    if (decl instanceof sol.ImportDirective) {
+        return new DefValue(decl.vSourceUnit);
+    }
+
+    return new DefValue(decl);
+}
+
 export class ContractScope extends BaseScope {
     private readonly layoutType: ExpStructType;
     private readonly layout: StructStorageView;
     private fieldToView: Map<string, BaseStorageView<any, sol.TypeNode>>;
     private constFieldToView: Map<string, BaseMemoryView<any, sol.TypeNode>>;
+    private defMap: Map<string, DefValue>;
+
+    private static gatherDefs(contract: sol.ContractDefinition): Map<string, UnitDef> {
+        const res = new Map<string, UnitDef>();
+
+        for (const d of contract.vFunctions) {
+            res.set(d.name, d);
+        }
+
+        for (const d of contract.vEvents) {
+            res.set(d.name, d);
+        }
+
+        for (const d of contract.vErrors) {
+            res.set(d.name, d);
+        }
+
+        return res;
+    }
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
@@ -245,10 +287,25 @@ export class ContractScope extends BaseScope {
         const [layoutType] = getContractLayoutType(contract, infer);
         const defTypes = new Map<string, sol.TypeNode>(layoutType.fields);
 
-        const constVars = contract.vStateVariables.filter((decl) => decl.mutability === sol.Mutability.Constant)
+        const constVars = contract.vStateVariables.filter(
+            (decl) => decl.mutability === sol.Mutability.Constant
+        );
 
         for (const v of constVars) {
-            defTypes.set(v.name, simplifyType(infer.variableDeclarationToTypeNode(v), infer, sol.DataLocation.Memory))
+            defTypes.set(
+                v.name,
+                simplifyType(infer.variableDeclarationToTypeNode(v), infer, sol.DataLocation.Memory)
+            );
+        }
+
+        const defMap = ContractScope.gatherDefs(contract);
+        for (const [name, def] of defMap) {
+            if (def instanceof sol.VariableDeclaration) {
+                // Handled above
+                continue;
+            }
+
+            defTypes.set(name, defToType(def, infer));
         }
 
         super(`<contract ${contract.name}>`, defTypes, state, _next);
@@ -259,16 +316,21 @@ export class ContractScope extends BaseScope {
         this.constFieldToView = new Map();
         for (const v of constVars) {
             const constView = state.constantsMap.get(v.id);
-            sol.assert(constView !== undefined, `Missing value for constant state var ${contract.name}.${v.name}`)
-            this.constFieldToView.set(v.name, constView)
+            sol.assert(
+                constView !== undefined,
+                `Missing value for constant state var ${contract.name}.${v.name}`
+            );
+            this.constFieldToView.set(v.name, constView);
         }
+
+        this.defMap = new Map([...defMap.entries()].map(([name, def]) => [name, defToValue(def)]));
     }
 
     private _lookupConst(name: string): Value | undefined {
         const view = this.constFieldToView.get(name);
 
         if (view === undefined) {
-            return undefined;
+            return this.defMap.get(name);
         }
 
         if (isValueType(view.type)) {
@@ -311,29 +373,74 @@ export class ContractScope extends BaseScope {
     }
 }
 
+type UnitDef =
+    | sol.ContractDefinition
+    | sol.ImportDirective
+    | sol.FunctionDefinition
+    | sol.EventDefinition
+    | sol.ErrorDefinition;
+
+function isUnitDef(n: sol.ASTNode): n is UnitDef {
+    return (
+        n instanceof sol.ContractDefinition ||
+        n instanceof sol.ImportDirective ||
+        n instanceof sol.FunctionDefinition ||
+        n instanceof sol.EventDefinition ||
+        n instanceof sol.ErrorDefinition
+    );
+}
+
 export class GlobalScope extends BaseScope {
     private viewMap: Map<string, BaseMemoryView<BaseValue, sol.TypeNode>>;
+    private defMap: Map<string, DefValue>;
+
     private static gatherDefs(
         unit: sol.SourceUnit,
-        res = new Map<string, sol.VariableDeclaration>()
-    ): Map<string, sol.VariableDeclaration> {
+        res = new Map<string, sol.VariableDeclaration | UnitDef>()
+    ): Map<string, sol.VariableDeclaration | UnitDef> {
         for (const v of unit.vVariables) {
             res.set(v.name, v);
         }
 
         for (const imp of unit.vImportDirectives) {
             // import * as foo from "..."
-            if (imp.unitAlias) {
+            if (imp.unitAlias !== "") {
                 // Nothing to do - constants get resolved by evalMemberAccess
+                res.set(imp.unitAlias, imp);
             } else if (imp.symbolAliases.length > 0) {
                 // import { a, b as c, ...} from "..."
-                nyi(
-                    `alias imports. These require DefValues to support Contract.Var and Unit.Contract.Var`
-                );
+                for (const alias of imp.vSymbolAliases) {
+                    const [originalDef, newName] = alias;
+                    if (originalDef instanceof sol.VariableDeclaration || isUnitDef(originalDef)) {
+                        const name =
+                            newName === undefined
+                                ? originalDef instanceof sol.ImportDirective
+                                    ? originalDef.unitAlias
+                                    : originalDef.name
+                                : newName;
+                        res.set(name, originalDef);
+                    }
+                }
             } else {
                 // import "foo"
                 res = GlobalScope.gatherDefs(imp.vSourceUnit, res);
             }
+        }
+
+        for (const d of unit.vContracts) {
+            res.set(d.name, d);
+        }
+
+        for (const d of unit.vFunctions) {
+            res.set(d.name, d);
+        }
+
+        for (const d of unit.vEvents) {
+            res.set(d.name, d);
+        }
+
+        for (const d of unit.vErrors) {
+            res.set(d.name, d);
         }
 
         return res;
@@ -349,23 +456,32 @@ export class GlobalScope extends BaseScope {
 
         const declMap = GlobalScope.gatherDefs(unit);
         for (const [name, decl] of declMap) {
-            defMap.set(name, infer.variableDeclarationToTypeNode(decl));
+            const type =
+                decl instanceof sol.VariableDeclaration
+                    ? infer.variableDeclarationToTypeNode(decl)
+                    : defToType(decl, infer);
+            defMap.set(name, type);
         }
 
         super(`<global scope ${unit.sourceEntryKey}>`, defMap, state, _next);
         this.viewMap = new Map();
+        this.defMap = new Map();
 
         for (const [name, decl] of declMap) {
-            const view = state.constantsMap.get(decl.id);
-            sol.assert(view !== undefined, `Missing view for global constant ${name}`)
-            this.viewMap.set(name, view);
+            if (decl instanceof sol.VariableDeclaration) {
+                const view = state.constantsMap.get(decl.id);
+                sol.assert(view !== undefined, `Missing view for global constant ${name}`);
+                this.viewMap.set(name, view);
+            } else {
+                this.defMap.set(name, defToValue(decl));
+            }
         }
     }
 
     _lookup(name: string): Value | undefined {
         const view = this.viewMap.get(name);
         if (view === undefined) {
-            return view;
+            return this.defMap.get(name);
         }
 
         if (isValueType(view.type)) {
@@ -384,7 +500,7 @@ export class GlobalScope extends BaseScope {
         panic(`Can't get location of ${name} in GlobalScope`);
     }
 
-    _set(name: string, v: BaseMemoryView<BaseValue, sol.TypeNode>): void {
+    _set(name: string): void {
         panic(`Can't set ${name} in GlobalScope`);
     }
 

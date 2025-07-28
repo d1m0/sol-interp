@@ -9,7 +9,7 @@ import {
     Slice
 } from "sol-dbg";
 import { StateArea, View } from "sol-dbg";
-import * as sol from "solc-typed-ast"
+import * as sol from "solc-typed-ast";
 import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
@@ -23,10 +23,12 @@ export class BuiltinFunction extends BaseInterpValue {
         public readonly name: string,
         public readonly type: sol.BuiltinFunctionType,
         public readonly call: (interp: Interpreter, state: State, args: Value[]) => Value[]
-    ) { super(); }
+    ) {
+        super();
+    }
 
     pp(): string {
-        return `<builtin fun ${this.type.pp()}>`
+        return `<builtin fun ${this.type.pp()}>`;
     }
 }
 
@@ -34,10 +36,12 @@ export class BuiltinStruct extends BaseInterpValue {
     constructor(
         public readonly name: string,
         public readonly fields: Array<[string, Value]>
-    ) { super(); }
+    ) {
+        super();
+    }
 
     pp(): string {
-        return `<builtin struct ${this.name}>`
+        return `<builtin struct ${this.name}>`;
     }
 }
 
@@ -51,19 +55,24 @@ export class BuiltinStruct extends BaseInterpValue {
  *      }
  *   }
  * ```
- * 
+ *
  * The `Foo` identifier in the `Foo.x` member access evaluates to a `DefValue`.
  */
 export class DefValue extends BaseInterpValue {
     constructor(
-        public readonly def: sol.ContractDefinition | sol.SourceUnit
+        public readonly def:
+            | sol.ContractDefinition
+            | sol.SourceUnit
+            | sol.FunctionDefinition
+            | sol.EventDefinition
+            | sol.ErrorDefinition
     ) {
         super();
     }
 
     pp(): string {
-        const name = this.def instanceof sol.ContractDefinition ? this.def.name : this.def.sourceEntryKey;
-        return `<${this.def.constructor.name} ${name}>`
+        const name = this.def instanceof sol.SourceUnit ? this.def.sourceEntryKey : this.def.name;
+        return `<${this.def.constructor.name} ${name}>`;
     }
 }
 
@@ -93,7 +102,12 @@ type NonPoisonPrimitiveValue =
     | FunctionValue // function types
     | Slice // array slices
     | View<any, BaseValue, any, sol.TypeNode>; // Pointer Values
-export type NonPoisonValue = NonPoisonPrimitiveValue | BuiltinFunction | BuiltinStruct | DefValue | Value[];
+export type NonPoisonValue =
+    | NonPoisonPrimitiveValue
+    | BuiltinFunction
+    | BuiltinStruct
+    | DefValue
+    | Value[];
 
 export type LValue =
     | View<StateArea, BaseValue, any, sol.TypeNode>
@@ -140,30 +154,30 @@ export type ValueTypeConstructors =
 
 export type TypeConstructorToValueType<V extends ValueTypeConstructors> =
     V extends BigIntConstructor
-    ? bigint
-    : V extends BooleanConstructor
-    ? boolean
-    : V extends Uint8ArrayConstructor
-    ? Uint8Array
-    : V extends AddressConstructor
-    ? Address
-    : V extends ExternalFunRefConstructor
-    ? ExternalFunRef
-    : V extends InternalFunRefConstructor
-    ? InternalFunRef
-    : V extends SliceConstructor
-    ? Slice
-    : V extends ViewConstructor
-    ? View
-    : V extends PoisonConstructor
-    ? Poison
-    : V extends BuiltinFunctionConstructor
-    ? BuiltinFunction
-    : V extends BuiltinStructConstructor
-    ? BuiltinStruct
-    : V extends ArrayConstructor
-    ? Value[]
-    : never;
+        ? bigint
+        : V extends BooleanConstructor
+          ? boolean
+          : V extends Uint8ArrayConstructor
+            ? Uint8Array
+            : V extends AddressConstructor
+              ? Address
+              : V extends ExternalFunRefConstructor
+                ? ExternalFunRef
+                : V extends InternalFunRefConstructor
+                  ? InternalFunRef
+                  : V extends SliceConstructor
+                    ? Slice
+                    : V extends ViewConstructor
+                      ? View
+                      : V extends PoisonConstructor
+                        ? Poison
+                        : V extends BuiltinFunctionConstructor
+                          ? BuiltinFunction
+                          : V extends BuiltinStructConstructor
+                            ? BuiltinStruct
+                            : V extends ArrayConstructor
+                              ? Value[]
+                              : never;
 
 export function match<T extends ValueTypeConstructors>(
     v: Value,

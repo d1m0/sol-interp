@@ -37,7 +37,15 @@ import {
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
 import { EvalStep, ExecStep, Trace } from "./step";
-import { InternalError, NoScope, NotDefined, OOB, Overflow, RuntimeError } from "./exceptions";
+import {
+    InternalError,
+    InterpError,
+    NoScope,
+    NotDefined,
+    OOB,
+    Overflow,
+    RuntimeError
+} from "./exceptions";
 import { gte, lt } from "semver";
 import {
     BuiltinFunction,
@@ -52,7 +60,7 @@ import {
     Value,
     ValueTypeConstructors
 } from "./value";
-import { Address } from "@ethereumjs/util";
+import { Address, bigIntToBytes, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
 import { BaseScope, LocalsScope, makeStaticScope } from "./scope";
 import { changeLocTo, getMsg, isStructView, isValueType, makeZeroValue, printNode } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
@@ -301,8 +309,8 @@ export class Interpreter {
 
             varInitialVals =
                 stmt.vInitialValue instanceof sol.TupleExpression &&
-                    stmt.vInitialValue.vOriginalComponents.length > 1 &&
-                    !stmt.vInitialValue.isInlineArray
+                stmt.vInitialValue.vOriginalComponents.length > 1 &&
+                !stmt.vInitialValue.isInlineArray
                     ? (initVal as Value[])
                     : [initVal];
         } else {
@@ -410,8 +418,8 @@ export class Interpreter {
 
         sol.assert(
             fun !== undefined &&
-            (retVals.length === fun.vReturnParameters.vParameters.length ||
-                retVals.length === 0),
+                (retVals.length === fun.vReturnParameters.vParameters.length ||
+                    retVals.length === 0),
             `Mismatch in number of ret vals and formal returns`
         );
 
@@ -802,7 +810,11 @@ export class Interpreter {
             } else if (lvalue instanceof BaseStorageView) {
                 state.storage = lvalue.encode(complexRVal, state.storage);
             } else {
-                const memView = PointerMemView.allocMemFor(complexRVal, lvalue.type.to, state.memAllocator);
+                const memView = PointerMemView.allocMemFor(
+                    complexRVal,
+                    lvalue.type.to,
+                    state.memAllocator
+                );
                 memView.encode(complexRVal, state.memory, state.memAllocator);
                 lvalue.encode(memView);
             }
@@ -821,7 +833,7 @@ export class Interpreter {
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
                 !(lvalue.type instanceof sol.PointerType) ||
-                (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp())
+                    (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp())
             );
             lvalue.encode(rvalue);
         } else if (lvalue === null) {
@@ -872,6 +884,24 @@ export class Interpreter {
         return clampedVal;
     }
 
+    private coerceIntLiteralsToBytes(left: Value, right: Value): [Value, Value] {
+        if (typeof left === typeof right) {
+            return [left, right];
+        }
+
+        if (typeof left === "bigint" && right instanceof Uint8Array) {
+            const t = left;
+            left = right;
+            right = t;
+        }
+
+        if (left instanceof Uint8Array && typeof right === "bigint") {
+            return [left, bigIntToBytes(right)];
+        }
+
+        this.fail(InterpError, `Unexpected values ${ppValue(left)} and ${ppValue(right)}`);
+    }
+
     private computeBinary(
         left: Value,
         operator: string,
@@ -901,10 +931,14 @@ export class Interpreter {
         if (sol.BINARY_OPERATOR_GROUPS.Equality.includes(operator)) {
             let isEqual: boolean;
 
+            [left, right] = this.coerceIntLiteralsToBytes(left, right);
+
             if (typeof left === "boolean" && typeof right === "boolean") {
                 isEqual = left === right;
             } else if (typeof left === "bigint" && typeof right === "bigint") {
                 isEqual = left === right;
+            } else if (left instanceof Uint8Array && right instanceof Uint8Array) {
+                isEqual = equalsBytes(left, right);
             } else {
                 nyi(`${left} ${operator} ${right}`);
             }
@@ -921,7 +955,19 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Comparison.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint");
+            let [sleft, sright]: [any, any] = this.coerceIntLiteralsToBytes(left, right);
+
+            if (sleft instanceof Uint8Array && sright instanceof Uint8Array) {
+                // Perform lexicographical comparison
+                sleft = bytesToHex(sleft);
+                sright = bytesToHex(sright);
+            }
+
+            this.expect(
+                (typeof sleft === "bigint" && typeof sright === "bigint") ||
+                    (typeof sleft === "string" && typeof sright === "string")
+            );
+
             if (operator === "<") {
                 return left < right;
             }
@@ -965,29 +1011,36 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint");
+            if (operator === "<<" || operator === ">>") {
+                this.expect(typeof right === "bigint");
 
-            if (operator === "<<") {
-                return left << right;
+                if (typeof left === "bigint") {
+                    return operator === "<<" ? left << right : left >> right;
+                }
+
+                this.expect(left instanceof Uint8Array);
+                nyi(`Bitshift of fixed bytes`);
             }
 
-            if (operator === ">>") {
-                return left >> right;
+            [left, right] = this.coerceIntLiteralsToBytes(left, right);
+
+            if (typeof left === "bigint" && typeof right === "bigint") {
+                if (operator === "|") {
+                    return left | right;
+                }
+
+                if (operator === "&") {
+                    return left & right;
+                }
+
+                if (operator === "^") {
+                    return left ^ right;
+                }
+
+                nyi(`Unknown bitwise operator ${operator}`);
             }
 
-            if (operator === "|") {
-                return left | right;
-            }
-
-            if (operator === "&") {
-                return left & right;
-            }
-
-            if (operator === "^") {
-                return left ^ right;
-            }
-
-            nyi(`Unknown bitwise operator ${operator}`);
+            nyi(`Bitwise ${operator} on fixed bytes`);
         }
 
         nyi(`${left} ${operator} ${right}`);
@@ -1035,6 +1088,7 @@ export class Interpreter {
 
         const fromV = this.evalNP(expr.vArguments[0], state);
 
+        // int -> fixed bytes
         if (fromT instanceof sol.IntType && toT instanceof sol.FixedBytesType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
             this.expect(
@@ -1044,6 +1098,17 @@ export class Interpreter {
 
             scratchWord.fill(0);
             const view = new IntMemView(fromT, 0n);
+            view.encode(fromV, scratchWord);
+
+            return scratchWord.slice(32 - toT.size, 32);
+        }
+
+        // int literal -> fixed bytes
+        if (fromT instanceof sol.IntLiteralType && toT instanceof sol.FixedBytesType) {
+            this.expect(typeof fromV === "bigint", `Expected a bigint`);
+
+            scratchWord.fill(0);
+            const view = new IntMemView(new sol.IntType(toT.size * 8, false), 0n);
             view.encode(fromV, scratchWord);
 
             return scratchWord.slice(32 - toT.size, 32);
@@ -1127,13 +1192,17 @@ export class Interpreter {
 
         this.expect(
             calleeT instanceof sol.TypeNameType &&
-            calleeT.type instanceof sol.UserDefinedType &&
-            calleeT.type.definition instanceof sol.StructDefinition,
+                calleeT.type instanceof sol.UserDefinedType &&
+                calleeT.type.definition instanceof sol.StructDefinition,
             `Expected UserDefinedTypeName not ${calleeT.pp()}`
         );
 
         const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
-        const structView = PointerMemView.allocMemFor(undefined, structT, state.memAllocator) as StructMemView
+        const structView = PointerMemView.allocMemFor(
+            undefined,
+            structT,
+            state.memAllocator
+        ) as StructMemView;
 
         const fieldExprs = this.detectStructFieldExprs(expr, structT);
         const fieldMap = new Map<string, Value>();
@@ -1243,8 +1312,8 @@ export class Interpreter {
         simplifiedT = simplifiedT.to;
         this.expect(
             (simplifiedT instanceof sol.ArrayType || simplifiedT instanceof sol.PackedArrayType) &&
-            args.length === 1 &&
-            typeof args[0] === "bigint",
+                args.length === 1 &&
+                typeof args[0] === "bigint",
             `Expected an array type with a single length argument not ${simplifiedT.pp()} with ${args}`
         );
 
@@ -1322,7 +1391,10 @@ export class Interpreter {
 
         // named SourceUnit import
         if (expr.vReferencedDeclaration instanceof sol.ImportDirective) {
-            this.expect(expr.vReferencedDeclaration.unitAlias !== "", `Unexpected identifier of an unnamed import`)
+            this.expect(
+                expr.vReferencedDeclaration.unitAlias !== "",
+                `Unexpected identifier of an unnamed import`
+            );
             return new DefValue(expr.vReferencedDeclaration.vSourceUnit);
         }
 
@@ -1418,8 +1490,8 @@ export class Interpreter {
 
         this.expect(
             expr.kind === sol.LiteralKind.String ||
-            expr.kind === sol.LiteralKind.HexString ||
-            expr.kind === sol.LiteralKind.UnicodeString
+                expr.kind === sol.LiteralKind.HexString ||
+                expr.kind === sol.LiteralKind.UnicodeString
         );
 
         const view = state.constantsMap.get(expr.id);
@@ -1458,10 +1530,24 @@ export class Interpreter {
         }
 
         if (baseVal instanceof DefValue) {
-            if (baseVal.def instanceof sol.SourceUnit || baseVal.def instanceof sol.ContractDefinition) {
+            if (
+                baseVal.def instanceof sol.EventDefinition ||
+                baseVal.def instanceof sol.ErrorDefinition
+            ) {
+                const infer = this.infer(state);
+                return hexToBytes(`0x${infer.signatureHash(baseVal.def)}`);
+            }
+
+            if (
+                baseVal.def instanceof sol.SourceUnit ||
+                baseVal.def instanceof sol.ContractDefinition
+            ) {
                 const scope = makeStaticScope(baseVal.def, state);
                 const res = scope.lookup(expr.memberName);
-                this.expect(res !== undefined, `Couldnt find ${expr.memberName} in ${ppValue(baseVal)}`)
+                this.expect(
+                    res !== undefined,
+                    `Couldnt find ${expr.memberName} in ${ppValue(baseVal)}`
+                );
 
                 return res;
             }
@@ -1482,8 +1568,8 @@ export class Interpreter {
             const arrPtrT = infer.typeOf(expr);
             this.expect(
                 arrPtrT instanceof sol.PointerType &&
-                arrPtrT.to instanceof sol.ArrayType &&
-                arrPtrT.to.size !== undefined,
+                    arrPtrT.to instanceof sol.ArrayType &&
+                    arrPtrT.to.size !== undefined,
                 `Expected a fixed size array in memory not ${arrPtrT.pp()}`
             );
 

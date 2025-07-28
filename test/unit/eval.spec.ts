@@ -127,7 +127,7 @@ describe("Eval unit tests", () => {
     for (const [fileName, path, defs, expValue] of samples) {
         it(path, () => {
             const sample = sampleMap.get(fileName) as SampleInfo;
-            const contract = sample.unit.vContracts[0];
+            const contract = sample.units[0].vContracts[0];
             const expr = new sol.XPath(contract).query(path)[0] as sol.Expression;
             const state = makeState(expr, artifactManager, ...defs);
             expect(expr).toBeDefined();
