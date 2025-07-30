@@ -128,14 +128,25 @@
 120 - add all defs to contract scope (minus struct/enum type defs)
 121 - add tests for Contract.Variable, Unit.Contract.Variable
 122 - add test with AnotherContract.ConstantVariable and ThisContract.NonConstantVariable
+123 - test repeated same modifier
+124 - test modifier with return; in function with various returns
+125 - add baseCall()
+125    - save scope
+125    - set new scope to makeScope(...)
+125    - exec
+125    - restore scope
+125    - add test global calling a global
+126 - test calling global from another file that references local global constants that are shadowed the cur scope
+127 - test calling Library function from another file that depends on local globals and local constant contract vars that are shadowed in the cur scope
+128 - test virtual abstract modifier
+129 - test virtual abstract function
+- merge & rel
 
-- add baseCall()
-    - save scope
-    - set new scope to makeScope(...)
-    - exec
-    - restore scope
-    - add test global calling a global
-
+- cleanup builtins - make them take their own scope with only other builtins
+- add valueTypeOf
+- check arg types on fun call/ret
+- add option to take implicit this argument to builtinFunction
+- add array push builtin
 - Idea: Tying it all toghether at the top-level:
     - interface PersistentState {
         artifact: ArtifactInfo;
@@ -170,11 +181,12 @@
 - need an "immutable" var space somewhere in the state
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-- jest debug config
 
 - make an exhaustive test for coercions from old code
 
 // ---------------
+- getters
+    - test virtual function resolves to public getter
 - external calls
 - add evalNew for contracts
 - more coercions
@@ -182,7 +194,6 @@
 - try/catch etc...
 - add builtins
 - add a test with array of maps in a struct and push
-
 
 - make a pass to remove nyi and todos
 - add side-by-side execution test :)
@@ -196,3 +207,6 @@ Eventually:
 
 Writing ideas:
     - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!
+
+Tried and failed:
+- jest debug config
