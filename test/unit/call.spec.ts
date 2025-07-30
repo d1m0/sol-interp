@@ -85,7 +85,8 @@ const samples: Array<
     ["selectors.sol", "Foo", "main", [], [], []],
     ["cross_file_constant_deps1.sol", "Main", "main", [], [], []],
     ["type_conversions_more.sol", "Foo", "main", [], [], []],
-    ["type_conversions_more.sol", "Foo", "binops", [], [], []]
+    ["type_conversions_more.sol", "Foo", "binops", [], [], []],
+    ["modifiers.sol", "Foo", "main", [], [], []]
 ];
 
 describe("Simple function call tests", () => {

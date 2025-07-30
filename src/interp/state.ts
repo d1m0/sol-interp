@@ -8,14 +8,14 @@ import {
     DefaultAllocator,
     ZERO_ADDRESS
 } from "sol-dbg";
-import { BaseScope } from "./scope";
+import { BaseScope, LocalsScope } from "./scope";
 import {
     ContractDefinition,
     FunctionDefinition,
+    ModifierInvocation,
     TypeNode,
     VariableDeclaration
 } from "solc-typed-ast";
-import { Value } from "./value";
 import { Allocator } from "sol-dbg";
 
 export interface CallResult {
@@ -41,7 +41,8 @@ export interface SolMessage {
 
 export interface InternalCallFrame {
     callee: FunctionDefinition | VariableDeclaration;
-    args: Value[];
+    scope: LocalsScope;
+    curModifier: ModifierInvocation | undefined
 }
 
 export interface State {

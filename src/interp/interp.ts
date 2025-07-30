@@ -13,7 +13,6 @@ import {
     Poison,
     StateArea,
     View,
-    zip,
     Value as BaseValue,
     StructMemView,
     StructCalldataView,
@@ -32,7 +31,8 @@ import {
     BytesStorageView,
     MAX_ARR_DECODE_LIMIT,
     ArrayLikeView,
-    BytesCalldataView
+    BytesCalldataView,
+    stackTop,
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -61,8 +61,8 @@ import {
     ValueTypeConstructors
 } from "./value";
 import { Address, bigIntToBytes, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
-import { BaseScope, LocalsScope, makeStaticScope } from "./scope";
-import { changeLocTo, getMsg, isStructView, isValueType, makeZeroValue, printNode } from "./utils";
+import { BaseScope, LocalsScope, makeScope, makeStaticScope } from "./scope";
+import { changeLocTo, getModifiers, getMsg, isStructView, isValueType, makeZeroValue, printNode } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
     BaseLocalView,
@@ -203,45 +203,7 @@ export class Interpreter {
      * @param state
      */
     public callInternal(callee: sol.FunctionDefinition, args: Value[], state: State): Value[] {
-        this.nodes.push(callee);
-        // @todo handle modifiers!!!!!
-        const formalArgs: sol.VariableDeclaration[] = callee.vParameters.vParameters;
-
-        // Zero-init return values if they are named
-        const infer = this.infer(state);
-        const formalReturns = callee.vReturnParameters.vParameters;
-        const retVals = formalReturns.map((ret) => {
-            const type = simplifyType(infer.variableDeclarationToTypeNode(ret), infer, undefined);
-            return makeZeroValue(type, state);
-        });
-
-        const argRetNames = [
-            ...formalArgs.map((d) => d.name),
-            ...formalReturns.map((ret, i) => LocalsScope.returnName(ret, i))
-        ];
-        const argRetVals = [...args, ...retVals];
-
-        // Add function scope (includes arguments and returns)
-        this.pushScope(callee, zip(argRetNames, argRetVals), state);
-
-        sol.assert(callee.vBody !== undefined, `Can't call function with no body ${callee.name}`);
-        const flow = this.exec(callee.vBody, state);
-        sol.assert(
-            flow === ControlFlow.Fallthrough || flow === ControlFlow.Return,
-            `Unexpected control flow at end of function ${flow}`
-        );
-
-        const results = formalReturns.map((ret, i) => {
-            const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
-            if (res === undefined) {
-                this.fail(NotDefined, ``);
-            }
-            return res;
-        });
-
-        this.popScope(state);
-        this.nodes.pop();
-        return results;
+        return this._execCall(callee, args, state);
     }
 
     ///*********************STATEMENTS*************************************************
@@ -271,13 +233,13 @@ export class Interpreter {
             res = this.execDoWhileStatement(stmt, state);
         } else if (stmt instanceof sol.ForStatement) {
             res = this.execForStatement(stmt, state);
+        } else if (stmt instanceof sol.PlaceholderStatement) {
+            res = this.execPlaceholderStatement(stmt, state);
             /*
         } else if (stmt instanceof sol.EmitStatement) {
             res = this.execEmitStatement(stmt, state);
         } else if (stmt instanceof sol.InlineAssembly) {
             res = this.execInlineAssembly(stmt, state);
-        } else if (stmt instanceof sol.PlaceholderStatement) {
-            res = this.execPlaceholderStatement(stmt, state);
         } else if (stmt instanceof sol.RevertStatement) {
             res = this.execRevertStatement(stmt, state);
         } else if (stmt instanceof sol.Throw) {
@@ -308,9 +270,7 @@ export class Interpreter {
             const initVal = this.evalNP(stmt.vInitialValue, state);
 
             varInitialVals =
-                stmt.vInitialValue instanceof sol.TupleExpression &&
-                stmt.vInitialValue.vOriginalComponents.length > 1 &&
-                !stmt.vInitialValue.isInlineArray
+                stmt.assignments.length > 1
                     ? (initVal as Value[])
                     : [initVal];
         } else {
@@ -414,7 +374,9 @@ export class Interpreter {
             retVals = [];
         }
 
-        const fun = stmt.getClosestParentByType(sol.FunctionDefinition);
+        const frame = stackTop(state.intCallStack);
+        const fun = frame.callee;
+        this.expect(fun instanceof sol.FunctionDefinition, `Unexpected return outside of a function call`)
 
         sol.assert(
             fun !== undefined &&
@@ -543,6 +505,49 @@ export class Interpreter {
             this.popScope(state);
         }
 
+        return ControlFlow.Fallthrough;
+    }
+
+    private execPlaceholderStatement(stmt: sol.PlaceholderStatement, state: State): ControlFlow {
+        const frame = stackTop(state.intCallStack);
+
+        this.expect(frame.callee instanceof sol.FunctionDefinition && frame.curModifier !== undefined);
+
+        const curMod = frame.curModifier;
+        const mods = getModifiers(frame.callee);
+
+        const modIdx = mods.indexOf(curMod);
+        this.expect(modIdx >= 0);
+
+        // Execute the next modifier
+        if (modIdx < mods.length - 1) {
+            const nextMod = mods[modIdx + 1];
+            // Eval the modifier args in the modified function's syntactic scope
+            const savedScope = state.scope;
+
+            state.scope = frame.scope;
+            const modArgs = nextMod.vArguments.map((argE) => this.eval(argE, state));
+            state.scope = savedScope;
+
+            this._execCall(nextMod, modArgs, state);
+            return ControlFlow.Fallthrough;
+        }
+
+        // Execute the function body
+        const body = frame.callee.vBody;
+
+        this.expect(body !== undefined, `Can't execute function ${frame.callee.name} with no body`);
+        const savedScope = state.scope;
+        state.scope = frame.scope;
+        const savedCurModifier = frame.curModifier;
+
+        const flow = this.exec(body, state);
+        this.expect(flow === ControlFlow.Fallthrough || flow === ControlFlow.Return)
+
+        state.scope = savedScope;
+        frame.curModifier = savedCurModifier;
+
+        // Note that even if the underyling function has a `Return` control flow, execution continues after the placeholder
         return ControlFlow.Fallthrough;
     }
 
@@ -1244,6 +1249,76 @@ export class Interpreter {
 
     evalExternalCall(expr: sol.FunctionCall, state: State): Value {
         nyi(`evalExternalCall(${printNode(expr)}, ${state})`);
+    }
+
+    /**
+     * Internal call logic. Reused for both internal calls and modifiers. Its responsible for
+     * pushing/popping internal stack frames and correctly setting the callee lexical scope and
+     * restoring the caller scope
+     * 
+     * When target is `sol.FunctionDefinition` return the `Value[]`s returned by the function. For modifiers returns [].
+     */
+    _execCall(target: sol.FunctionDefinition | sol.ModifierInvocation, args: Value[], state: State): Value[] {
+        // Save scope
+        const savedScope = state.scope;
+        let savedCurModifier: sol.ModifierInvocation | undefined
+
+        const callee = target instanceof sol.FunctionDefinition ? target : target.vModifier;
+        this.expect(callee instanceof sol.FunctionDefinition || callee instanceof sol.ModifierDefinition);
+
+        state.scope = makeScope(callee, args, state, this.infer(state));
+        this.nodes.push(target);
+
+        if (target instanceof sol.FunctionDefinition) {
+            state.intCallStack.push({
+                callee: target,
+                scope: state.scope as LocalsScope,
+                curModifier: undefined
+            })
+        } else {
+            const frame = stackTop(state.intCallStack);
+            savedCurModifier = frame.curModifier;
+            frame.curModifier = target;
+        }
+
+        if (target instanceof sol.FunctionDefinition) {
+            const mods = getModifiers(target);
+
+            if (mods.length > 0) {
+                const mod = mods[0];
+                const argVals = mod.vArguments.map((argE) => this.eval(argE, state));
+                this._execCall(mod, argVals, state);
+            } else {
+                this.expect(target.vBody !== undefined, `Can't call ${target.name} with no body.`)
+                this.exec(target.vBody, state);
+            }
+        } else {
+            const mod = target.vModifier as sol.ModifierDefinition;
+            this.expect(mod.vBody !== undefined, `Can't call ${mod.name} with no body.`)
+            this.exec(mod.vBody, state);
+        }
+
+        let res: Value[] = [];
+        const frame = stackTop(state.intCallStack);
+
+        if (target instanceof sol.FunctionDefinition) {
+            res = target.vReturnParameters.vParameters.map((ret, i) => {
+                const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
+                if (res === undefined) {
+                    this.fail(NotDefined, ``);
+                }
+                return res;
+            });
+            state.intCallStack.pop();
+        } else {
+            frame.curModifier = savedCurModifier;
+        }
+
+        this.nodes.pop();
+        // Restore scope
+        state.scope = savedScope;
+
+        return res;
     }
 
     evalInternalCall(expr: sol.FunctionCall, state: State): Value {

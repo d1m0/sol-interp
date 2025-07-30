@@ -15,7 +15,7 @@ import {
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
-import { isValueType, panic } from "./utils";
+import { isValueType, makeZeroValue, panic } from "./utils";
 import { assertBuiltin } from "./builtins";
 
 /**
@@ -578,4 +578,36 @@ export function makeStaticScope(nd: sol.ASTNode | undefined, state: State): Base
     }
 
     return scope;
+}
+
+/**
+ * Make the lexical scope for a given function or modifier. This also sets the argument values (and zero values for returns) for that scope.
+ * @param nd 
+ * @param args 
+ * @param state 
+ * @param infer 
+ * @returns 
+ */
+export function makeScope(nd: sol.FunctionDefinition | sol.ModifierDefinition, args: Value[], state: State, infer: sol.InferType): BaseScope {
+    const staticScope = makeStaticScope(nd, state);
+    const localNames = nd.vParameters.vParameters.map((d) => d.name);
+
+    // We keep the returns in the function scope as well
+    if (nd instanceof sol.FunctionDefinition) {
+        localNames.push(...nd.vReturnParameters.vParameters.map((ret, i) => LocalsScope.returnName(ret, i)))
+        args.push(...nd.vReturnParameters.vParameters.map((ret) => {
+            const type = simplifyType(infer.variableDeclarationToTypeNode(ret), infer, undefined);
+            return makeZeroValue(type, state);
+        }))
+    }
+
+    sol.assert(localNames.length === args.length, `Mismatch in args in call to ${nd.name} expected ${localNames.length} got ${args.length}`);
+
+    let res = new LocalsScope(nd, state, staticScope);
+
+    for (let i = 0; i < localNames.length; i++) {
+        res.set(localNames[i], args[i]);
+    }
+
+    return res;
 }
