@@ -277,5 +277,17 @@ export const worldFailMock: WorldInterface = {
  * Return the modifier invocations that correspond to actual modifiers (and not base constructor calls)
  */
 export function getModifiers(f: sol.FunctionDefinition): sol.ModifierInvocation[] {
-    return f.vModifiers.filter((m) => m.vModifier instanceof sol.ModifierDefinition)
+    return f.vModifiers.filter((m) => m.vModifier instanceof sol.ModifierDefinition);
+}
+
+/**
+ * Return true iff f is a contract method (i.e. its not a global or a library function)
+ * @param f
+ */
+export function isMethod(f: sol.FunctionDefinition | sol.VariableDeclaration): boolean {
+    return (
+        f instanceof sol.FunctionDefinition &&
+        f.vScope instanceof sol.ContractDefinition &&
+        f.vScope.kind === sol.ContractKind.Contract
+    );
 }

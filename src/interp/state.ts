@@ -42,7 +42,7 @@ export interface SolMessage {
 export interface InternalCallFrame {
     callee: FunctionDefinition | VariableDeclaration;
     scope: LocalsScope;
-    curModifier: ModifierInvocation | undefined
+    curModifier: ModifierInvocation | undefined;
 }
 
 export interface State {

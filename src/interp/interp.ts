@@ -32,7 +32,7 @@ import {
     MAX_ARR_DECODE_LIMIT,
     ArrayLikeView,
     BytesCalldataView,
-    stackTop,
+    stackTop
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -62,7 +62,16 @@ import {
 } from "./value";
 import { Address, bigIntToBytes, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
 import { BaseScope, LocalsScope, makeScope, makeStaticScope } from "./scope";
-import { changeLocTo, getModifiers, getMsg, isStructView, isValueType, makeZeroValue, printNode } from "./utils";
+import {
+    changeLocTo,
+    getModifiers,
+    getMsg,
+    isMethod,
+    isStructView,
+    isValueType,
+    makeZeroValue,
+    printNode
+} from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
     BaseLocalView,
@@ -269,10 +278,7 @@ export class Interpreter {
         if (stmt.vInitialValue) {
             const initVal = this.evalNP(stmt.vInitialValue, state);
 
-            varInitialVals =
-                stmt.assignments.length > 1
-                    ? (initVal as Value[])
-                    : [initVal];
+            varInitialVals = stmt.assignments.length > 1 ? (initVal as Value[]) : [initVal];
         } else {
             varInitialVals = stmt.vDeclarations.map((d) => {
                 const type = simplifyType(infer.variableDeclarationToTypeNode(d), infer, undefined);
@@ -376,7 +382,10 @@ export class Interpreter {
 
         const frame = stackTop(state.intCallStack);
         const fun = frame.callee;
-        this.expect(fun instanceof sol.FunctionDefinition, `Unexpected return outside of a function call`)
+        this.expect(
+            fun instanceof sol.FunctionDefinition,
+            `Unexpected return outside of a function call`
+        );
 
         sol.assert(
             fun !== undefined &&
@@ -511,7 +520,9 @@ export class Interpreter {
     private execPlaceholderStatement(stmt: sol.PlaceholderStatement, state: State): ControlFlow {
         const frame = stackTop(state.intCallStack);
 
-        this.expect(frame.callee instanceof sol.FunctionDefinition && frame.curModifier !== undefined);
+        this.expect(
+            frame.callee instanceof sol.FunctionDefinition && frame.curModifier !== undefined
+        );
 
         const curMod = frame.curModifier;
         const mods = getModifiers(frame.callee);
@@ -542,7 +553,7 @@ export class Interpreter {
         const savedCurModifier = frame.curModifier;
 
         const flow = this.exec(body, state);
-        this.expect(flow === ControlFlow.Fallthrough || flow === ControlFlow.Return)
+        this.expect(flow === ControlFlow.Fallthrough || flow === ControlFlow.Return);
 
         state.scope = savedScope;
         frame.curModifier = savedCurModifier;
@@ -1251,20 +1262,45 @@ export class Interpreter {
         nyi(`evalExternalCall(${printNode(expr)}, ${state})`);
     }
 
+    resolveCallee(
+        target: sol.FunctionDefinition | sol.ModifierDefinition,
+        state: State
+    ): sol.FunctionDefinition | sol.VariableDeclaration | sol.ModifierDefinition {
+        if (target instanceof sol.FunctionDefinition && !isMethod(target)) {
+            return target;
+        }
+
+        this.expect(state.mdc !== undefined);
+        const infer = this.infer(state);
+        const res = sol.resolve(state.mdc, target, infer);
+        this.expect(
+            res !== undefined,
+            `Couldn't resolve ${target.name} in contract ${state.mdc.name}`
+        );
+
+        return res;
+    }
+
     /**
      * Internal call logic. Reused for both internal calls and modifiers. Its responsible for
      * pushing/popping internal stack frames and correctly setting the callee lexical scope and
      * restoring the caller scope
-     * 
+     *
      * When target is `sol.FunctionDefinition` return the `Value[]`s returned by the function. For modifiers returns [].
      */
-    _execCall(target: sol.FunctionDefinition | sol.ModifierInvocation, args: Value[], state: State): Value[] {
+    _execCall(
+        target: sol.FunctionDefinition | sol.ModifierInvocation,
+        args: Value[],
+        state: State
+    ): Value[] {
         // Save scope
         const savedScope = state.scope;
-        let savedCurModifier: sol.ModifierInvocation | undefined
+        let savedCurModifier: sol.ModifierInvocation | undefined;
 
         const callee = target instanceof sol.FunctionDefinition ? target : target.vModifier;
-        this.expect(callee instanceof sol.FunctionDefinition || callee instanceof sol.ModifierDefinition);
+        this.expect(
+            callee instanceof sol.FunctionDefinition || callee instanceof sol.ModifierDefinition
+        );
 
         state.scope = makeScope(callee, args, state, this.infer(state));
         this.nodes.push(target);
@@ -1274,7 +1310,7 @@ export class Interpreter {
                 callee: target,
                 scope: state.scope as LocalsScope,
                 curModifier: undefined
-            })
+            });
         } else {
             const frame = stackTop(state.intCallStack);
             savedCurModifier = frame.curModifier;
@@ -1289,12 +1325,20 @@ export class Interpreter {
                 const argVals = mod.vArguments.map((argE) => this.eval(argE, state));
                 this._execCall(mod, argVals, state);
             } else {
-                this.expect(target.vBody !== undefined, `Can't call ${target.name} with no body.`)
-                this.exec(target.vBody, state);
+                const resolvedTarget = this.resolveCallee(target, state);
+                this.expect(
+                    resolvedTarget instanceof sol.FunctionDefinition &&
+                        resolvedTarget.vBody !== undefined,
+                    `Can't call ${resolvedTarget.name} with no body.`
+                );
+                this.exec(resolvedTarget.vBody, state);
             }
         } else {
-            const mod = target.vModifier as sol.ModifierDefinition;
-            this.expect(mod.vBody !== undefined, `Can't call ${mod.name} with no body.`)
+            const mod = this.resolveCallee(target.vModifier as sol.ModifierDefinition, state);
+            this.expect(
+                mod instanceof sol.ModifierDefinition && mod.vBody !== undefined,
+                `Can't call ${mod.name} with no body.`
+            );
             this.exec(mod.vBody, state);
         }
 
@@ -1338,7 +1382,7 @@ export class Interpreter {
             state.mdc !== undefined,
             `NYI calling a global function from another global function`
         );
-        const resolvedCalleeDef = sol.resolveCallable(state.mdc, def, infer);
+        const resolvedCalleeDef = isMethod(def) ? sol.resolve(state.mdc, def, infer) : def;
         this.expect(
             resolvedCalleeDef !== undefined,
             `Couldn't resolve callee ${def.name} in contract ${state.mdc}`

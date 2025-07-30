@@ -86,7 +86,10 @@ const samples: Array<
     ["cross_file_constant_deps1.sol", "Main", "main", [], [], []],
     ["type_conversions_more.sol", "Foo", "main", [], [], []],
     ["type_conversions_more.sol", "Foo", "binops", [], [], []],
-    ["modifiers.sol", "Foo", "main", [], [], []]
+    ["modifiers.sol", "Foo", "main", [], [], []],
+    ["global_fun_main.sol", "Foo", "main", [], [], []],
+    ["virtual_modifiers.sol", "Child", "main", [], [], []],
+    ["virtual_abstract_method.sol", "Child", "main", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
