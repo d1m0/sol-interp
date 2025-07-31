@@ -140,13 +140,23 @@
 127 - test calling Library function from another file that depends on local globals and local constant contract vars that are shadowed in the cur scope
 128 - test virtual abstract modifier
 129 - test virtual abstract function
-- merge & rel
-
+130 - merge & rel
+131    - move version
+132    - move artifact
+133    - make infer a local var and kill this.infer()
+134    - restore constantMap back to state
+135    - remove state from where relevant
+136 - make Interpreter artifact specific (i.e. move version, artifact and infer to it)
+    
 - cleanup builtins - make them take their own scope with only other builtins
 - add valueTypeOf
 - check arg types on fun call/ret
 - add option to take implicit this argument to builtinFunction
 - add array push builtin
+- builtins (nyi for anything needing external call state)
+- add test with struct constructor and out-of-order field names, and mutation to capture order of execution
+- migrate builtin tests
+
 - Idea: Tying it all toghether at the top-level:
     - interface PersistentState {
         artifact: ArtifactInfo;
@@ -180,19 +190,17 @@
 
 - need an "immutable" var space somewhere in the state
 
-- add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-
 - make an exhaustive test for coercions from old code
 
 // ---------------
 - getters
     - test virtual function resolves to public getter
+    - note - getters are only ever called externally :)
 - external calls
 - add evalNew for contracts
 - more coercions
 - cli for playing
 - try/catch etc...
-- add builtins
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos

@@ -114,22 +114,25 @@ const samples: Array<[string, string, Array<[string, Value]>, Value]> = [
 
 describe("Eval unit tests", () => {
     let artifactManager: ArtifactManager;
-    let interp: Interpreter;
     let sampleMap: SampleMap;
 
     const fileNames = [...new Set<string>(samples.map(([name]) => name))];
 
     beforeAll(async () => {
         [artifactManager, sampleMap] = await loadSamples(fileNames);
-        interp = new Interpreter(worldFailMock, artifactManager);
     }, 10000);
 
     for (const [fileName, path, defs, expValue] of samples) {
         it(path, () => {
             const sample = sampleMap.get(fileName) as SampleInfo;
             const contract = sample.units[0].vContracts[0];
+            const interp = new Interpreter(
+                worldFailMock,
+                artifactManager,
+                artifactManager.getArtifact(contract)
+            );
             const expr = new sol.XPath(contract).query(path)[0] as sol.Expression;
-            const state = makeState(expr, artifactManager, ...defs);
+            const state = makeState(expr, interp, ...defs);
             expect(expr).toBeDefined();
             let v: any = interp.eval(expr, state);
 

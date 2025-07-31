@@ -47,7 +47,6 @@ export interface InternalCallFrame {
 
 export interface State {
     //Solidity version of the current contract
-    version: string;
     storage: Storage;
     memory: Memory;
     memAllocator: Allocator;
@@ -58,10 +57,9 @@ export interface State {
     constantsMap: Map<number, BaseMemoryView<BaseValue, TypeNode>>;
 }
 
-export function makeEmptyState(version: string): State {
+export function makeEmptyState(): State {
     const memAllocator = new DefaultAllocator();
     return {
-        version,
         storage: ImmMap.fromEntries([]),
         memory: memAllocator.memory,
         memAllocator,

@@ -94,22 +94,26 @@ const samples: Array<
 
 describe("Simple function call tests", () => {
     let artifactManager: ArtifactManager;
-    let interp: Interpreter;
     let sampleMap: SampleMap;
 
     const fileNames = [...new Set<string>(samples.map(([name]) => name))];
 
     beforeAll(async () => {
         [artifactManager, sampleMap] = await loadSamples(fileNames);
-        interp = new Interpreter(worldFailMock, artifactManager);
     }, 10000);
 
     for (const [fileName, contract, funName, stateVals, argVals, expectedReturns] of samples) {
         it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, () => {
-            const { units } = sampleMap.get(fileName) as SampleInfo;
-            let fun: sol.FunctionDefinition | undefined = undefined;
+            const info = sampleMap.get(fileName) as SampleInfo;
 
-            for (const unit of units) {
+            let fun: sol.FunctionDefinition | undefined = undefined;
+            const interp: Interpreter = new Interpreter(
+                worldFailMock,
+                artifactManager,
+                artifactManager.getArtifact(info.units[0])
+            );
+
+            for (const unit of info.units) {
                 fun = new sol.XPath(unit).query(
                     `//ContractDefinition[@name='${contract}']/FunctionDefinition[@name='${funName}']`
                 )[0];
@@ -120,7 +124,7 @@ describe("Simple function call tests", () => {
             }
 
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
-            const state = makeState(fun, artifactManager, ...stateVals);
+            const state = makeState(fun, interp, ...stateVals);
 
             const args = zip(
                 fun.vParameters.vParameters.map((d) => d.name),

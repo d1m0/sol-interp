@@ -13,7 +13,7 @@ import { StringMemView } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { topoSort, worldFailMock } from "./utils";
 import { Interpreter } from "./interp";
-import { ContractScope, GlobalScope, makeStaticScope } from "./scope";
+import { ContractScope, GlobalScope } from "./scope";
 import { makeEmptyState } from "./state";
 import { isPrimitiveValue, NoneValue } from "./value";
 import { ArtifactManager } from "./artifactManager";
@@ -118,7 +118,7 @@ export function gatherConstants(
     artifact: ArtifactInfo
 ): [Map<number, BaseMemoryView<Value, sol.TypeNode>>, Memory] {
     const version = artifact.compilerVersion;
-    const state = makeEmptyState(version);
+    const state = makeEmptyState();
 
     // First gather and encode the string constants
     for (const unit of artifact.units) {
@@ -157,16 +157,17 @@ export function gatherConstants(
         });
     }
 
-    // Next walk over the constant variable declarations in topoligcal order and evaluate them
-    const infer = new sol.InferType(version);
-    const interp = new Interpreter(worldFailMock, artifactManager);
     const [constNodes, depGraph] = buildConstantDepGraph(artifact.units);
     const sortedNodes = topoSort(constNodes, depGraph);
+    const interp = new Interpreter(worldFailMock, artifactManager, artifact);
 
     // Pre-init constantMap with NoneViews to appease Scope constructors
     for (const nd of sortedNodes) {
         state.constantsMap.set(nd.id, new NoneView());
     }
+
+    // Next walk over the constant variable declarations in topoligcal order and evaluate them
+    const infer = new sol.InferType(version);
 
     for (const nd of sortedNodes) {
         const typ = simplifyType(
@@ -174,7 +175,7 @@ export function gatherConstants(
             infer,
             sol.DataLocation.Memory
         );
-        const scope = makeStaticScope(nd, state);
+        const scope = interp.makeStaticScope(nd, state);
         sol.assert(scope instanceof GlobalScope || scope instanceof ContractScope, ``);
         state.scope = scope;
 
