@@ -17,6 +17,7 @@ import {
     VariableDeclaration
 } from "solc-typed-ast";
 import { Allocator } from "sol-dbg";
+import { BuiltinFunction } from "./value";
 
 export interface CallResult {
     reverted: boolean;
@@ -40,14 +41,13 @@ export interface SolMessage {
 }
 
 export interface InternalCallFrame {
-    callee: FunctionDefinition | VariableDeclaration;
+    callee: FunctionDefinition | VariableDeclaration | BuiltinFunction;
     scope: LocalsScope;
     curModifier: ModifierInvocation | undefined;
 }
 
 export interface State {
     //Solidity version of the current contract
-    version: string;
     storage: Storage;
     memory: Memory;
     memAllocator: Allocator;
@@ -58,10 +58,9 @@ export interface State {
     constantsMap: Map<number, BaseMemoryView<BaseValue, TypeNode>>;
 }
 
-export function makeEmptyState(version: string): State {
+export function makeEmptyState(): State {
     const memAllocator = new DefaultAllocator();
     return {
-        version,
         storage: ImmMap.fromEntries([]),
         memory: memAllocator.memory,
         memAllocator,

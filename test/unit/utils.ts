@@ -1,43 +1,27 @@
 import {
     BaseMemoryView,
     BaseStorageView,
-    ImmMap,
     nyi,
     PartialSolcOutput,
     PrimitiveValue,
-    Value,
-    ZERO_ADDRESS
+    Value
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
-import { BaseScope, LocalsScope, makeStaticScope } from "../../src/interp/scope";
+import { BaseScope, LocalsScope } from "../../src/interp/scope";
 import { State } from "../../src/interp/state";
-import { DefaultAllocator } from "sol-dbg/dist/debug/decoding/memory/allocator";
 import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
 import { gt } from "semver";
 import { ArtifactManager } from "../../src/interp/artifactManager";
+import { Interpreter } from "../../src";
 
 export function makeState(
     loc: sol.ASTNode,
-    artifactManager: ArtifactManager,
+    interp: Interpreter,
     ...vals: Array<[string, Value]>
 ): State {
-    const artifact = artifactManager.getArtifact(loc);
-
-    const [constantsMap, constMem] = artifactManager.getConstants(artifact);
-    /*
-    console.error(
-        `Constants for ${(loc.getClosestParentByType(sol.SourceUnit) as sol.SourceUnit).sourceEntryKey}: {${[...constantsMap.entries()].map(([k, v]) => `${k}: ${v.pp()}`).join(", ")}} in mem ${bytesToHex(constMem)}`
-    );
-    */
-
-    const allocator = new DefaultAllocator();
-
-    // Copy over the constants into the new memory
-    allocator.alloc(constMem.length);
-    allocator.memory.set(constMem, 0x80);
-
+    const res = interp.makeState();
     let nd: sol.ASTNode | undefined = loc;
     const scopeNodes: Array<sol.FunctionDefinition | sol.Block | sol.UncheckedBlock> = [];
 
@@ -57,28 +41,12 @@ export function makeState(
     const contract = loc.getClosestParentByType(sol.ContractDefinition);
     sol.assert(contract !== undefined, ``);
 
-    const res: State = {
-        storage: ImmMap.fromEntries([]),
-        memory: allocator.memory,
-        memAllocator: allocator,
-        intCallStack: [],
-        version: artifact.compilerVersion,
-        scope: undefined,
-        constantsMap,
-        mdc: contract,
-        msg: {
-            to: ZERO_ADDRESS,
-            data: new Uint8Array(),
-            gas: 0n,
-            value: 0n,
-            salt: undefined
-        }
-    };
+    res.mdc = contract;
 
     // Builtins
-    let scope: BaseScope = makeStaticScope(loc, res);
+    let scope: BaseScope = interp.makeStaticScope(loc, res);
     for (const nd of scopeNodes) {
-        scope = new LocalsScope(nd, res, scope);
+        scope = new LocalsScope(nd, res, interp.compilerVersion, scope);
     }
 
     res.scope = scope as BaseScope;

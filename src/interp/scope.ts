@@ -1,5 +1,5 @@
 import * as sol from "solc-typed-ast";
-import { DefValue, Value } from "./value";
+import { BuiltinFunction, DefValue, Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -15,8 +15,7 @@ import {
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
-import { isValueType, makeZeroValue, panic } from "./utils";
-import { assertBuiltin } from "./builtins";
+import { isValueType, panic } from "./utils";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -96,7 +95,8 @@ export type LocalsScopeNodeType =
     // In Solidity >0.5.0 each VariableDeclarationStatement is its own scope from now, till the end of the defining block
     | sol.VariableDeclarationStatement
     | sol.FunctionDefinition
-    | sol.ModifierDefinition;
+    | sol.ModifierDefinition
+    | BuiltinFunction;
 
 /**
  * Scope corresponding to the current top-level LocalsScope in State.
@@ -176,6 +176,10 @@ export class LocalsScope extends BaseScope {
                     simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
                 );
             }
+        } else {
+            for (let i = 0; i < node.type.parameters.length; i++) {
+                res.set(`arg_${i}`, simplifyType(node.type.parameters[i], infer, undefined));
+            }
         }
 
         return res;
@@ -184,9 +188,10 @@ export class LocalsScope extends BaseScope {
     constructor(
         public readonly node: LocalsScopeNodeType,
         state: State,
+        version: string,
         _next: BaseScope | undefined
     ) {
-        const defTypesMap = LocalsScope.detectIds(node, state.version);
+        const defTypesMap = LocalsScope.detectIds(node, version);
 
         let name: string;
         if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
@@ -194,9 +199,11 @@ export class LocalsScope extends BaseScope {
         } else if (node instanceof sol.VariableDeclarationStatement) {
             name = `<locals ${[...defTypesMap.keys()].join(", ")}>`;
         } else if (node instanceof sol.FunctionDefinition) {
-            name = `<arg/rets for ${node.print(0)}>`;
+            name = `<args/rets for ${node.print(0)}>`;
+        } else if (node instanceof sol.ModifierDefinition) {
+            name = `<args for ${node.print(0)}>`;
         } else {
-            name = `<arg for ${node.print(0)}>`;
+            name = `<args for ${node.pp()}>`;
         }
 
         super(name, defTypesMap, state, _next);
@@ -449,12 +456,12 @@ export class GlobalScope extends BaseScope {
     constructor(
         public readonly unit: sol.SourceUnit,
         state: State,
+        infer: sol.InferType,
         _next: BaseScope | undefined
     ) {
         const defMap = new Map<string, sol.TypeNode>();
-        const infer = new sol.InferType(state.version);
-
         const declMap = GlobalScope.gatherDefs(unit);
+
         for (const [name, decl] of declMap) {
             const type =
                 decl instanceof sol.VariableDeclaration
@@ -535,95 +542,4 @@ export class BuiltinsScope extends BaseScope {
     _set(): void {
         sol.assert(false, `Can't set a builtin after initialization`);
     }
-}
-
-export function makeBuiltinScope(state: State): BuiltinsScope {
-    const builtins = [assertBuiltin];
-    return new BuiltinsScope(
-        builtins.map((b) => [b.name, b.type, b]),
-        state,
-        undefined
-    );
-}
-
-/**
- * Given a node make a scope for it up to the containing contract.
- * This will include the builtins, globals and contract scopes.
- *
- * This scope is used to:
- * 1. Compute constant expressions
- * 2. As a basis for dynamic runtime scopes. Those build on this scope with LocalScopes for function args, locals, etc..
- */
-export function makeStaticScope(nd: sol.ASTNode | undefined, state: State): BaseScope {
-    const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
-
-    while (nd !== undefined) {
-        if (nd instanceof sol.SourceUnit || nd instanceof sol.ContractDefinition) {
-            scopeNodes.push(nd);
-        }
-
-        nd = nd.parent;
-    }
-
-    scopeNodes.reverse();
-    let scope: BaseScope = makeBuiltinScope(state);
-
-    for (const nd of scopeNodes) {
-        if (nd instanceof sol.SourceUnit) {
-            scope = new GlobalScope(nd, state, scope);
-        } else {
-            const infer = new sol.InferType(state.version);
-            scope = new ContractScope(nd, infer, state, scope);
-        }
-    }
-
-    return scope;
-}
-
-/**
- * Make the lexical scope for a given function or modifier. This also sets the argument values (and zero values for returns) for that scope.
- * @param nd
- * @param args
- * @param state
- * @param infer
- * @returns
- */
-export function makeScope(
-    nd: sol.FunctionDefinition | sol.ModifierDefinition,
-    args: Value[],
-    state: State,
-    infer: sol.InferType
-): BaseScope {
-    const staticScope = makeStaticScope(nd, state);
-    const localNames = nd.vParameters.vParameters.map((d) => d.name);
-
-    // We keep the returns in the function scope as well
-    if (nd instanceof sol.FunctionDefinition) {
-        localNames.push(
-            ...nd.vReturnParameters.vParameters.map((ret, i) => LocalsScope.returnName(ret, i))
-        );
-        args.push(
-            ...nd.vReturnParameters.vParameters.map((ret) => {
-                const type = simplifyType(
-                    infer.variableDeclarationToTypeNode(ret),
-                    infer,
-                    undefined
-                );
-                return makeZeroValue(type, state);
-            })
-        );
-    }
-
-    sol.assert(
-        localNames.length === args.length,
-        `Mismatch in args in call to ${nd.name} expected ${localNames.length} got ${args.length}`
-    );
-
-    const res = new LocalsScope(nd, state, staticScope);
-
-    for (let i = 0; i < localNames.length; i++) {
-        res.set(localNames[i], args[i]);
-    }
-
-    return res;
 }

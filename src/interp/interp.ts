@@ -1,5 +1,4 @@
 import {
-    ArtifactManager,
     DecodingFailure,
     IntMemView,
     isArrayLikeCalldataView,
@@ -32,7 +31,12 @@ import {
     MAX_ARR_DECODE_LIMIT,
     ArrayLikeView,
     BytesCalldataView,
-    stackTop
+    stackTop,
+    ArtifactInfo,
+    DefaultAllocator,
+    ImmMap,
+    ZERO_ADDRESS,
+    isPoison
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -61,7 +65,7 @@ import {
     ValueTypeConstructors
 } from "./value";
 import { Address, bigIntToBytes, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
-import { BaseScope, LocalsScope, makeScope, makeStaticScope } from "./scope";
+import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
     changeLocTo,
     getModifiers,
@@ -70,7 +74,8 @@ import {
     isStructView,
     isValueType,
     makeZeroValue,
-    printNode
+    printNode,
+    solcValueToValue
 } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
@@ -82,6 +87,8 @@ import {
     PrimitiveLocalView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
+import { assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
+import { ArtifactManager } from "./artifactManager";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -128,18 +135,26 @@ export function skipFieldDueToMap(t: sol.TypeNode): boolean {
  *  - AST node stack of currently executed/evaluated objects
  */
 export class Interpreter {
-    nodes: sol.ASTNode[];
+    nodes: Array<sol.ASTNode | BuiltinFunction>;
     _trace: Trace;
+
+    get compilerVersion(): string {
+        return this.artifact.compilerVersion;
+    }
+
+    _infer: sol.InferType;
 
     constructor(
         protected readonly world: WorldInterface,
-        protected readonly artifactManager: ArtifactManager
+        protected readonly artifactManager: ArtifactManager,
+        protected readonly artifact: ArtifactInfo
     ) {
         this.nodes = [];
         this._trace = [];
+        this._infer = new sol.InferType(this.compilerVersion);
     }
 
-    get curNode(): sol.ASTNode {
+    get curNode(): sol.ASTNode | BuiltinFunction {
         sol.assert(this.nodes.length > 0, `No cur node`);
         return this.nodes[this.nodes.length - 1];
     }
@@ -154,7 +169,7 @@ export class Interpreter {
     fail(
         errorConstr: new (...args: any[]) => InternalError,
         msg: string,
-        ctx: sol.ASTNode = this.curNode
+        ctx: sol.ASTNode | BuiltinFunction = this.curNode
     ): never {
         throw new errorConstr(ctx, this._trace, msg);
     }
@@ -183,7 +198,7 @@ export class Interpreter {
             node instanceof sol.UncheckedBlock ||
             node instanceof sol.VariableDeclarationStatement
         ) {
-            const newScope = new LocalsScope(node, state, state.scope);
+            const newScope = new LocalsScope(node, state, this.compilerVersion, state.scope);
 
             // Add arguments to store
             for (const [name, val] of vals) {
@@ -211,8 +226,13 @@ export class Interpreter {
      * @param args
      * @param state
      */
-    public callInternal(callee: sol.FunctionDefinition, args: Value[], state: State): Value[] {
-        return this._execCall(callee, args, state);
+    public callInternal(
+        callee: sol.FunctionDefinition,
+        args: Value[],
+        argTs: sol.TypeNode[],
+        state: State
+    ): Value[] {
+        return this._execCall(callee, args, argTs, state);
     }
 
     ///*********************STATEMENTS*************************************************
@@ -273,22 +293,24 @@ export class Interpreter {
         state: State
     ): ControlFlow {
         let varInitialVals: Value[] = [];
-        const infer = this.infer(state);
-
         if (stmt.vInitialValue) {
             const initVal = this.evalNP(stmt.vInitialValue, state);
 
             varInitialVals = stmt.assignments.length > 1 ? (initVal as Value[]) : [initVal];
         } else {
             varInitialVals = stmt.vDeclarations.map((d) => {
-                const type = simplifyType(infer.variableDeclarationToTypeNode(d), infer, undefined);
+                const type = simplifyType(
+                    this._infer.variableDeclarationToTypeNode(d),
+                    this._infer,
+                    undefined
+                );
                 return makeZeroValue(type, state);
             });
         }
 
         // VariableDeclarationStatements are their own scope on solidity >0.5.0 and
         // when theyre in the initialization of a for loop.
-        if (gte(state.version, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
+        if (gte(this.compilerVersion, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
             this.pushScope(
                 stmt,
                 stmt.vDeclarations.map((d) => [d.name, none]),
@@ -329,15 +351,13 @@ export class Interpreter {
         const localVals: Array<[string, Value]> = [];
 
         // For Solidity <0.5.0 block locals are live for the whole block. So 0-init them at the start of the block
-        if (lt(state.version, "0.5.0")) {
-            const infer = this.infer(state);
-
+        if (lt(this.compilerVersion, "0.5.0")) {
             for (const stmt of block.vStatements) {
                 if (stmt instanceof sol.VariableDeclarationStatement) {
                     for (const decl of stmt.vDeclarations) {
                         const type = simplifyType(
-                            infer.variableDeclarationToTypeNode(decl),
-                            infer,
+                            this._infer.variableDeclarationToTypeNode(decl),
+                            this._infer,
                             undefined
                         );
                         localVals.push([decl.name, makeZeroValue(type, state)]);
@@ -356,7 +376,7 @@ export class Interpreter {
             }
         }
 
-        if (gte(state.version, "0.5.0")) {
+        if (gte(this.compilerVersion, "0.5.0")) {
             // In Solidity >0.5.0 all variable declaration statements in the block are their own scopes, that go out of scope at the end
             // of the block. So remove them here
             while (!(state.scope instanceof LocalsScope && state.scope.node === block)) {
@@ -538,9 +558,10 @@ export class Interpreter {
 
             state.scope = frame.scope;
             const modArgs = nextMod.vArguments.map((argE) => this.eval(argE, state));
+            const modArgTs = nextMod.vArguments.map((argE) => this._infer.typeOf(argE));
             state.scope = savedScope;
 
-            this._execCall(nextMod, modArgs, state);
+            this._execCall(nextMod, modArgs, modArgTs, state);
             return ControlFlow.Fallthrough;
         }
 
@@ -770,7 +791,7 @@ export class Interpreter {
         return res;
     }
 
-    assign(lvalue: LValue, rvalue: Value, state: State): void {
+    public assign(lvalue: LValue, rvalue: Value, state: State): void {
         // Handle tuple assignments first
         if (lvalue instanceof Array) {
             this.expect(
@@ -849,6 +870,7 @@ export class Interpreter {
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
                 !(lvalue.type instanceof sol.PointerType) ||
+                    isPoison(rvalue) ||
                     (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp())
             );
             lvalue.encode(rvalue);
@@ -869,17 +891,10 @@ export class Interpreter {
         if (expr.operator.length > 1) {
             const op = expr.operator.slice(0, -1);
             const lVal = this.lvToValue(lv, state);
-            const lType = this.infer(state).typeOf(expr.vLeftHandSide);
+            const lType = this._infer.typeOf(expr.vLeftHandSide);
             // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
 
-            rvalue = this.computeBinary(
-                lVal,
-                op,
-                rvalue,
-                lType,
-                undefined,
-                this.isUnchecked(expr, state)
-            );
+            rvalue = this.computeBinary(lVal, op, rvalue, lType, undefined, this.isUnchecked(expr));
             this.assign(lv, rvalue, state);
         } else {
             this.assign(lv, rvalue, state);
@@ -1063,6 +1078,11 @@ export class Interpreter {
     }
 
     evalBinaryOperation(expr: sol.BinaryOperation, state: State): Value {
+        // Eval constant expression as one whole block, as those are evaluated at compile time.
+        if (sol.isConstant(expr)) {
+            return solcValueToValue(sol.evalBinary(expr, this._infer));
+        }
+
         // Note: RHS evaluates first.
         const rVal = this.evalNP(expr.vRightExpression, state);
         const lVal = this.evalNP(expr.vLeftExpression, state);
@@ -1071,9 +1091,9 @@ export class Interpreter {
             lVal,
             expr.operator,
             rVal,
-            this.typeof(expr, state),
+            this._infer.typeOf(expr),
             expr.vUserFunction,
-            this.isUnchecked(expr, state)
+            this.isUnchecked(expr)
         );
     }
 
@@ -1091,15 +1111,14 @@ export class Interpreter {
      * Type conversion is complex and changes with language versions.
      */
     evalTypeConversion(expr: sol.FunctionCall, state: State): Value {
-        const infer = this.infer(state);
         this.expect(expr.vArguments.length === 1, `Type conversion expects a single argument`);
-        const calleeT = infer.typeOf(expr.vExpression);
+        const calleeT = this._infer.typeOf(expr.vExpression);
         this.expect(
             calleeT instanceof sol.TypeNameType,
             `Unexpected type for ${expr.vExpression.print()} in type conversion: ${calleeT.pp()}`
         );
 
-        const fromT = infer.typeOf(expr.vArguments[0]);
+        const fromT = this._infer.typeOf(expr.vArguments[0]);
         const toT = calleeT.type;
 
         const fromV = this.evalNP(expr.vArguments[0], state);
@@ -1134,7 +1153,7 @@ export class Interpreter {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
             // In Solidity <0.8.0 coercing int literals that didn't fit resulted in silent overflow.
             // In >0.8.0 its a type error, so we shouldn't encouter it.
-            return this.clamp(fromV, toT, lt(state.version, "0.8.0"));
+            return this.clamp(fromV, toT, lt(this.compilerVersion, "0.8.0"));
         }
 
         // string ptr -> bytes
@@ -1203,8 +1222,7 @@ export class Interpreter {
      * @param state
      */
     evalStructConstructorCall(expr: sol.FunctionCall, state: State): Value {
-        const infer = this.infer(state);
-        const calleeT = infer.typeOf(expr.vExpression);
+        const calleeT = this._infer.typeOf(expr.vExpression);
 
         this.expect(
             calleeT instanceof sol.TypeNameType &&
@@ -1213,7 +1231,11 @@ export class Interpreter {
             `Expected UserDefinedTypeName not ${calleeT.pp()}`
         );
 
-        const structT = simplifyType(calleeT.type, infer, sol.DataLocation.Memory) as ExpStructType;
+        const structT = simplifyType(
+            calleeT.type,
+            this._infer,
+            sol.DataLocation.Memory
+        ) as ExpStructType;
         const structView = PointerMemView.allocMemFor(
             undefined,
             structT,
@@ -1253,9 +1275,37 @@ export class Interpreter {
     evalBuiltinCall(expr: sol.FunctionCall, state: State): Value {
         const callee = this.evalNP(expr.vExpression, state);
         const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
+        const argTs: sol.TypeNode[] = expr.vArguments.map((argExpr) => this._infer.typeOf(argExpr));
 
         this.expect(callee instanceof BuiltinFunction);
-        return callee.call(this, state, args);
+
+        if (callee.implicitFirstArg) {
+            this.expect(
+                expr.vExpression instanceof sol.MemberAccess,
+                `Expected member access in builtin callee ${printNode(expr)}`
+            );
+
+            const savedTrace = this._trace;
+            // Small hack - we don't want to add to the trace the re-evaluation of the base
+            this._trace = [];
+            const firstArg = this.eval(expr.vExpression.vExpression, state);
+            this._trace = savedTrace;
+
+            args.unshift(firstArg);
+            argTs.unshift(this._infer.typeOf(expr.vExpression.vExpression));
+        }
+
+        const results = this._execCall(callee, args, argTs, state);
+
+        if (results.length === 0) {
+            return none;
+        }
+
+        if (results.length === 1) {
+            return results[0];
+        }
+
+        return results;
     }
 
     evalExternalCall(expr: sol.FunctionCall, state: State): Value {
@@ -1271,8 +1321,7 @@ export class Interpreter {
         }
 
         this.expect(state.mdc !== undefined);
-        const infer = this.infer(state);
-        const res = sol.resolve(state.mdc, target, infer);
+        const res = sol.resolve(state.mdc, target, this._infer);
         this.expect(
             res !== undefined,
             `Couldn't resolve ${target.name} in contract ${state.mdc.name}`
@@ -1289,41 +1338,46 @@ export class Interpreter {
      * When target is `sol.FunctionDefinition` return the `Value[]`s returned by the function. For modifiers returns [].
      */
     _execCall(
-        target: sol.FunctionDefinition | sol.ModifierInvocation,
+        target: sol.FunctionDefinition | sol.ModifierInvocation | BuiltinFunction,
         args: Value[],
+        argTs: sol.TypeNode[],
         state: State
     ): Value[] {
         // Save scope
         const savedScope = state.scope;
         let savedCurModifier: sol.ModifierInvocation | undefined;
+        let callee: sol.FunctionDefinition | sol.ModifierDefinition | BuiltinFunction;
 
-        const callee = target instanceof sol.FunctionDefinition ? target : target.vModifier;
-        this.expect(
-            callee instanceof sol.FunctionDefinition || callee instanceof sol.ModifierDefinition
-        );
+        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
+            callee = target;
+        } else {
+            callee = target.vModifier as sol.ModifierDefinition;
+        }
 
-        state.scope = makeScope(callee, args, state, this.infer(state));
+        state.scope = this.makeScope(callee, args, argTs, state);
         this.nodes.push(target);
 
-        if (target instanceof sol.FunctionDefinition) {
+        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
             state.intCallStack.push({
                 callee: target,
                 scope: state.scope as LocalsScope,
                 curModifier: undefined
             });
-        } else {
+        } else if (target instanceof sol.ModifierInvocation) {
             const frame = stackTop(state.intCallStack);
             savedCurModifier = frame.curModifier;
             frame.curModifier = target;
         }
 
+        let res: Value[];
         if (target instanceof sol.FunctionDefinition) {
             const mods = getModifiers(target);
 
             if (mods.length > 0) {
                 const mod = mods[0];
                 const argVals = mod.vArguments.map((argE) => this.eval(argE, state));
-                this._execCall(mod, argVals, state);
+                const argTs = mod.vArguments.map((argE) => this._infer.typeOf(argE));
+                this._execCall(mod, argVals, argTs, state);
             } else {
                 const resolvedTarget = this.resolveCallee(target, state);
                 this.expect(
@@ -1333,19 +1387,7 @@ export class Interpreter {
                 );
                 this.exec(resolvedTarget.vBody, state);
             }
-        } else {
-            const mod = this.resolveCallee(target.vModifier as sol.ModifierDefinition, state);
-            this.expect(
-                mod instanceof sol.ModifierDefinition && mod.vBody !== undefined,
-                `Can't call ${mod.name} with no body.`
-            );
-            this.exec(mod.vBody, state);
-        }
 
-        let res: Value[] = [];
-        const frame = stackTop(state.intCallStack);
-
-        if (target instanceof sol.FunctionDefinition) {
             res = target.vReturnParameters.vParameters.map((ret, i) => {
                 const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
                 if (res === undefined) {
@@ -1353,6 +1395,21 @@ export class Interpreter {
                 }
                 return res;
             });
+        } else if (target instanceof sol.ModifierInvocation) {
+            const mod = this.resolveCallee(target.vModifier as sol.ModifierDefinition, state);
+            this.expect(
+                mod instanceof sol.ModifierDefinition && mod.vBody !== undefined,
+                `Can't call ${mod.name} with no body.`
+            );
+            this.exec(mod.vBody, state);
+            res = [];
+        } else {
+            res = target.call(this, state, args.length);
+        }
+
+        const frame = stackTop(state.intCallStack);
+
+        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
             state.intCallStack.pop();
         } else {
             frame.curModifier = savedCurModifier;
@@ -1367,7 +1424,6 @@ export class Interpreter {
 
     evalInternalCall(expr: sol.FunctionCall, state: State): Value {
         const calleeAst = this.getCallee(expr.vExpression);
-        const infer = this.infer(state);
         this.expect(
             calleeAst instanceof sol.Identifier || calleeAst instanceof sol.MemberAccess,
             `Unexpected callee ${printNode(calleeAst)}`
@@ -1382,17 +1438,18 @@ export class Interpreter {
             state.mdc !== undefined,
             `NYI calling a global function from another global function`
         );
-        const resolvedCalleeDef = isMethod(def) ? sol.resolve(state.mdc, def, infer) : def;
+        const resolvedCalleeDef = isMethod(def) ? sol.resolve(state.mdc, def, this._infer) : def;
         this.expect(
             resolvedCalleeDef !== undefined,
             `Couldn't resolve callee ${def.name} in contract ${state.mdc}`
         );
 
         const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
+        const argTs = expr.vArguments.map((arg) => this._infer.typeOf(arg));
         let results: Value[];
 
         if (resolvedCalleeDef instanceof sol.FunctionDefinition) {
-            results = this.callInternal(resolvedCalleeDef, argVals, state);
+            results = this._execCall(resolvedCalleeDef, argVals, argTs, state);
         } else {
             nyi(`Calling public getter ${resolvedCalleeDef.name} in ${state.mdc}`);
         }
@@ -1410,8 +1467,7 @@ export class Interpreter {
 
     evalNewCall(expr: sol.FunctionCall, state: State): Value {
         const calleeAST = this.getCallee(expr.vExpression) as sol.NewExpression;
-        const infer = this.infer(state);
-        const newT = infer.typeNameToSpecializedTypeNode(
+        const newT = this._infer.typeNameToSpecializedTypeNode(
             calleeAST.vTypeName,
             sol.DataLocation.Memory
         );
@@ -1426,7 +1482,7 @@ export class Interpreter {
             nyi(`Creating a new contract`);
         }
 
-        let simplifiedT = simplifyType(newT, infer, sol.DataLocation.Memory);
+        let simplifiedT = simplifyType(newT, this._infer, sol.DataLocation.Memory);
         this.expect(simplifiedT instanceof sol.PointerType, ``);
         simplifiedT = simplifiedT.to;
         this.expect(
@@ -1493,9 +1549,7 @@ export class Interpreter {
             return this.evalBuiltinCall(expr, state);
         }
 
-        const infer = this.infer(state);
-
-        if (infer.isFunctionCallExternal(expr)) {
+        if (this._infer.isFunctionCallExternal(expr)) {
             return this.evalExternalCall(expr, state);
         }
 
@@ -1532,9 +1586,7 @@ export class Interpreter {
 
     evalIndexAccess(expr: sol.IndexAccess, state: State): Value {
         this.expect(expr.vIndexExpression !== undefined, `Mising index expression in eval`);
-        const infer = this.infer(state);
-
-        const baseT = infer.typeOf(expr.vBaseExpression);
+        const baseT = this._infer.typeOf(expr.vBaseExpression);
 
         let baseVal = this.evalNP(expr.vBaseExpression, state);
         const indexVal = this.evalNP(expr.vIndexExpression, state);
@@ -1600,7 +1652,9 @@ export class Interpreter {
 
     evalLiteral(expr: sol.Literal, state: State): Value {
         if (expr.kind === sol.LiteralKind.Number) {
-            return BigInt(expr.value);
+            const v = sol.evalLiteral(expr);
+            this.expect(typeof v === "bigint", ``);
+            return BigInt(v);
         }
 
         if (expr.kind === sol.LiteralKind.Bool) {
@@ -1653,15 +1707,14 @@ export class Interpreter {
                 baseVal.def instanceof sol.EventDefinition ||
                 baseVal.def instanceof sol.ErrorDefinition
             ) {
-                const infer = this.infer(state);
-                return hexToBytes(`0x${infer.signatureHash(baseVal.def)}`);
+                return hexToBytes(`0x${this._infer.signatureHash(baseVal.def)}`);
             }
 
             if (
                 baseVal.def instanceof sol.SourceUnit ||
                 baseVal.def instanceof sol.ContractDefinition
             ) {
-                const scope = makeStaticScope(baseVal.def, state);
+                const scope = this.makeStaticScope(baseVal.def, state);
                 const res = scope.lookup(expr.memberName);
                 this.expect(
                     res !== undefined,
@@ -1670,6 +1723,13 @@ export class Interpreter {
 
                 return res;
             }
+        }
+
+        if (
+            (isArrayLikeStorageView(baseVal) && expr.memberName === "push") ||
+            expr.memberName === "pop"
+        ) {
+            return expr.memberName === "push" ? pushBuiltin : popBuiltin;
         }
 
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
@@ -1683,8 +1743,7 @@ export class Interpreter {
 
         // Array literals get allocated in memory
         if (expr.isInlineArray) {
-            const infer = this.infer(state);
-            const arrPtrT = infer.typeOf(expr);
+            const arrPtrT = this._infer.typeOf(expr);
             this.expect(
                 arrPtrT instanceof sol.PointerType &&
                     arrPtrT.to instanceof sol.ArrayType &&
@@ -1721,21 +1780,9 @@ export class Interpreter {
         }
     }
 
-    /**
-     * Return an InferType instance relevant to the current state. Since infer-type is version dependent
-     * we need to get the version of the current contract first
-     */
-    infer(s: State): sol.InferType {
-        return this.artifactManager.infer(s.version);
-    }
-
-    typeof(e: sol.Expression, s: State): sol.TypeNode {
-        return this.infer(s).typeOf(e);
-    }
-
-    isUnchecked(n: sol.ASTNode, s: State): boolean {
+    isUnchecked(n: sol.ASTNode): boolean {
         // In Solidity older than 0.8.0 all operations are unchecked
-        if (lt(s.version, "0.8.0")) {
+        if (lt(this.compilerVersion, "0.8.0")) {
             return true;
         }
 
@@ -1809,6 +1856,10 @@ export class Interpreter {
     }
 
     evalUnaryOperation(expr: sol.UnaryOperation, state: State): Value {
+        if (sol.isConstant(expr)) {
+            return solcValueToValue(sol.evalUnary(expr, this._infer));
+        }
+
         if (expr.vUserFunction) {
             nyi(`Unary user functions`);
         }
@@ -1820,8 +1871,8 @@ export class Interpreter {
 
         // In all other cases the result is bigint
         let res: bigint;
-        const unchecked = this.isUnchecked(expr, state);
-        const t = this.infer(state).typeOf(expr);
+        const unchecked = this.isUnchecked(expr);
+        const t = this._infer.typeOf(expr);
 
         // Prefix/infix inc/dec require special handling as we need to
         // eval the subexpression as an LV. We can't evaluate it multiple times, as that may
@@ -1853,5 +1904,141 @@ export class Interpreter {
         }
 
         return this.clamp(res, t, unchecked);
+    }
+
+    makeBuiltinScope(state: State): BuiltinsScope {
+        const builtins = [assertBuiltin];
+        return new BuiltinsScope(
+            builtins.map((b) => [b.name, b.type, b]),
+            state,
+            undefined
+        );
+    }
+
+    /**
+     * Given a node make a scope for it up to the containing contract.
+     * This will include the builtins, globals and contract scopes.
+     *
+     * This scope is used to:
+     * 1. Compute constant expressions
+     * 2. As a basis for dynamic runtime scopes. Those build on this scope with LocalScopes for function args, locals, etc..
+     */
+    public makeStaticScope(nd: sol.ASTNode | BuiltinFunction | undefined, state: State): BaseScope {
+        const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
+
+        if (nd instanceof BuiltinFunction) {
+            return this.makeBuiltinScope(state);
+        }
+
+        while (nd !== undefined) {
+            if (nd instanceof sol.SourceUnit || nd instanceof sol.ContractDefinition) {
+                scopeNodes.push(nd);
+            }
+
+            nd = nd.parent;
+        }
+
+        scopeNodes.reverse();
+        let scope: BaseScope = this.makeBuiltinScope(state);
+
+        for (const nd of scopeNodes) {
+            if (nd instanceof sol.SourceUnit) {
+                scope = new GlobalScope(nd, state, this._infer, scope);
+            } else {
+                scope = new ContractScope(nd, this._infer, state, scope);
+            }
+        }
+
+        return scope;
+    }
+
+    /**
+     * Make the lexical scope for a given function or modifier. This also sets the argument values (and zero values for returns) for that scope.
+     * @param nd
+     * @param args
+     * @param state
+     * @param infer
+     * @returns
+     */
+    makeScope(
+        nd: sol.FunctionDefinition | sol.ModifierDefinition | BuiltinFunction,
+        args: Value[],
+        argTs: sol.TypeNode[],
+        state: State
+    ): BaseScope {
+        const staticScope = this.makeStaticScope(nd, state);
+        let localNames: string[];
+
+        if (nd instanceof BuiltinFunction) {
+            nd = nd.concretize(argTs);
+        }
+
+        if (nd instanceof BuiltinFunction) {
+            localNames = nd.type.parameters.map((_, i) => `arg_${i}`);
+        } else {
+            localNames = nd.vParameters.vParameters.map((d) => d.name);
+        }
+
+        // We keep the returns in the function scope as well
+        if (nd instanceof sol.FunctionDefinition) {
+            localNames.push(
+                ...nd.vReturnParameters.vParameters.map((ret, i) => LocalsScope.returnName(ret, i))
+            );
+            args.push(
+                ...nd.vReturnParameters.vParameters.map((ret) => {
+                    const type = simplifyType(
+                        this._infer.variableDeclarationToTypeNode(ret),
+                        this._infer,
+                        undefined
+                    );
+                    return makeZeroValue(type, state);
+                })
+            );
+        }
+
+        sol.assert(
+            localNames.length === args.length,
+            `Mismatch in args in call to ${nd.name} expected ${localNames.length} got ${args.length}`
+        );
+
+        const res = new LocalsScope(nd, state, this.compilerVersion, staticScope);
+
+        for (let i = 0; i < localNames.length; i++) {
+            const v = res.lookupLocation(localNames[i]);
+            this.expect(v !== undefined, ``);
+            this.assign(v, args[i], state);
+        }
+
+        return res;
+    }
+
+    /**
+     * Make an empty state containing just the constants
+     * @returns
+     */
+    public makeState(): State {
+        const memAllocator = new DefaultAllocator();
+        const [constantsMap, constantsMemory] = this.artifactManager.getConstants(this.artifact);
+
+        // Copy over the constants into the new memory
+        memAllocator.alloc(constantsMemory.length);
+        memAllocator.memory.set(constantsMemory, 0x80);
+
+        return {
+            storage: ImmMap.fromEntries([]),
+            memory: memAllocator.memory,
+            memAllocator,
+            mdc: undefined,
+            msg: {
+                to: ZERO_ADDRESS,
+                data: new Uint8Array(),
+                gas: 0n,
+                value: 0n,
+                salt: undefined
+            },
+            intCallStack: [],
+            scope: undefined,
+            constantsMap: constantsMap
+        };
     }
 }

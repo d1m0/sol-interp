@@ -19,7 +19,7 @@ import {
     Storage
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { none } from "./value";
+import { none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { BaseLocalView } from "./view";
 
@@ -49,6 +49,7 @@ export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
     }
 
     if (t instanceof sol.PointerType) {
+        // The only reazon we treat mem pointers differently is that uninitialized local mem variables are pre-allocated by default.
         if (t.location === sol.DataLocation.Memory) {
             let zeroValue: BaseValue;
 
@@ -290,4 +291,18 @@ export function isMethod(f: sol.FunctionDefinition | sol.VariableDeclaration): b
         f.vScope instanceof sol.ContractDefinition &&
         f.vScope.kind === sol.ContractKind.Contract
     );
+}
+
+export const bytes1 = new sol.FixedBytesType(1);
+
+export function solcValueToValue(solV: sol.Value): Value {
+    if (typeof solV === "bigint" || typeof solV === "boolean") {
+        return solV;
+    }
+
+    if (solV instanceof Buffer) {
+        return new Uint8Array(solV);
+    }
+
+    sol.assert(false, `Cannot convert solc value ${solV}`);
 }

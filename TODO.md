@@ -140,13 +140,37 @@
 127 - test calling Library function from another file that depends on local globals and local constant contract vars that are shadowed in the cur scope
 128 - test virtual abstract modifier
 129 - test virtual abstract function
-- merge & rel
+130 - merge & rel
+131    - move version
+132    - move artifact
+133    - make infer a local var and kill this.infer()
+134    - restore constantMap back to state
+135    - remove state from where relevant
+136 - make Interpreter artifact specific (i.e. move version, artifact and infer to it)
+137 - add polymorphism
+138 - add valueTypeOf
+139 - check arg types on fun call/ret
+140 - add array push builtin
+141 - add option to take implicit this argument to builtinFunction
+142 - Hit a bug around polymorphism and implicit casts. Implicit casts may involve copies (memory string literal -> storage). The correct order of operations is:
+143    - get concrete builtin type
+144    - assign args to go through casting/copy logic
+145 - test push
+146 - cleanup builtins - make them take their own scope with only other builtins
+147 - add pop
+148 - add concretize tests
+149 - add union tests
+150 - test pop
+151 - check that normal internal calls handle arguments/returns assignment copies correctly
+152 - Add a test with fun returning an uninitialized local struct
+153 - units on literals
+154 - rationals in constant expressions
 
-- cleanup builtins - make them take their own scope with only other builtins
-- add valueTypeOf
-- check arg types on fun call/ret
-- add option to take implicit this argument to builtinFunction
-- add array push builtin
+- mock up external world stuff
+- builtins (nyi for anything needing external call state)
+- migrate builtin tests
+
+- add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 - Idea: Tying it all toghether at the top-level:
     - interface PersistentState {
         artifact: ArtifactInfo;
@@ -180,30 +204,31 @@
 
 - need an "immutable" var space somewhere in the state
 
-- add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-
 - make an exhaustive test for coercions from old code
 
 // ---------------
 - getters
     - test virtual function resolves to public getter
+    - note - getters are only ever called externally :)
 - external calls
 - add evalNew for contracts
 - more coercions
 - cli for playing
 - try/catch etc...
-- add builtins
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos
 - add side-by-side execution test :)
 - refactor this.expect to use template strings like sol.assert as an optimization
+- test behavior of zero-ing out (delete, assign zero, pop) of complex storage datastructures. Are they recursively zeroed-out? For sized arrays? For structs? for unsized arrays?
 
 Eventually:
+    - move push implementaion in ArrayStorageView/BytesStorageView
     - cleanup nyi()s to 0
     - doc all functions
     - cleanup @todo-s
     - cli
+    - file a bug to eventually elaborate the steps of constant expression eval by moving logic from solc-typed-ast's constant eval. Note this requires making Value = | Decimal to support rationals.
 
 Writing ideas:
     - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!

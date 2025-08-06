@@ -89,27 +89,39 @@ const samples: Array<
     ["modifiers.sol", "Foo", "main", [], [], []],
     ["global_fun_main.sol", "Foo", "main", [], [], []],
     ["virtual_modifiers.sol", "Child", "main", [], [], []],
-    ["virtual_abstract_method.sol", "Child", "main", [], [], []]
+    ["virtual_abstract_method.sol", "Child", "main", [], [], []],
+    ["push.sol", "Foo", "main", [], [], []],
+    ["call_implicit_casts.sol", "Foo", "main", [], [], []],
+    ["units.sol", "Foo", "main", [], [], []],
+    ["return_uninitialized_mem_struct.sol", "Foo", "main", [], [], []],
+    ["RationalTest.sol", "RationalTest", "subdenominationEtherTest", [], [], []],
+    ["RationalTest.sol", "RationalTest", "subdenominationTimeTest", [], [], []],
+    ["RationalTest.sol", "RationalTest", "mathTest", [], [], []],
+    ["RationalTest.sol", "RationalTest", "extremeDenominatedValues", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
     let artifactManager: ArtifactManager;
-    let interp: Interpreter;
     let sampleMap: SampleMap;
 
     const fileNames = [...new Set<string>(samples.map(([name]) => name))];
 
     beforeAll(async () => {
         [artifactManager, sampleMap] = await loadSamples(fileNames);
-        interp = new Interpreter(worldFailMock, artifactManager);
     }, 10000);
 
     for (const [fileName, contract, funName, stateVals, argVals, expectedReturns] of samples) {
         it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, () => {
-            const { units } = sampleMap.get(fileName) as SampleInfo;
-            let fun: sol.FunctionDefinition | undefined = undefined;
+            const info = sampleMap.get(fileName) as SampleInfo;
 
-            for (const unit of units) {
+            let fun: sol.FunctionDefinition | undefined = undefined;
+            const interp: Interpreter = new Interpreter(
+                worldFailMock,
+                artifactManager,
+                artifactManager.getArtifact(info.units[0])
+            );
+
+            for (const unit of info.units) {
                 fun = new sol.XPath(unit).query(
                     `//ContractDefinition[@name='${contract}']/FunctionDefinition[@name='${funName}']`
                 )[0];
@@ -120,15 +132,23 @@ describe("Simple function call tests", () => {
             }
 
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
-            const state = makeState(fun, artifactManager, ...stateVals);
+            const state = makeState(fun, interp, ...stateVals);
 
             const args = zip(
                 fun.vParameters.vParameters.map((d) => d.name),
                 argVals
             );
+            const argTs = fun.vParameters.vParameters.map((decl) =>
+                interp._infer.variableDeclarationToTypeNode(decl)
+            );
             if (expectedReturns instanceof Array) {
                 try {
-                    const returns = interp.callInternal(fun, encodeMemArgs(args, state), state);
+                    const returns = interp.callInternal(
+                        fun,
+                        encodeMemArgs(args, state),
+                        argTs,
+                        state
+                    );
                     const decodedReturns = returns.map((ret) =>
                         ret instanceof View ? interp.decode(ret, state) : ret
                     );
@@ -148,7 +168,7 @@ describe("Simple function call tests", () => {
                 }
             } else {
                 expect(() => {
-                    interp.callInternal(fun, encodeMemArgs(args, state), state);
+                    interp.callInternal(fun, encodeMemArgs(args, state), argTs, state);
                 }).toThrow(expectedReturns);
             }
         });
