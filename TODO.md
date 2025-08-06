@@ -161,9 +161,8 @@
 148 - add concretize tests
 149 - add union tests
 150 - test pop
-
-- check that normal internal calls handle arguments/returns assignment copies correctly
-- Add a test with fun returning an uninitialized local struct
+151 - check that normal internal calls handle arguments/returns assignment copies correctly
+152 - Add a test with fun returning an uninitialized local struct
 - builtins (nyi for anything needing external call state)
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
