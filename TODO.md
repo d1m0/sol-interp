@@ -163,12 +163,14 @@
 150 - test pop
 151 - check that normal internal calls handle arguments/returns assignment copies correctly
 152 - Add a test with fun returning an uninitialized local struct
+153 - units on literals
+154 - rationals in constant expressions
+
+- mock up external world stuff
 - builtins (nyi for anything needing external call state)
+- migrate builtin tests
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-- migrate builtin tests
-- units on literals
-
 - Idea: Tying it all toghether at the top-level:
     - interface PersistentState {
         artifact: ArtifactInfo;
@@ -226,6 +228,7 @@ Eventually:
     - doc all functions
     - cleanup @todo-s
     - cli
+    - file a bug to eventually elaborate the steps of constant expression eval by moving logic from solc-typed-ast's constant eval. Note this requires making Value = | Decimal to support rationals.
 
 Writing ideas:
     - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!

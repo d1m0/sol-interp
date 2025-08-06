@@ -91,7 +91,13 @@ const samples: Array<
     ["virtual_modifiers.sol", "Child", "main", [], [], []],
     ["virtual_abstract_method.sol", "Child", "main", [], [], []],
     ["push.sol", "Foo", "main", [], [], []],
-    ["call_implicit_casts.sol", "Foo", "main", [], [], []]
+    ["call_implicit_casts.sol", "Foo", "main", [], [], []],
+    ["units.sol", "Foo", "main", [], [], []],
+    ["return_uninitialized_mem_struct.sol", "Foo", "main", [], [], []],
+    ["RationalTest.sol", "RationalTest", "subdenominationEtherTest", [], [], []],
+    ["RationalTest.sol", "RationalTest", "subdenominationTimeTest", [], [], []],
+    ["RationalTest.sol", "RationalTest", "mathTest", [], [], []],
+    ["RationalTest.sol", "RationalTest", "extremeDenominatedValues", [], [], []]
 ];
 
 describe("Simple function call tests", () => {

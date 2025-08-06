@@ -74,7 +74,8 @@ import {
     isStructView,
     isValueType,
     makeZeroValue,
-    printNode
+    printNode,
+    solcValueToValue
 } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
@@ -1077,6 +1078,11 @@ export class Interpreter {
     }
 
     evalBinaryOperation(expr: sol.BinaryOperation, state: State): Value {
+        // Eval constant expression as one whole block, as those are evaluated at compile time.
+        if (sol.isConstant(expr)) {
+            return solcValueToValue(sol.evalBinary(expr, this._infer));
+        }
+
         // Note: RHS evaluates first.
         const rVal = this.evalNP(expr.vRightExpression, state);
         const lVal = this.evalNP(expr.vLeftExpression, state);
@@ -1646,7 +1652,9 @@ export class Interpreter {
 
     evalLiteral(expr: sol.Literal, state: State): Value {
         if (expr.kind === sol.LiteralKind.Number) {
-            return BigInt(expr.value);
+            const v = sol.evalLiteral(expr);
+            this.expect(typeof v === "bigint", ``);
+            return BigInt(v);
         }
 
         if (expr.kind === sol.LiteralKind.Bool) {
@@ -1848,6 +1856,10 @@ export class Interpreter {
     }
 
     evalUnaryOperation(expr: sol.UnaryOperation, state: State): Value {
+        if (sol.isConstant(expr)) {
+            return solcValueToValue(sol.evalUnary(expr, this._infer));
+        }
+
         if (expr.vUserFunction) {
             nyi(`Unary user functions`);
         }

@@ -19,7 +19,7 @@ import {
     Storage
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { none } from "./value";
+import { none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { BaseLocalView } from "./view";
 
@@ -294,3 +294,15 @@ export function isMethod(f: sol.FunctionDefinition | sol.VariableDeclaration): b
 }
 
 export const bytes1 = new sol.FixedBytesType(1);
+
+export function solcValueToValue(solV: sol.Value): Value {
+    if (typeof solV === "bigint" || typeof solV === "boolean") {
+        return solV;
+    }
+
+    if (solV instanceof Buffer) {
+        return new Uint8Array(solV);
+    }
+
+    sol.assert(false, `Cannot convert solc value ${solV}`);
+}
