@@ -99,7 +99,11 @@ const unificationSamples: Array<[sol.TypeNode, sol.TypeNode, boolean]> = [
     [new TUnion([uint256, uint8]), sol.types.address, false],
     [new sol.TupleType([a]), new sol.TupleType([uint256, uint8]), false],
     [new sol.ArrayType(a), new sol.ArrayType(uint8, 5n), false],
-    [new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Memory), new sol.PointerType(new sol.ArrayType(uint8), sol.DataLocation.Storage), false]
+    [
+        new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Memory),
+        new sol.PointerType(new sol.ArrayType(uint8), sol.DataLocation.Storage),
+        false
+    ]
 ];
 
 const substSamples: Array<[sol.TypeNode, sol.TypeNode, sol.TypeNode]> = [
@@ -159,15 +163,14 @@ const substSamples: Array<[sol.TypeNode, sol.TypeNode, sol.TypeNode]> = [
             ["b", new sol.PointerType(new sol.ArrayType(uint256, 5n), sol.DataLocation.Memory)]
         ])
     ],
+    [new TUnion([uint256, uint8]), uint8, uint8],
     [
-        new TUnion([uint256, uint8]),
-        uint8,
-        uint8
-    ],
-    [
-        new TUnion([uint256, new sol.PointerType(new sol.ArrayType(a, 5n), sol.DataLocation.Memory)]),
+        new TUnion([
+            uint256,
+            new sol.PointerType(new sol.ArrayType(a, 5n), sol.DataLocation.Memory)
+        ]),
         new sol.PointerType(new sol.ArrayType(uint256, 5n), sol.DataLocation.Memory),
-        new sol.PointerType(new sol.ArrayType(uint256, 5n), sol.DataLocation.Memory),
+        new sol.PointerType(new sol.ArrayType(uint256, 5n), sol.DataLocation.Memory)
     ]
 ];
 
@@ -195,16 +198,12 @@ const concretizeTests: Array<[sol.TypeNode[], sol.TypeNode[], sol.TypeNode[] | u
         [uint256, uint8, uint256],
         [uint256, uint8, uint256]
     ],
-    [
-        [uint256, new TRest()],
-        [uint256],
-        [uint256]
-    ],
+    [[uint256, new TRest()], [uint256], [uint256]],
     [
         [new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Memory), a, new TRest()],
         [new sol.PointerType(new sol.ArrayType(uint8), sol.DataLocation.Memory), uint256, uint8],
         [new sol.PointerType(new sol.ArrayType(uint8), sol.DataLocation.Memory), uint8, uint8]
-    ],
+    ]
 ];
 
 function ppTypes(ts: sol.TypeNode[]): string {

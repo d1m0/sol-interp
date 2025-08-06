@@ -13,7 +13,7 @@ import {
     uint256
 } from "sol-dbg";
 import { bytes1, makeZeroValue } from "./utils";
-import { bytesToHex, concatBytes } from "@ethereumjs/util";
+import { concatBytes } from "@ethereumjs/util";
 
 function getArgs(numArgs: number, state: State): Value[] {
     const res: Value[] = [];
@@ -114,10 +114,12 @@ export const popBuiltin = new BuiltinFunction(
     "pop",
     new BuiltinFunctionType(
         "pop",
-        [new TUnion([
+        [
+            new TUnion([
                 new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Storage),
                 new sol.PointerType(new sol.BytesType(), sol.DataLocation.Storage)
-            ])],
+            ])
+        ],
         []
     ),
     (interp: Interpreter, state: State): Value[] => {
@@ -149,7 +151,6 @@ export const popBuiltin = new BuiltinFunction(
                 interp.runtimeError(EmptyArrayPop, `pop() from empty array`);
             }
 
-            console.error(`Popping from ${bytesToHex(bytes)} to ${bytesToHex(bytes.slice(0, -1))}`)
             state.storage = arr.encode(bytes.slice(0, -1), state.storage);
             // @todo zero-out deleted element
         }
