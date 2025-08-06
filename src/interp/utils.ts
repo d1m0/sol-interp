@@ -49,6 +49,8 @@ export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
     }
 
     if (t instanceof sol.PointerType) {
+        // @todo Something feels off here. It would be cleaner if all pointer types are 0-initialized to poison.
+        // Do we really allocate memory for uninitialized locals? Add a test with fun returning an uninitialized local struct;
         if (t.location === sol.DataLocation.Memory) {
             let zeroValue: BaseValue;
 

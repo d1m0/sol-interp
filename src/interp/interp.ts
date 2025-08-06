@@ -35,7 +35,8 @@ import {
     ArtifactInfo,
     DefaultAllocator,
     ImmMap,
-    ZERO_ADDRESS
+    ZERO_ADDRESS,
+    isPoison
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -868,6 +869,7 @@ export class Interpreter {
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
                 !(lvalue.type instanceof sol.PointerType) ||
+                    isPoison(rvalue) ||
                     (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp())
             );
             lvalue.encode(rvalue);

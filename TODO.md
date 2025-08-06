@@ -163,12 +163,12 @@
 150 - test pop
 
 - check that normal internal calls handle arguments/returns assignment copies correctly
-    - add tests
-    
+- Add a test with fun returning an uninitialized local struct
 - builtins (nyi for anything needing external call state)
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 - migrate builtin tests
+- units on literals
 
 - Idea: Tying it all toghether at the top-level:
     - interface PersistentState {

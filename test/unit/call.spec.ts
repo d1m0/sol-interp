@@ -90,7 +90,8 @@ const samples: Array<
     ["global_fun_main.sol", "Foo", "main", [], [], []],
     ["virtual_modifiers.sol", "Child", "main", [], [], []],
     ["virtual_abstract_method.sol", "Child", "main", [], [], []],
-    ["push.sol", "Foo", "main", [], [], []]
+    ["push.sol", "Foo", "main", [], [], []],
+    ["call_implicit_casts.sol", "Foo", "main", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
