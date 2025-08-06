@@ -17,6 +17,7 @@ import {
     VariableDeclaration
 } from "solc-typed-ast";
 import { Allocator } from "sol-dbg";
+import { BuiltinFunction } from "./value";
 
 export interface CallResult {
     reverted: boolean;
@@ -40,7 +41,7 @@ export interface SolMessage {
 }
 
 export interface InternalCallFrame {
-    callee: FunctionDefinition | VariableDeclaration;
+    callee: FunctionDefinition | VariableDeclaration | BuiltinFunction;
     scope: LocalsScope;
     curModifier: ModifierInvocation | undefined;
 }

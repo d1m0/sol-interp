@@ -147,13 +147,26 @@
 134    - restore constantMap back to state
 135    - remove state from where relevant
 136 - make Interpreter artifact specific (i.e. move version, artifact and infer to it)
+137 - add polymorphism
+138 - add valueTypeOf
+139 - check arg types on fun call/ret
+140 - add array push builtin
+141 - add option to take implicit this argument to builtinFunction
+142 - Hit a bug around polymorphism and implicit casts. Implicit casts may involve copies (memory string literal -> storage). The correct order of operations is:
+143    - get concrete builtin type
+144    - assign args to go through casting/copy logic
+145 - test push
+146 - cleanup builtins - make them take their own scope with only other builtins
+147 - add pop
+148 - add concretize tests
+149 - add union tests
+150 - test pop
+
+- check that normal internal calls handle arguments/returns assignment copies correctly
+    - add tests
     
-- cleanup builtins - make them take their own scope with only other builtins
-- add valueTypeOf
-- check arg types on fun call/ret
-- add option to take implicit this argument to builtinFunction
-- add array push builtin
 - builtins (nyi for anything needing external call state)
+
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 - migrate builtin tests
 
@@ -206,8 +219,10 @@
 - make a pass to remove nyi and todos
 - add side-by-side execution test :)
 - refactor this.expect to use template strings like sol.assert as an optimization
+- test behavior of zero-ing out (delete, assign zero, pop) of complex storage datastructures. Are they recursively zeroed-out? For sized arrays? For structs? for unsized arrays?
 
 Eventually:
+    - move push implementaion in ArrayStorageView/BytesStorageView
     - cleanup nyi()s to 0
     - doc all functions
     - cleanup @todo-s

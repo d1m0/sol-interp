@@ -176,7 +176,7 @@ contract Assignments {
         assert (a == 42);
     }
 
-    function tupleEvaluateAllInitialExpressions() public returns(uint){
+    function tupleEvaluateAllInitialExpressions() public returns(uint) {
         uint foo = 42;
         (uint8 a, , string memory c, ) = (1, foo=1337, "abc",4);
         assert(a == 1 && foo == 1337);

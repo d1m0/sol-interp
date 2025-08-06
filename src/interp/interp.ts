@@ -85,7 +85,7 @@ import {
     PrimitiveLocalView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
-import { assertBuiltin } from "./builtins";
+import { assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 
 enum ControlFlow {
@@ -133,7 +133,7 @@ export function skipFieldDueToMap(t: sol.TypeNode): boolean {
  *  - AST node stack of currently executed/evaluated objects
  */
 export class Interpreter {
-    nodes: sol.ASTNode[];
+    nodes: Array<sol.ASTNode | BuiltinFunction>;
     _trace: Trace;
 
     get compilerVersion(): string {
@@ -152,7 +152,7 @@ export class Interpreter {
         this._infer = new sol.InferType(this.compilerVersion);
     }
 
-    get curNode(): sol.ASTNode {
+    get curNode(): sol.ASTNode | BuiltinFunction {
         sol.assert(this.nodes.length > 0, `No cur node`);
         return this.nodes[this.nodes.length - 1];
     }
@@ -167,7 +167,7 @@ export class Interpreter {
     fail(
         errorConstr: new (...args: any[]) => InternalError,
         msg: string,
-        ctx: sol.ASTNode = this.curNode
+        ctx: sol.ASTNode | BuiltinFunction = this.curNode
     ): never {
         throw new errorConstr(ctx, this._trace, msg);
     }
@@ -224,8 +224,13 @@ export class Interpreter {
      * @param args
      * @param state
      */
-    public callInternal(callee: sol.FunctionDefinition, args: Value[], state: State): Value[] {
-        return this._execCall(callee, args, state);
+    public callInternal(
+        callee: sol.FunctionDefinition,
+        args: Value[],
+        argTs: sol.TypeNode[],
+        state: State
+    ): Value[] {
+        return this._execCall(callee, args, argTs, state);
     }
 
     ///*********************STATEMENTS*************************************************
@@ -551,9 +556,10 @@ export class Interpreter {
 
             state.scope = frame.scope;
             const modArgs = nextMod.vArguments.map((argE) => this.eval(argE, state));
+            const modArgTs = nextMod.vArguments.map((argE) => this._infer.typeOf(argE));
             state.scope = savedScope;
 
-            this._execCall(nextMod, modArgs, state);
+            this._execCall(nextMod, modArgs, modArgTs, state);
             return ControlFlow.Fallthrough;
         }
 
@@ -783,7 +789,7 @@ export class Interpreter {
         return res;
     }
 
-    assign(lvalue: LValue, rvalue: Value, state: State): void {
+    public assign(lvalue: LValue, rvalue: Value, state: State): void {
         // Handle tuple assignments first
         if (lvalue instanceof Array) {
             this.expect(
@@ -1261,9 +1267,37 @@ export class Interpreter {
     evalBuiltinCall(expr: sol.FunctionCall, state: State): Value {
         const callee = this.evalNP(expr.vExpression, state);
         const args: Value[] = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
+        const argTs: sol.TypeNode[] = expr.vArguments.map((argExpr) => this._infer.typeOf(argExpr));
 
         this.expect(callee instanceof BuiltinFunction);
-        return callee.call(this, state, args);
+
+        if (callee.implicitFirstArg) {
+            this.expect(
+                expr.vExpression instanceof sol.MemberAccess,
+                `Expected member access in builtin callee ${printNode(expr)}`
+            );
+
+            const savedTrace = this._trace;
+            // Small hack - we don't want to add to the trace the re-evaluation of the base
+            this._trace = [];
+            const firstArg = this.eval(expr.vExpression.vExpression, state);
+            this._trace = savedTrace;
+
+            args.unshift(firstArg);
+            argTs.unshift(this._infer.typeOf(expr.vExpression.vExpression));
+        }
+
+        const results = this._execCall(callee, args, argTs, state);
+
+        if (results.length === 0) {
+            return none;
+        }
+
+        if (results.length === 1) {
+            return results[0];
+        }
+
+        return results;
     }
 
     evalExternalCall(expr: sol.FunctionCall, state: State): Value {
@@ -1296,41 +1330,46 @@ export class Interpreter {
      * When target is `sol.FunctionDefinition` return the `Value[]`s returned by the function. For modifiers returns [].
      */
     _execCall(
-        target: sol.FunctionDefinition | sol.ModifierInvocation,
+        target: sol.FunctionDefinition | sol.ModifierInvocation | BuiltinFunction,
         args: Value[],
+        argTs: sol.TypeNode[],
         state: State
     ): Value[] {
         // Save scope
         const savedScope = state.scope;
         let savedCurModifier: sol.ModifierInvocation | undefined;
+        let callee: sol.FunctionDefinition | sol.ModifierDefinition | BuiltinFunction;
 
-        const callee = target instanceof sol.FunctionDefinition ? target : target.vModifier;
-        this.expect(
-            callee instanceof sol.FunctionDefinition || callee instanceof sol.ModifierDefinition
-        );
+        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
+            callee = target;
+        } else {
+            callee = target.vModifier as sol.ModifierDefinition;
+        }
 
-        state.scope = this.makeScope(callee, args, state);
+        state.scope = this.makeScope(callee, args, argTs, state);
         this.nodes.push(target);
 
-        if (target instanceof sol.FunctionDefinition) {
+        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
             state.intCallStack.push({
                 callee: target,
                 scope: state.scope as LocalsScope,
                 curModifier: undefined
             });
-        } else {
+        } else if (target instanceof sol.ModifierInvocation) {
             const frame = stackTop(state.intCallStack);
             savedCurModifier = frame.curModifier;
             frame.curModifier = target;
         }
 
+        let res: Value[];
         if (target instanceof sol.FunctionDefinition) {
             const mods = getModifiers(target);
 
             if (mods.length > 0) {
                 const mod = mods[0];
                 const argVals = mod.vArguments.map((argE) => this.eval(argE, state));
-                this._execCall(mod, argVals, state);
+                const argTs = mod.vArguments.map((argE) => this._infer.typeOf(argE));
+                this._execCall(mod, argVals, argTs, state);
             } else {
                 const resolvedTarget = this.resolveCallee(target, state);
                 this.expect(
@@ -1340,19 +1379,7 @@ export class Interpreter {
                 );
                 this.exec(resolvedTarget.vBody, state);
             }
-        } else {
-            const mod = this.resolveCallee(target.vModifier as sol.ModifierDefinition, state);
-            this.expect(
-                mod instanceof sol.ModifierDefinition && mod.vBody !== undefined,
-                `Can't call ${mod.name} with no body.`
-            );
-            this.exec(mod.vBody, state);
-        }
 
-        let res: Value[] = [];
-        const frame = stackTop(state.intCallStack);
-
-        if (target instanceof sol.FunctionDefinition) {
             res = target.vReturnParameters.vParameters.map((ret, i) => {
                 const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
                 if (res === undefined) {
@@ -1360,6 +1387,21 @@ export class Interpreter {
                 }
                 return res;
             });
+        } else if (target instanceof sol.ModifierInvocation) {
+            const mod = this.resolveCallee(target.vModifier as sol.ModifierDefinition, state);
+            this.expect(
+                mod instanceof sol.ModifierDefinition && mod.vBody !== undefined,
+                `Can't call ${mod.name} with no body.`
+            );
+            this.exec(mod.vBody, state);
+            res = [];
+        } else {
+            res = target.call(this, state, args.length);
+        }
+
+        const frame = stackTop(state.intCallStack);
+
+        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
             state.intCallStack.pop();
         } else {
             frame.curModifier = savedCurModifier;
@@ -1395,10 +1437,11 @@ export class Interpreter {
         );
 
         const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
+        const argTs = expr.vArguments.map((arg) => this._infer.typeOf(arg));
         let results: Value[];
 
         if (resolvedCalleeDef instanceof sol.FunctionDefinition) {
-            results = this.callInternal(resolvedCalleeDef, argVals, state);
+            results = this._execCall(resolvedCalleeDef, argVals, argTs, state);
         } else {
             nyi(`Calling public getter ${resolvedCalleeDef.name} in ${state.mdc}`);
         }
@@ -1672,6 +1715,13 @@ export class Interpreter {
             }
         }
 
+        if (
+            (isArrayLikeStorageView(baseVal) && expr.memberName === "push") ||
+            expr.memberName === "pop"
+        ) {
+            return expr.memberName === "push" ? pushBuiltin : popBuiltin;
+        }
+
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
     }
 
@@ -1859,8 +1909,12 @@ export class Interpreter {
      * 1. Compute constant expressions
      * 2. As a basis for dynamic runtime scopes. Those build on this scope with LocalScopes for function args, locals, etc..
      */
-    public makeStaticScope(nd: sol.ASTNode | undefined, state: State): BaseScope {
+    public makeStaticScope(nd: sol.ASTNode | BuiltinFunction | undefined, state: State): BaseScope {
         const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
+
+        if (nd instanceof BuiltinFunction) {
+            return this.makeBuiltinScope(state);
+        }
 
         while (nd !== undefined) {
             if (nd instanceof sol.SourceUnit || nd instanceof sol.ContractDefinition) {
@@ -1892,13 +1946,24 @@ export class Interpreter {
      * @param infer
      * @returns
      */
-    public makeScope(
-        nd: sol.FunctionDefinition | sol.ModifierDefinition,
+    makeScope(
+        nd: sol.FunctionDefinition | sol.ModifierDefinition | BuiltinFunction,
         args: Value[],
+        argTs: sol.TypeNode[],
         state: State
     ): BaseScope {
         const staticScope = this.makeStaticScope(nd, state);
-        const localNames = nd.vParameters.vParameters.map((d) => d.name);
+        let localNames: string[];
+
+        if (nd instanceof BuiltinFunction) {
+            nd = nd.concretize(argTs);
+        }
+
+        if (nd instanceof BuiltinFunction) {
+            localNames = nd.type.parameters.map((_, i) => `arg_${i}`);
+        } else {
+            localNames = nd.vParameters.vParameters.map((d) => d.name);
+        }
 
         // We keep the returns in the function scope as well
         if (nd instanceof sol.FunctionDefinition) {
@@ -1925,7 +1990,9 @@ export class Interpreter {
         const res = new LocalsScope(nd, state, this.compilerVersion, staticScope);
 
         for (let i = 0; i < localNames.length; i++) {
-            res.set(localNames[i], args[i]);
+            const v = res.lookupLocation(localNames[i]);
+            this.expect(v !== undefined, ``);
+            this.assign(v, args[i], state);
         }
 
         return res;

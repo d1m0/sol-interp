@@ -1,5 +1,5 @@
 import * as sol from "solc-typed-ast";
-import { DefValue, Value } from "./value";
+import { BuiltinFunction, DefValue, Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -95,7 +95,8 @@ export type LocalsScopeNodeType =
     // In Solidity >0.5.0 each VariableDeclarationStatement is its own scope from now, till the end of the defining block
     | sol.VariableDeclarationStatement
     | sol.FunctionDefinition
-    | sol.ModifierDefinition;
+    | sol.ModifierDefinition
+    | BuiltinFunction;
 
 /**
  * Scope corresponding to the current top-level LocalsScope in State.
@@ -175,6 +176,10 @@ export class LocalsScope extends BaseScope {
                     simplifyType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
                 );
             }
+        } else {
+            for (let i = 0; i < node.type.parameters.length; i++) {
+                res.set(`arg_${i}`, simplifyType(node.type.parameters[i], infer, undefined));
+            }
         }
 
         return res;
@@ -194,9 +199,11 @@ export class LocalsScope extends BaseScope {
         } else if (node instanceof sol.VariableDeclarationStatement) {
             name = `<locals ${[...defTypesMap.keys()].join(", ")}>`;
         } else if (node instanceof sol.FunctionDefinition) {
-            name = `<arg/rets for ${node.print(0)}>`;
+            name = `<args/rets for ${node.print(0)}>`;
+        } else if (node instanceof sol.ModifierDefinition) {
+            name = `<args for ${node.print(0)}>`;
         } else {
-            name = `<arg for ${node.print(0)}>`;
+            name = `<args for ${node.pp()}>`;
         }
 
         super(name, defTypesMap, state, _next);

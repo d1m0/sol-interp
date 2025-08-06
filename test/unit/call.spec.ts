@@ -89,7 +89,8 @@ const samples: Array<
     ["modifiers.sol", "Foo", "main", [], [], []],
     ["global_fun_main.sol", "Foo", "main", [], [], []],
     ["virtual_modifiers.sol", "Child", "main", [], [], []],
-    ["virtual_abstract_method.sol", "Child", "main", [], [], []]
+    ["virtual_abstract_method.sol", "Child", "main", [], [], []],
+    ["push.sol", "Foo", "main", [], [], []]
 ];
 
 describe("Simple function call tests", () => {
@@ -130,9 +131,17 @@ describe("Simple function call tests", () => {
                 fun.vParameters.vParameters.map((d) => d.name),
                 argVals
             );
+            const argTs = fun.vParameters.vParameters.map((decl) =>
+                interp._infer.variableDeclarationToTypeNode(decl)
+            );
             if (expectedReturns instanceof Array) {
                 try {
-                    const returns = interp.callInternal(fun, encodeMemArgs(args, state), state);
+                    const returns = interp.callInternal(
+                        fun,
+                        encodeMemArgs(args, state),
+                        argTs,
+                        state
+                    );
                     const decodedReturns = returns.map((ret) =>
                         ret instanceof View ? interp.decode(ret, state) : ret
                     );
@@ -152,7 +161,7 @@ describe("Simple function call tests", () => {
                 }
             } else {
                 expect(() => {
-                    interp.callInternal(fun, encodeMemArgs(args, state), state);
+                    interp.callInternal(fun, encodeMemArgs(args, state), argTs, state);
                 }).toThrow(expectedReturns);
             }
         });

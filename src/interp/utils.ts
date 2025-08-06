@@ -291,3 +291,5 @@ export function isMethod(f: sol.FunctionDefinition | sol.VariableDeclaration): b
         f.vScope.kind === sol.ContractKind.Contract
     );
 }
+
+export const bytes1 = new sol.FixedBytesType(1);

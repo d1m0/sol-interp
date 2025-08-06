@@ -13,6 +13,7 @@ import * as sol from "solc-typed-ast";
 import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
+import { concretize, substitute } from "./polymorphic";
 
 export abstract class BaseInterpValue implements sol.PPAble {
     abstract pp(): string;
@@ -22,13 +23,30 @@ export class BuiltinFunction extends BaseInterpValue {
     constructor(
         public readonly name: string,
         public readonly type: sol.BuiltinFunctionType,
-        public readonly call: (interp: Interpreter, state: State, args: Value[]) => Value[]
+        protected readonly _call: (interp: Interpreter, state: State, nArgs: number) => Value[],
+        public readonly implicitFirstArg = false
     ) {
         super();
     }
 
     pp(): string {
         return `<builtin fun ${this.type.pp()}>`;
+    }
+
+    concretize(argTs: sol.TypeNode[]): BuiltinFunction {
+        const [concreteFormalArgs, subst] = concretize(this.type.parameters, argTs);
+        const concreteFormalRets = this.type.returns.map((retT) => substitute(retT, subst));
+
+        const concreteT = new sol.BuiltinFunctionType(
+            this.type.name,
+            concreteFormalArgs,
+            concreteFormalRets
+        );
+        return new BuiltinFunction(this.name, concreteT, this._call, this.implicitFirstArg);
+    }
+
+    call(interp: Interpreter, state: State, nArgs: number): Value[] {
+        return this._call(interp, state, nArgs);
     }
 }
 
