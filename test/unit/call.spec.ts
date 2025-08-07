@@ -4,7 +4,7 @@ import * as sol from "solc-typed-ast";
 import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
 import { Assert, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
-import { worldFailMock } from "../../src/interp/utils";
+import { decodeView, worldFailMock } from "../../src/interp/utils";
 import { ArtifactManager } from "../../src/interp/artifactManager";
 
 type ExceptionConstructors = typeof Assert;
@@ -149,8 +149,9 @@ describe("Simple function call tests", () => {
                         argTs,
                         state
                     );
+
                     const decodedReturns = returns.map((ret) =>
-                        ret instanceof View ? interp.decode(ret, state) : ret
+                        ret instanceof View ? decodeView(ret, state) : ret
                     );
                     expect(decodedReturns).toEqual(expectedReturns);
                 } catch (e) {

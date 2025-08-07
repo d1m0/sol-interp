@@ -6,7 +6,9 @@ import {
     Value as BaseValue,
     ImmMap,
     DefaultAllocator,
-    ZERO_ADDRESS
+    ZERO_ADDRESS,
+    ContractInfo,
+    ArtifactInfo
 } from "sol-dbg";
 import { BaseScope, LocalsScope } from "./scope";
 import {
@@ -18,6 +20,7 @@ import {
 } from "solc-typed-ast";
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction } from "./value";
+import { ArtifactManager } from "./artifactManager";
 
 export interface CallResult {
     reverted: boolean;
@@ -51,6 +54,7 @@ export interface State {
     storage: Storage;
     memory: Memory;
     memAllocator: Allocator;
+    contract: ContractInfo | undefined;
     mdc: ContractDefinition | undefined;
     msg: SolMessage;
     intCallStack: InternalCallFrame[];
@@ -64,6 +68,7 @@ export function makeEmptyState(): State {
         storage: ImmMap.fromEntries([]),
         memory: memAllocator.memory,
         memAllocator,
+        contract: undefined,
         mdc: undefined,
         msg: {
             to: ZERO_ADDRESS,
@@ -75,5 +80,39 @@ export function makeEmptyState(): State {
         intCallStack: [],
         scope: undefined,
         constantsMap: new Map()
+    };
+}
+
+/**
+ * Make an empty state containing just the constants
+ * @returns
+ */
+export function makeStateWithConstants(
+    artifactManager: ArtifactManager,
+    artifact: ArtifactInfo
+): State {
+    const memAllocator = new DefaultAllocator();
+    const [constantsMap, constantsMemory] = artifactManager.getConstants(artifact);
+
+    // Copy over the constants into the new memory
+    memAllocator.alloc(constantsMemory.length);
+    memAllocator.memory.set(constantsMemory, 0x80);
+
+    return {
+        storage: ImmMap.fromEntries([]),
+        memory: memAllocator.memory,
+        memAllocator,
+        mdc: undefined,
+        contract: undefined,
+        msg: {
+            to: ZERO_ADDRESS,
+            data: new Uint8Array(),
+            gas: 0n,
+            value: 0n,
+            salt: undefined
+        },
+        intCallStack: [],
+        scope: undefined,
+        constantsMap: constantsMap
     };
 }

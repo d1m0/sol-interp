@@ -33,10 +33,8 @@ import {
     BytesCalldataView,
     stackTop,
     ArtifactInfo,
-    DefaultAllocator,
-    ImmMap,
-    ZERO_ADDRESS,
-    isPoison
+    isPoison,
+    buildMsgViews
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { WorldInterface, State, SolMessage } from "./state";
@@ -68,8 +66,10 @@ import { Address, bigIntToBytes, bytesToHex, equalsBytes, hexToBytes } from "@et
 import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
     changeLocTo,
+    decodeView,
     getModifiers,
     getMsg,
+    hasSelector,
     isMethod,
     isStructView,
     isValueType,
@@ -83,12 +83,12 @@ import {
     ArrayLikeLocalView,
     isArrayLikeView,
     isPointerView,
-    PointerLocalView,
-    PrimitiveLocalView
+    PointerLocalView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import { assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
+import { encode } from "./abi";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -146,8 +146,8 @@ export class Interpreter {
 
     constructor(
         protected readonly world: WorldInterface,
-        protected readonly artifactManager: ArtifactManager,
-        protected readonly artifact: ArtifactInfo
+        public readonly artifactManager: ArtifactManager,
+        public readonly artifact: ArtifactInfo
     ) {
         this.nodes = [];
         this._trace = [];
@@ -186,8 +186,105 @@ export class Interpreter {
         nyi(`create(${msg}, ${state})`);
     }
 
-    public call(msg: SolMessage, state: State): Value[] | InternalError {
-        nyi(`create(${msg}, ${state})`);
+    /**
+     * Main entrypoint to the conctract. Responsible for:
+     *  - dispatching to the correct function
+     *  - decoding arguments from calldata
+     */
+    public call(msg: SolMessage, state: State): Uint8Array | RuntimeError {
+        state.msg = msg;
+
+        this.expect(state.contract !== undefined, `Missing contract in state in call`);
+
+        // This handles dispatch including fallback and receive functions.
+        const entryPoint = this.artifactManager.findEntryPoint(msg.data, state.contract);
+
+        if (entryPoint === undefined) {
+            nyi(`Couldn't find entry point for ${msg}`);
+        }
+
+        // Decode args
+        let calldataArgs: Value[] = buildMsgViews(entryPoint, this._infer).map((x) => x[1]);
+
+        // Skip selector
+        if (hasSelector(entryPoint)) {
+            calldataArgs = calldataArgs.slice(1);
+        }
+
+        let argTs: sol.TypeNode[];
+        if (entryPoint instanceof sol.FunctionDefinition) {
+            // The arg values here are calldata pointers, which may differ from
+            // the actual arguments (i.e. they may be memory pointers).  The
+            // `Intepreter.assign` in `makeScope()` will handle the copying from
+            // calldata to memory.
+            argTs = entryPoint.vParameters.vParameters.map((argT) =>
+                sol.specializeType(
+                    sol.generalizeType(this._infer.variableDeclarationToTypeNode(argT))[0],
+                    sol.DataLocation.CallData
+                )
+            );
+        } else {
+            nyi("public getters");
+        }
+
+        calldataArgs = calldataArgs.map((arg, i) => {
+            if (isValueType(argTs[i])) {
+                return decodeView(arg as View, state) as PrimitiveValue;
+            }
+
+            if (arg instanceof PointerCalldataView) {
+                const innerView = arg.toView(getMsg(state));
+                this.expect(innerView instanceof BaseCalldataView, ``);
+                return innerView;
+            }
+
+            sol.assert(false, `Unexpected calldata arg ${ppValue(arg)}`);
+        });
+
+        /*
+        console.error(`Args: ${ppValue(calldataArgs)}`)
+        */
+
+        if (entryPoint instanceof sol.FunctionDefinition) {
+            // The arg values here are calldata pointers, which may differ from
+            // the actual arguments (i.e. they may be memory pointers).  The
+            // `Intepreter.assign` in `makeScope()` will handle the copying from
+            // calldata to memory.
+            const argTs = entryPoint.vParameters.vParameters.map((argT) =>
+                sol.specializeType(
+                    sol.generalizeType(this._infer.variableDeclarationToTypeNode(argT))[0],
+                    sol.DataLocation.CallData
+                )
+            );
+            let res: Value[];
+
+            try {
+                res = this.callInternal(entryPoint, calldataArgs, argTs, state);
+            } catch (e) {
+                if (e instanceof RuntimeError) {
+                    return e;
+                }
+
+                throw e;
+            }
+
+            // Encode returns
+            const resTs = entryPoint.vReturnParameters.vParameters.map((retT) =>
+                this._infer.variableDeclarationToTypeNode(retT)
+            );
+            const isLib = (state.mdc as sol.ContractDefinition).kind === sol.ContractKind.Library;
+
+            return encode(
+                res,
+                resTs,
+                state,
+                this._infer,
+                isLib,
+                state.contract.artifact.abiEncoderVersion
+            );
+        } else {
+            nyi(`public getter`);
+        }
     }
 
     private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
@@ -747,7 +844,7 @@ export class Interpreter {
             } else if (baseLV instanceof MapStorageView) {
                 const key =
                     indexVal instanceof View
-                        ? this.decode(indexVal, state)
+                        ? decodeView(indexVal, state)
                         : (indexVal as PrimitiveValue);
                 idxView = baseLV.indexView(key);
             } else {
@@ -840,7 +937,7 @@ export class Interpreter {
                 `Mismatching types in copying ref assignment (modulo location): ${lvT} and ${rvT} `
             );
 
-            const complexRVal = this.decode(rvalue, state);
+            const complexRVal = decodeView(rvalue, state);
 
             if (lvalue instanceof BaseMemoryView) {
                 lvalue.encode(complexRVal, state.memory, state.memAllocator);
@@ -1630,7 +1727,7 @@ export class Interpreter {
         } else if (baseVal instanceof MapStorageView) {
             const key =
                 indexVal instanceof View
-                    ? this.decode(indexVal, state)
+                    ? decodeView(indexVal, state)
                     : (indexVal as PrimitiveValue);
             const idxView = baseVal.indexView(key);
             res = this.lvToValue(idxView, state);
@@ -1791,23 +1888,6 @@ export class Interpreter {
     }
 
     /**
-     * Given a view decode its contents. Note that this may return complex values.
-     */
-    public decode(lv: View, state: State): BaseValue {
-        if (lv instanceof BaseStorageView) {
-            return lv.decode(state.storage);
-        } else if (lv instanceof BaseMemoryView) {
-            return lv.decode(state.memory);
-        } else if (lv instanceof BaseCalldataView) {
-            return lv.decode(getMsg(state));
-        } else if (lv instanceof PrimitiveLocalView) {
-            return lv.decode();
-        }
-
-        nyi(`decode(${lv})`);
-    }
-
-    /**
      * Given an array-like view get its size
      */
     public getSize(lv: ArrayLikeView<any, View>, state: State): bigint {
@@ -1838,7 +1918,7 @@ export class Interpreter {
 
         if (lv instanceof View) {
             if (isValueType(lv.type)) {
-                return this.decode(lv, state) as PrimitiveValue;
+                return decodeView(lv, state) as PrimitiveValue;
             }
 
             if (isPointerView(lv)) {
@@ -2010,35 +2090,5 @@ export class Interpreter {
         }
 
         return res;
-    }
-
-    /**
-     * Make an empty state containing just the constants
-     * @returns
-     */
-    public makeState(): State {
-        const memAllocator = new DefaultAllocator();
-        const [constantsMap, constantsMemory] = this.artifactManager.getConstants(this.artifact);
-
-        // Copy over the constants into the new memory
-        memAllocator.alloc(constantsMemory.length);
-        memAllocator.memory.set(constantsMemory, 0x80);
-
-        return {
-            storage: ImmMap.fromEntries([]),
-            memory: memAllocator.memory,
-            memAllocator,
-            mdc: undefined,
-            msg: {
-                to: ZERO_ADDRESS,
-                data: new Uint8Array(),
-                gas: 0n,
-                value: 0n,
-                salt: undefined
-            },
-            intCallStack: [],
-            scope: undefined,
-            constantsMap: constantsMap
-        };
     }
 }

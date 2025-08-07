@@ -21,7 +21,7 @@ import {
 import * as sol from "solc-typed-ast";
 import { none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
-import { BaseLocalView } from "./view";
+import { BaseLocalView, PrimitiveLocalView } from "./view";
 
 /**
  * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
@@ -90,6 +90,20 @@ export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
 
 export function getMsg(state: State): Uint8Array {
     return state.msg.data;
+}
+
+export function decodeView(lv: View, state: State): BaseValue {
+    if (lv instanceof BaseStorageView) {
+        return lv.decode(state.storage);
+    } else if (lv instanceof BaseMemoryView) {
+        return lv.decode(state.memory);
+    } else if (lv instanceof BaseCalldataView) {
+        return lv.decode(getMsg(state));
+    } else if (lv instanceof PrimitiveLocalView) {
+        return lv.decode();
+    }
+
+    nyi(`decode(${lv})`);
 }
 
 // @todo move to solc-typed-ast
@@ -305,4 +319,21 @@ export function solcValueToValue(solV: sol.Value): Value {
     }
 
     sol.assert(false, `Cannot convert solc value ${solV}`);
+}
+
+// @todo remove after sol-dbg ver bump
+export function hasSelector(callee: sol.FunctionDefinition | sol.VariableDeclaration): boolean {
+    if (callee instanceof sol.VariableDeclaration) {
+        return true;
+    }
+
+    if (
+        callee.isConstructor ||
+        callee.kind === sol.FunctionKind.Receive ||
+        callee.kind === sol.FunctionKind.Fallback
+    ) {
+        return false;
+    }
+
+    return true;
 }

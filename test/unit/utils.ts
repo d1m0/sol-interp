@@ -9,7 +9,7 @@ import {
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
 import { BaseScope, LocalsScope } from "../../src/interp/scope";
-import { State } from "../../src/interp/state";
+import { makeStateWithConstants, State } from "../../src/interp/state";
 import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
 import { gt } from "semver";
@@ -21,7 +21,7 @@ export function makeState(
     interp: Interpreter,
     ...vals: Array<[string, Value]>
 ): State {
-    const res = interp.makeState();
+    const res = makeStateWithConstants(interp.artifactManager, interp.artifact);
     let nd: sol.ASTNode | undefined = loc;
     const scopeNodes: Array<sol.FunctionDefinition | sol.Block | sol.UncheckedBlock> = [];
 

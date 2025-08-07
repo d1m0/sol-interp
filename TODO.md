@@ -165,8 +165,29 @@
 152 - Add a test with fun returning an uninitialized local struct
 153 - units on literals
 154 - rationals in constant expressions
-
 - mock up external world stuff
+155    - add abi.encode() helper 
+156    - finish call
+157    - add test harness for call with some simple tests
+
+    - fill out call() callback
+    - add test with external calls
+    - add test with external calls where an inner one fails (should propagate up)
+    - add abi.encode family
+    - add abi.decode family
+    - move over abi.encode() tests from sol2maruir
+
+    - plan staticcall()
+        - add a static flag to state?
+    - plan delegatecall()
+        - is there a way to test it without assembly?
+
+- maybe move constants cache to Chain from Artifact? Though logically it feels like it fits better there....
+- Interp.makeState duplicates logic in Chain
+- write external call logic
+- add unit test with empty constructors and calling
+- add abi.encodeCall test with failure in type checking
+
 - builtins (nyi for anything needing external call state)
 - migrate builtin tests
 
