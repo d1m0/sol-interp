@@ -1,3 +1,3 @@
 export abstract class BaseType {
-    abstract pp(): string
+    abstract pp(): string;
 }

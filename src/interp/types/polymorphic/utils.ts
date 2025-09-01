@@ -14,7 +14,7 @@ import { TRest } from "./trest";
 import { TUnion } from "./tunion";
 import { TVar } from "./tvar";
 
-import { assert } from "solc-typed-ast"
+import { assert } from "solc-typed-ast";
 
 export type TSubst = Map<string, BaseType>;
 
@@ -57,13 +57,13 @@ function containsTVar(t: BaseType, v: BaseTVar): boolean {
     }
 
     if (t instanceof BaseFunctionType) {
-        for (let paramT of t.parameters) {
+        for (const paramT of t.parameters) {
             if (containsTVar(paramT, v)) {
                 return true;
             }
         }
 
-        for (let paramT of t.returns) {
+        for (const paramT of t.returns) {
             if (containsTVar(paramT, v)) {
                 return true;
             }
@@ -112,13 +112,13 @@ export function isPolymorphic(t: BaseType): boolean {
     }
 
     if (t instanceof BaseFunctionType) {
-        for (let paramT of t.parameters) {
+        for (const paramT of t.parameters) {
             if (isPolymorphic(paramT)) {
                 return true;
             }
         }
 
-        for (let paramT of t.returns) {
+        for (const paramT of t.returns) {
             if (isPolymorphic(paramT)) {
                 return true;
             }
@@ -126,7 +126,7 @@ export function isPolymorphic(t: BaseType): boolean {
     }
 
     if (t instanceof TupleType) {
-        for (let elT of t.elementTypes) {
+        for (const elT of t.elementTypes) {
             if (isPolymorphic(elT)) {
                 return true;
             }
@@ -134,12 +134,11 @@ export function isPolymorphic(t: BaseType): boolean {
     }
 
     if (t instanceof MappingType) {
-        return isPolymorphic(t.keyType) || isPolymorphic(t.valueType)
+        return isPolymorphic(t.keyType) || isPolymorphic(t.valueType);
     }
 
     return false;
 }
-
 
 /**
  * Replace all TVars inside `t` according to `subst`.
@@ -180,10 +179,11 @@ export function substitute(t: BaseType, subst: TSubst): BaseType {
     }
 
     if (t instanceof BaseFunctionType) {
-        const constr = t instanceof InternalFunctionType ? InternalFunctionType : ExternalFunctionType
+        const constr =
+            t instanceof InternalFunctionType ? InternalFunctionType : ExternalFunctionType;
         return new constr(
-            t.parameters.map((pT) => substitute(pT, subst)), 
-            t.returns.map((rT) => substitute(rT, subst)), 
+            t.parameters.map((pT) => substitute(pT, subst)),
+            t.returns.map((rT) => substitute(rT, subst))
         );
     }
 
@@ -203,7 +203,7 @@ export function substitute(t: BaseType, subst: TSubst): BaseType {
  * Returns true IFF t1 unifies with t2 under type substitution subst.
  * As types are unified subst is destructively modified to accumulate the substitution.
  * This happens even if we return false.
- * 
+ *
  * Note that this handles a limit subset of the types, which appear in
  * builtin args.
  */
@@ -329,7 +329,7 @@ export function unify(t1: BaseType, t2: BaseType, subst: TSubst): boolean {
  * to get the right concrete type.
  *
  * Also this handles TRest and TOptional
- * @todo (dimo): Go over this fun again. Feels hacky. There has to be a better way 
+ * @todo (dimo): Go over this fun again. Feels hacky. There has to be a better way
  * to implement this.
  */
 export function concretize(

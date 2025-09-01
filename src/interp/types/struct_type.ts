@@ -1,7 +1,10 @@
 import { BaseType } from "./base_type";
 
 export class StructType extends BaseType {
-    constructor(public readonly name: string, public readonly fields: [string, BaseType][]) {
+    constructor(
+        public readonly name: string,
+        public readonly fields: Array<[string, BaseType]>
+    ) {
         super();
     }
 

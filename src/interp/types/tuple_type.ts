@@ -6,6 +6,6 @@ export class TupleType extends BaseType {
     }
 
     pp(): string {
-        return `(${this.elementTypes.map((t) => t.pp()).join(", ")})`
+        return `(${this.elementTypes.map((t) => t.pp()).join(", ")})`;
     }
 }

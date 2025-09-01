@@ -6,6 +6,6 @@ import { BaseType } from "./base_type";
  */
 export class MissingType extends BaseType {
     pp(): string {
-        return `<mssing type>`
+        return `<mssing type>`;
     }
 }

@@ -178,10 +178,12 @@
 162 - get clean test run
 163 - add abi.encode builtin and use it in evalExternallCall
 164 - move over abi.encode() tests from sol2maruir
+165 - add decode
+166 - add decode_fail test.
+167 - add decoding builtin
 
-- add decode
-- add decode_fail test.
-- add decoding builtin
+- fix #6 - add own type system
+
 - move over some decoding tests
 
 - finish evalExternalCall.

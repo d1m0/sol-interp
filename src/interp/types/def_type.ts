@@ -1,14 +1,15 @@
 import * as sol from "solc-typed-ast";
 import { BaseType } from "./base_type";
 
-type NamedDefinition = sol.ContractDefinition
-            | sol.ImportDirective
-            | sol.FunctionDefinition
-            | sol.EventDefinition
-            | sol.ErrorDefinition
-            | sol.StructDefinition
-            | sol.EnumDefinition
-            | sol.UserDefinedValueTypeDefinition;
+type NamedDefinition =
+    | sol.ContractDefinition
+    | sol.ImportDirective
+    | sol.FunctionDefinition
+    | sol.EventDefinition
+    | sol.ErrorDefinition
+    | sol.StructDefinition
+    | sol.EnumDefinition
+    | sol.UserDefinedValueTypeDefinition;
 
 export class DefType extends BaseType {
     constructor(public readonly def: NamedDefinition) {
@@ -26,12 +27,13 @@ export class DefType extends BaseType {
     get fullName(): string {
         let scope: string;
         if (this.def instanceof sol.ImportDirective) {
-            scope = '';
+            scope = "";
         } else {
-            scope = this.def.vScope instanceof sol.ContractDefinition ? `${this.def.vScope.name}.` : "";
+            scope =
+                this.def.vScope instanceof sol.ContractDefinition ? `${this.def.vScope.name}.` : "";
         }
 
-        return `${scope}${this.name}`
+        return `${scope}${this.name}`;
     }
 
     get kind(): string {
@@ -68,6 +70,6 @@ export class DefType extends BaseType {
     }
 
     pp(): string {
-        return `<def ${this.kind} ${this.name}>`
+        return `<def ${this.kind} ${this.name}>`;
     }
 }
