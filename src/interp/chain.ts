@@ -1,32 +1,44 @@
-import { ContractInfo, Storage, nyi, ZERO_ADDRESS } from "sol-dbg";
-import { CallResult, makeStateWithConstants, SolMessage, WorldInterface } from "./state";
+import { ContractInfo, Storage, nyi, ZERO_ADDRESS, ImmMap } from "sol-dbg";
+import { CallResult, makeStateForAccount, SolMessage, WorldInterface } from "./state";
 import { Interpreter } from "./interp";
 import { ArtifactManager } from "./artifactManager";
 import { Address } from "@ethereumjs/util";
 import { RuntimeError } from "./exceptions";
 
 export interface AccountInfo {
+    address: Address;
     contract: ContractInfo;
     storage: Storage;
     balance: bigint;
     nonce: bigint;
 }
 
-export interface ChainState {
-    accounts: Map<string, AccountInfo>;
-}
+export class Chain implements WorldInterface {
+    state: ImmMap<string, AccountInfo>;
 
-export class Chain implements ChainState {
-    accounts: Map<string, AccountInfo> = new Map();
+    constructor(public readonly artifactManager: ArtifactManager) {
+        this.state = ImmMap.fromEntries([]);
+    }
 
-    constructor(public readonly artifactManager: ArtifactManager) {}
+    create(): CallResult {
+        throw new Error("Method not implemented.");
+    }
+    staticcall(): CallResult {
+        throw new Error("Method not implemented.");
+    }
+    delegatecall(): CallResult {
+        throw new Error("Method not implemented.");
+    }
 
     getAccount(address: string | Address): AccountInfo | undefined {
-        return this.accounts.get(typeof address === "string" ? address : address.toString());
+        return this.state.get(typeof address === "string" ? address : address.toString());
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
-        this.accounts.set(typeof address === "string" ? address : address.toString(), account);
+        this.state = this.state.set(
+            typeof address === "string" ? address : address.toString(),
+            account
+        );
     }
 
     expect(f: boolean, msg: string = ""): asserts f {
@@ -40,41 +52,19 @@ export class Chain implements ChainState {
     }
 
     call(msg: SolMessage): CallResult {
+        const checkpoint = this.state;
+
         this.expect(!msg.to.equals(ZERO_ADDRESS));
-        const account = this.accounts.get(msg.to.toString());
+        const account = this.state.get(msg.to.toString());
 
         if (account === undefined) {
             nyi(`calling a missing account`);
         }
 
-        const worldInterface: WorldInterface = {
-            create: function (): Promise<CallResult> {
-                nyi("Function not implemented.");
-            },
-            call: function (): Promise<CallResult> {
-                nyi("Function not implemented.");
-            },
-            staticcall: function (): Promise<CallResult> {
-                nyi("Function not implemented.");
-            },
-            delegatecall: function (): Promise<CallResult> {
-                nyi("Function not implemented.");
-            },
-            getStorage: function (): Storage {
-                nyi("Function not implemented.");
-            }
-        };
+        const interp = new Interpreter(this, this.artifactManager, account.contract.artifact);
 
-        const interp = new Interpreter(
-            worldInterface,
-            this.artifactManager,
-            account.contract.artifact
-        );
-
-        const state = makeStateWithConstants(this.artifactManager, account.contract.artifact);
-        state.contract = account.contract;
-        state.mdc = account.contract.ast;
-        const res = interp.call(msg, state);
+        const interpState = makeStateForAccount(this.artifactManager, account);
+        const res = interp.call(msg, interpState);
 
         if (res instanceof Uint8Array) {
             return {
@@ -82,6 +72,9 @@ export class Chain implements ChainState {
                 data: res
             };
         } else {
+            // Call failed - revert state
+            this.state = checkpoint;
+
             return {
                 reverted: true,
                 data: this.encodeError(res)

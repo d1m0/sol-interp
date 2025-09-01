@@ -2,17 +2,14 @@ import { Address } from "@ethereumjs/util";
 import {
     BaseMemoryView,
     Memory,
-    Storage,
     Value as BaseValue,
     ImmMap,
     DefaultAllocator,
     ZERO_ADDRESS,
-    ContractInfo,
-    ArtifactInfo
+    ContractInfo
 } from "sol-dbg";
 import { BaseScope, LocalsScope } from "./scope";
 import {
-    ContractDefinition,
     FunctionDefinition,
     ModifierInvocation,
     TypeNode,
@@ -21,6 +18,7 @@ import {
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction } from "./value";
 import { ArtifactManager } from "./artifactManager";
+import { AccountInfo } from "./chain";
 
 export interface CallResult {
     reverted: boolean;
@@ -28,11 +26,12 @@ export interface CallResult {
 }
 
 export interface WorldInterface {
-    create(msg: SolMessage): Promise<CallResult>;
-    call(msg: SolMessage): Promise<CallResult>;
-    staticcall(msg: SolMessage): Promise<CallResult>;
-    delegatecall(msg: SolMessage): Promise<CallResult>;
-    getStorage(): Storage;
+    create(msg: SolMessage): CallResult;
+    call(msg: SolMessage): CallResult;
+    staticcall(msg: SolMessage): CallResult;
+    delegatecall(msg: SolMessage): CallResult;
+    getAccount(address: string | Address): AccountInfo | undefined;
+    setAccount(address: string | Address, account: AccountInfo): void;
 }
 
 export interface SolMessage {
@@ -51,25 +50,30 @@ export interface InternalCallFrame {
 
 export interface State {
     //Solidity version of the current contract
-    storage: Storage;
+    account: AccountInfo;
     memory: Memory;
     memAllocator: Allocator;
-    contract: ContractInfo | undefined;
-    mdc: ContractDefinition | undefined;
     msg: SolMessage;
     intCallStack: InternalCallFrame[];
     scope: BaseScope | undefined;
     constantsMap: Map<number, BaseMemoryView<BaseValue, TypeNode>>;
 }
 
-export function makeEmptyState(): State {
+/**
+ * Built interpreter state without a contract present. Used for evaluating compile time constants only
+ */
+export function makeNoContractState(): State {
     const memAllocator = new DefaultAllocator();
     return {
-        storage: ImmMap.fromEntries([]),
+        account: {
+            address: ZERO_ADDRESS,
+            contract: undefined as unknown as any,
+            storage: ImmMap.fromEntries([]),
+            balance: 0n,
+            nonce: 0n
+        },
         memory: memAllocator.memory,
         memAllocator,
-        contract: undefined,
-        mdc: undefined,
         msg: {
             to: ZERO_ADDRESS,
             data: new Uint8Array(),
@@ -89,21 +93,29 @@ export function makeEmptyState(): State {
  */
 export function makeStateWithConstants(
     artifactManager: ArtifactManager,
-    artifact: ArtifactInfo
+    contract: ContractInfo
 ): State {
+    return makeStateForAccount(artifactManager, {
+        address: ZERO_ADDRESS,
+        contract,
+        storage: ImmMap.fromEntries([]),
+        balance: 0n,
+        nonce: 0n
+    });
+}
+
+export function makeStateForAccount(artifactManager: ArtifactManager, account: AccountInfo): State {
     const memAllocator = new DefaultAllocator();
-    const [constantsMap, constantsMemory] = artifactManager.getConstants(artifact);
+    const [constantsMap, constantsMemory] = artifactManager.getConstants(account.contract.artifact);
 
     // Copy over the constants into the new memory
     memAllocator.alloc(constantsMemory.length);
     memAllocator.memory.set(constantsMemory, 0x80);
 
     return {
-        storage: ImmMap.fromEntries([]),
+        account,
         memory: memAllocator.memory,
         memAllocator,
-        mdc: undefined,
-        contract: undefined,
         msg: {
             to: ZERO_ADDRESS,
             data: new Uint8Array(),

@@ -21,7 +21,6 @@ export function makeState(
     interp: Interpreter,
     ...vals: Array<[string, Value]>
 ): State {
-    const res = makeStateWithConstants(interp.artifactManager, interp.artifact);
     let nd: sol.ASTNode | undefined = loc;
     const scopeNodes: Array<sol.FunctionDefinition | sol.Block | sol.UncheckedBlock> = [];
 
@@ -40,8 +39,9 @@ export function makeState(
 
     const contract = loc.getClosestParentByType(sol.ContractDefinition);
     sol.assert(contract !== undefined, ``);
-
-    res.mdc = contract;
+    const contractInfo = interp.artifactManager.getContractInfo(contract);
+    sol.assert(contractInfo !== undefined, ``);
+    const res = makeStateWithConstants(interp.artifactManager, contractInfo);
 
     // Builtins
     let scope: BaseScope = interp.makeStaticScope(loc, res);
@@ -56,7 +56,7 @@ export function makeState(
         if (view instanceof BaseMemoryView) {
             view.encode(val, res.memory, res.memAllocator);
         } else if (view instanceof BaseStorageView) {
-            res.storage = view.encode(val, res.storage);
+            res.account.storage = view.encode(val, res.account.storage);
         } else {
             nyi(`Encode ${val} in ${view}`);
         }

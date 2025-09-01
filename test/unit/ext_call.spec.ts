@@ -66,6 +66,7 @@ describe("Simple function call tests", () => {
             sol.assert(contractInfo !== undefined, `No info for contract ${contract}`);
 
             chain.setAccount(addr, {
+                address: addr,
                 contract: contractInfo,
                 storage: ImmMap.fromEntries([]),
                 balance: 0n,

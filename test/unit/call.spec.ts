@@ -97,7 +97,9 @@ const samples: Array<
     ["RationalTest.sol", "RationalTest", "subdenominationEtherTest", [], [], []],
     ["RationalTest.sol", "RationalTest", "subdenominationTimeTest", [], [], []],
     ["RationalTest.sol", "RationalTest", "mathTest", [], [], []],
-    ["RationalTest.sol", "RationalTest", "extremeDenominatedValues", [], [], []]
+    ["RationalTest.sol", "RationalTest", "extremeDenominatedValues", [], [], []],
+    ["EncodingTest.sol", "EncodingTest", "test", [], [], []],
+    ["DecodingTest.sol", "DecodingTest", "test", [], [], []]
 ];
 
 describe("Simple function call tests", () => {

@@ -14,7 +14,7 @@ import * as sol from "solc-typed-ast";
 import { topoSort, worldFailMock } from "./utils";
 import { Interpreter } from "./interp";
 import { ContractScope, GlobalScope } from "./scope";
-import { makeEmptyState } from "./state";
+import { makeNoContractState } from "./state";
 import { isPrimitiveValue, NoneValue } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { ppValue } from "./pp";
@@ -118,7 +118,7 @@ export function gatherConstants(
     artifact: ArtifactInfo
 ): [Map<number, BaseMemoryView<Value, sol.TypeNode>>, Memory] {
     const version = artifact.compilerVersion;
-    const state = makeEmptyState();
+    const state = makeNoContractState();
 
     // First gather and encode the string constants
     for (const unit of artifact.units) {
@@ -145,7 +145,7 @@ export function gatherConstants(
                 view.encode(nd.value, state.memory);
             } else {
                 view = PointerMemView.allocMemFor(
-                    nd.value,
+                    nd.hexValue,
                     sol.types.bytesMemory.to,
                     state.memAllocator
                 ) as BytesMemView;

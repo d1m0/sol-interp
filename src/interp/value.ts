@@ -14,6 +14,7 @@ import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
 import { concretize, substitute } from "./polymorphic";
+import { satisfies } from "semver";
 
 export abstract class BaseInterpValue implements sol.PPAble {
     abstract pp(): string;
@@ -23,7 +24,11 @@ export class BuiltinFunction extends BaseInterpValue {
     constructor(
         public readonly name: string,
         public readonly type: sol.BuiltinFunctionType,
-        protected readonly _call: (interp: Interpreter, state: State, nArgs: number) => Value[],
+        protected readonly _call: (
+            interp: Interpreter,
+            state: State,
+            self: BuiltinFunction
+        ) => Value[],
         public readonly implicitFirstArg = false
     ) {
         super();
@@ -45,15 +50,16 @@ export class BuiltinFunction extends BaseInterpValue {
         return new BuiltinFunction(this.name, concreteT, this._call, this.implicitFirstArg);
     }
 
-    call(interp: Interpreter, state: State, nArgs: number): Value[] {
-        return this._call(interp, state, nArgs);
+    call(interp: Interpreter, state: State, concretizedBuiltin: BuiltinFunction): Value[] {
+        return this._call(interp, state, concretizedBuiltin);
     }
 }
 
 export class BuiltinStruct extends BaseInterpValue {
     constructor(
         public readonly name: string,
-        public readonly fields: Array<[string, Value]>
+        public readonly type: sol.BuiltinStructType,
+        public readonly fields: Array<[string, Array<[Value, string]>]>
     ) {
         super();
     }
@@ -61,10 +67,25 @@ export class BuiltinStruct extends BaseInterpValue {
     pp(): string {
         return `<builtin struct ${this.name}>`;
     }
+
+    getFieldForVersion(field: string, ver: string): Value | undefined {
+        const options = this.fields.filter(([name]) => name === field);
+        if (options.length !== 1) {
+            return undefined;
+        }
+
+        for (const [res, versionRange] of options[0][1]) {
+            if (satisfies(ver, versionRange)) {
+                return res;
+            }
+        }
+
+        return undefined;
+    }
 }
 
 /**
- * Value corresponding to a contract our source unit definition. For example in this code:
+ * Value corresponding to a contract or source unit definition. For example in this code:
  * ```
  *   contract Foo {
  *      uint x;
@@ -84,6 +105,9 @@ export class DefValue extends BaseInterpValue {
             | sol.FunctionDefinition
             | sol.EventDefinition
             | sol.ErrorDefinition
+            | sol.StructDefinition
+            | sol.EnumDefinition
+            | sol.UserDefinedValueTypeDefinition
     ) {
         super();
     }
@@ -107,9 +131,48 @@ export class NoneValue extends Poison {
     }
 }
 
+export abstract class BaseTypeValue extends BaseInterpValue {}
+
+export class TypeValue extends BaseTypeValue {
+    constructor(public readonly type: sol.TypeNode) {
+        super();
+    }
+    pp(): string {
+        return `<typename ${this.type.pp()}>`;
+    }
+}
+
+export class TypeTuple extends BaseTypeValue {
+    constructor(public readonly elements: BaseTypeValue[]) {
+        super();
+    }
+    pp(): string {
+        return `<typename ${this.elements.map((e) => e.pp()).join(", ")}>`;
+    }
+}
+
+export function typeValueToType(t: BaseTypeValue): sol.TypeNode {
+    if (t instanceof TypeValue) {
+        return t.type;
+    }
+
+    if (t instanceof TypeTuple) {
+        return new sol.TupleType(t.elements.map(typeValueToType));
+    }
+
+    nyi(`typeValueToType(${t.constructor.name})`);
+}
+
 export const none = new NoneValue();
 
-export type Value = PrimitiveValue | BuiltinFunction | BuiltinStruct | DefValue | Value[];
+export type Value =
+    | PrimitiveValue
+    | BuiltinFunction
+    | BuiltinStruct
+    | DefValue
+    | TypeValue
+    | TypeTuple
+    | Value[];
 
 // @todo migrate to sol-dbg
 type NonPoisonPrimitiveValue =
@@ -119,7 +182,10 @@ type NonPoisonPrimitiveValue =
     | Address // address
     | FunctionValue // function types
     | Slice // array slices
-    | View<any, BaseValue, any, sol.TypeNode>; // Pointer Values
+    | View<any, BaseValue, any, sol.TypeNode> // Pointer Values
+    | TypeValue // Type Values and TypeTuples are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
+    | TypeTuple;
+
 export type NonPoisonValue =
     | NonPoisonPrimitiveValue
     | BuiltinFunction
@@ -143,7 +209,8 @@ export function isPrimitiveValue(v: any): v is PrimitiveValue {
         v instanceof InternalFunRef ||
         v instanceof Slice ||
         v instanceof View ||
-        v instanceof Poison
+        v instanceof Poison ||
+        v instanceof BaseTypeValue
     );
 }
 

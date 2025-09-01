@@ -16,12 +16,13 @@ import {
     BaseMemoryView,
     BaseCalldataView,
     BaseStorageView,
-    Storage
+    ContractInfo
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { BaseLocalView, PrimitiveLocalView } from "./view";
+import { AccountInfo } from "./chain";
 
 /**
  * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
@@ -92,9 +93,20 @@ export function getMsg(state: State): Uint8Array {
     return state.msg.data;
 }
 
+export function getContractInfo(state: State): ContractInfo {
+    return state.account.contract;
+}
+
+export function getContract(state: State): sol.ContractDefinition {
+    const info = getContractInfo(state);
+    const res = info.ast;
+    sol.assert(res !== undefined, `No AST for contract  ${info.contractName}`);
+    return res;
+}
+
 export function decodeView(lv: View, state: State): BaseValue {
     if (lv instanceof BaseStorageView) {
-        return lv.decode(state.storage);
+        return lv.decode(state.account.storage);
     } else if (lv instanceof BaseMemoryView) {
         return lv.decode(state.memory);
     } else if (lv instanceof BaseCalldataView) {
@@ -107,6 +119,7 @@ export function decodeView(lv: View, state: State): BaseValue {
 }
 
 // @todo move to solc-typed-ast
+// @todo dimo: Is it sufficient here to say !(type instancesof sol.PointerType) ?
 export function isValueType(type: sol.TypeNode): boolean {
     return (
         type instanceof sol.IntType ||
@@ -271,19 +284,22 @@ export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Se
 }
 
 export const worldFailMock: WorldInterface = {
-    create: function (): Promise<CallResult> {
+    create: function (): CallResult {
         throw new Error("Function not implemented.");
     },
-    call: function (): Promise<CallResult> {
+    call: function (): CallResult {
         throw new Error("Function not implemented.");
     },
-    staticcall: function (): Promise<CallResult> {
+    staticcall: function (): CallResult {
         throw new Error("Function not implemented.");
     },
-    delegatecall: function (): Promise<CallResult> {
+    delegatecall: function (): CallResult {
         throw new Error("Function not implemented.");
     },
-    getStorage: function (): Storage {
+    getAccount: function (): AccountInfo | undefined {
+        throw new Error("Function not implemented.");
+    },
+    setAccount: function (): void {
         throw new Error("Function not implemented.");
     }
 };
@@ -337,3 +353,5 @@ export function hasSelector(callee: sol.FunctionDefinition | sol.VariableDeclara
 
     return true;
 }
+
+export const int256 = new sol.IntType(256, true);

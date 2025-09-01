@@ -236,7 +236,7 @@ export class LocalsScope extends BaseScope {
     }
 }
 
-function defToType(decl: UnitDef, infer: sol.InferType): sol.TypeNode {
+export function defToType(decl: UnitDef, infer: sol.InferType): sol.TypeNode {
     if (decl instanceof sol.VariableDeclaration) {
         return infer.variableDeclarationToTypeNode(decl);
     } else if (decl instanceof sol.ContractDefinition) {
@@ -247,6 +247,12 @@ function defToType(decl: UnitDef, infer: sol.InferType): sol.TypeNode {
         return infer.eventDefToType(decl);
     } else if (decl instanceof sol.ErrorDefinition) {
         return infer.errDefToType(decl);
+    } else if (
+        decl instanceof sol.StructDefinition ||
+        decl instanceof sol.EnumDefinition ||
+        decl instanceof sol.UserDefinedValueTypeDefinition
+    ) {
+        return new sol.TypeNameType(new sol.UserDefinedType(decl.name, decl));
     } else {
         return new sol.ImportRefType(decl);
     }
@@ -279,6 +285,18 @@ export class ContractScope extends BaseScope {
         }
 
         for (const d of contract.vErrors) {
+            res.set(d.name, d);
+        }
+
+        for (const d of contract.vStructs) {
+            res.set(d.name, d);
+        }
+
+        for (const d of contract.vEnums) {
+            res.set(d.name, d);
+        }
+
+        for (const d of contract.vUserDefinedValueTypes) {
             res.set(d.name, d);
         }
 
@@ -363,7 +381,7 @@ export class ContractScope extends BaseScope {
             return view.toView();
         }
 
-        return view.decode(this.state.storage);
+        return view.decode(this.state.account.storage);
     }
 
     _lookupLocation(name: string): View | undefined {
@@ -372,7 +390,7 @@ export class ContractScope extends BaseScope {
 
     _set(name: string, v: Value): void {
         const view = this.fieldToView.get(name) as BaseStorageView<any, sol.TypeNode>;
-        this.state.storage = view.encode(v, this.state.storage);
+        this.state.account.storage = view.encode(v, this.state.account.storage);
     }
 
     public setConst(name: string, v: BaseMemoryView<BaseValue, sol.TypeNode>): void {
@@ -385,7 +403,10 @@ type UnitDef =
     | sol.ImportDirective
     | sol.FunctionDefinition
     | sol.EventDefinition
-    | sol.ErrorDefinition;
+    | sol.ErrorDefinition
+    | sol.StructDefinition
+    | sol.EnumDefinition
+    | sol.UserDefinedValueTypeDefinition;
 
 function isUnitDef(n: sol.ASTNode): n is UnitDef {
     return (
@@ -393,7 +414,10 @@ function isUnitDef(n: sol.ASTNode): n is UnitDef {
         n instanceof sol.ImportDirective ||
         n instanceof sol.FunctionDefinition ||
         n instanceof sol.EventDefinition ||
-        n instanceof sol.ErrorDefinition
+        n instanceof sol.ErrorDefinition ||
+        n instanceof sol.StructDefinition ||
+        n instanceof sol.EnumDefinition ||
+        n instanceof sol.UserDefinedValueTypeDefinition
     );
 }
 
@@ -447,6 +471,18 @@ export class GlobalScope extends BaseScope {
         }
 
         for (const d of unit.vErrors) {
+            res.set(d.name, d);
+        }
+
+        for (const d of unit.vStructs) {
+            res.set(d.name, d);
+        }
+
+        for (const d of unit.vEnums) {
+            res.set(d.name, d);
+        }
+
+        for (const d of unit.vUserDefinedValueTypes) {
             res.set(d.name, d);
         }
 
