@@ -178,11 +178,15 @@
 162 - get clean test run
 163 - add abi.encode builtin and use it in evalExternallCall
 164 - move over abi.encode() tests from sol2maruir
+165 - add decode
+166 - add decode_fail test.
+167 - add decoding builtin
+168 - move over some decoding tests
 
-- add decode
-- add decode_fail test.
-- add decoding builtin
-- move over some decoding tests
+- switch over to types branch of sol-dbg
+- refactor types to subclass BaseRuntimeType
+    - remove duplicating types
+    -
 
 - finish evalExternalCall.
     - Don't forget putAccount and getAccount around the actual call

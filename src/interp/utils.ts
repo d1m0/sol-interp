@@ -19,6 +19,7 @@ import {
     ContractInfo
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
+import * as rtt from "sol-dbg";
 import { none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { BaseLocalView, PrimitiveLocalView } from "./view";

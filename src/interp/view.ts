@@ -9,13 +9,14 @@ import {
     ArrayLikeView,
     isArrayLikeMemView,
     isArrayLikeCalldataView,
-    isArrayLikeStorageView
+    isArrayLikeStorageView,
+    BaseRuntimeType
 } from "sol-dbg";
-import { FixedBytesType, PointerType, TypeNode, types } from "solc-typed-ast";
+import { FixedBytesType, PointerType, types } from "solc-typed-ast";
 import { BaseScope } from "./scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
 
-export abstract class BaseLocalView<V extends PrimitiveValue, T extends TypeNode> extends View<
+export abstract class BaseLocalView<V extends PrimitiveValue, T extends BaseRuntimeType> extends View<
     null,
     V,
     [BaseScope, string],
@@ -44,7 +45,7 @@ export abstract class BaseLocalView<V extends PrimitiveValue, T extends TypeNode
     }
 }
 
-export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, TypeNode> {}
+export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, BaseRuntimeType> {}
 
 export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
     constructor(
@@ -95,9 +96,9 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
 
 export class PointerLocalView
     extends BaseLocalView<View, PointerType>
-    implements PointerView<null, View<any, Value, any, TypeNode>>
+    implements PointerView<null, View<any, Value, any, BaseRuntimeType>>
 {
-    toView(): DecodingFailure | View<any, Value, any, TypeNode> {
+    toView(): DecodingFailure | View<any, Value, any, BaseRuntimeType> {
         const ptr = this.decode();
 
         if (isFailure(ptr)) {

@@ -37,6 +37,7 @@ import {
     buildMsgViews
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
+import * as rtt from "sol-dbg";
 import { WorldInterface, State, SolMessage } from "./state";
 import { EvalStep, ExecStep, Trace } from "./step";
 import {
@@ -94,6 +95,7 @@ import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import { abi, assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 import { encode } from "./abi";
+import { BaseInterpType } from "./types";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -107,16 +109,16 @@ const scratchWord = new Uint8Array(32);
 /**
  * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
  */
-export function skipFieldDueToMap(t: sol.TypeNode): boolean {
-    if (t instanceof sol.MappingType) {
+export function skipFieldDueToMap(t: rtt.BaseRuntimeType): boolean {
+    if (t instanceof rtt.MappingType) {
         return true;
     }
 
-    if (t instanceof sol.PointerType) {
-        return skipFieldDueToMap(t.to);
+    if (t instanceof rtt.PointerType) {
+        return skipFieldDueToMap(t.toType);
     }
 
-    if (t instanceof sol.ArrayType) {
+    if (t instanceof rtt.ArrayType) {
         return skipFieldDueToMap(t.elementT);
     }
 
@@ -186,6 +188,15 @@ export class Interpreter {
         throw new errorConstr(this.curNode, this._trace, msg);
     }
 
+    typeOf(e: sol.Expression): BaseInterpType {
+        if (e instanceof sol.Literal) {
+
+        }
+
+        const solT = this._infer.typeOf(e);
+        return rtt.astToRuntimeType(solT, this._infer);
+    }
+
     ///*********************EXTERNAL FUNCTION CALLS************************************
     public create(msg: SolMessage, state: State): Address {
         nyi(`create(${msg}, ${state})`);
@@ -215,17 +226,18 @@ export class Interpreter {
             calldataArgs = calldataArgs.slice(1);
         }
 
-        let argTs: sol.TypeNode[];
+        let argTs: BaseInterpType[];
         if (entryPoint instanceof sol.FunctionDefinition) {
             // The arg values here are calldata pointers, which may differ from
             // the actual arguments (i.e. they may be memory pointers).  The
             // `Intepreter.assign` in `makeScope()` will handle the copying from
             // calldata to memory.
             argTs = entryPoint.vParameters.vParameters.map((argT) =>
-                sol.specializeType(
-                    sol.generalizeType(this._infer.variableDeclarationToTypeNode(argT))[0],
-                    sol.DataLocation.CallData
-                )
+                rtt.astToRuntimeType(
+                    sol.specializeType(
+                        sol.generalizeType(this._infer.variableDeclarationToTypeNode(argT))[0],
+                        sol.DataLocation.CallData
+                ), this._infer)
             );
         } else {
             nyi("public getters");

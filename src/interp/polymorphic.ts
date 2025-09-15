@@ -1,7 +1,8 @@
-import { ExpStructType } from "sol-dbg";
+import { BaseRuntimeType, StructType } from "sol-dbg";
 import * as sol from "solc-typed-ast";
+import * as rtt from "sol-dbg";
 
-export abstract class BasePolyType extends sol.TypeNode {}
+export abstract class BasePolyType extends BaseRuntimeType {}
 
 export class BaseTVar extends BasePolyType {
     constructor(public readonly name: string) {
@@ -18,7 +19,7 @@ export class TVar extends BaseTVar {}
 
 export class TUnion extends BaseTVar {
     private static ctr: number = 0;
-    constructor(public readonly options: sol.TypeNode[]) {
+    constructor(public readonly options: rtt.BaseRuntimeType[]) {
         super(`__tunion__${TUnion.ctr++}`);
     }
 
@@ -30,7 +31,7 @@ export class TUnion extends BaseTVar {
 // TOptional is a hack to support checking optional arguments.
 // Note that it is only handled by concretize, it is not supported by unify.
 export class TOptional extends BasePolyType {
-    constructor(public readonly subT: sol.TypeNode) {
+    constructor(public readonly subT: rtt.BaseRuntimeType) {
         super();
     }
 
@@ -49,7 +50,7 @@ export class TRest extends BaseTVar {
     }
 }
 
-function containsTVar(t: sol.TypeNode, v: BaseTVar): boolean {
+function containsTVar(t: BaseRuntimeType, v: BaseTVar): boolean {
     if (t instanceof BaseTVar && t.name === v.name) {
         return true;
     }
@@ -62,7 +63,7 @@ function containsTVar(t: sol.TypeNode, v: BaseTVar): boolean {
         return containsTVar(t.elementT, v);
     }
 
-    if (t instanceof ExpStructType) {
+    if (t instanceof StructType) {
         for (const [, fieldT] of t.fields) {
             if (containsTVar(fieldT, v)) {
                 return true;
