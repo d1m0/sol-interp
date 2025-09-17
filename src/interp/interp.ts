@@ -95,7 +95,7 @@ import {
     PointerLocalView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
-import { abi, assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
+import { abi, abiEncodeBuiltin, assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 import { encode } from "./abi";
 import { BaseInterpType } from "./types";
@@ -1556,11 +1556,8 @@ export class Interpreter {
 
         // Next compute the msg data
         const argVs = expr.vArguments.map((arg) => this.eval(arg, state));
-
-        const contract = getContract(state);
-        const data = encode(argVs, argTs, state, contract.kind === sol.ContractKind.Library);
-
-        console.error(`Args: `, argVs);
+        const [data] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
+        this.expect(data instanceof Uint8Array, ``)
 
         const msg: SolMessage = {
             to,

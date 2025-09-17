@@ -199,17 +199,16 @@
 182    - check all uses of _infer
 183    - fix compile errors in tests
 184    - in typeOf() handle int literals, string literals, address literals
-
-- clean test run
-
-    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
-    Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`
+185    - clean test run
+186    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
 
 - finish evalExternalCall.
     - Don't forget putAccount and getAccount around the actual call
     - add balance handling
 - add simple call test
 - clean test run
+
+    Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`
 
 - (address).call builtin
 
