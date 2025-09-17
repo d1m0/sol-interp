@@ -10,18 +10,18 @@ import {
     isArrayLikeMemView,
     isArrayLikeCalldataView,
     isArrayLikeStorageView,
-    BaseRuntimeType
+    BaseRuntimeType,
+    FixedBytesType,
+    PointerType
 } from "sol-dbg";
-import { FixedBytesType, PointerType, types } from "solc-typed-ast";
 import { BaseScope } from "./scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
+import { bytes1 } from "./utils";
 
-export abstract class BaseLocalView<V extends PrimitiveValue, T extends BaseRuntimeType> extends View<
-    null,
-    V,
-    [BaseScope, string],
-    T
-> {
+export abstract class BaseLocalView<
+    V extends PrimitiveValue,
+    T extends BaseRuntimeType
+> extends View<null, V, [BaseScope, string], T> {
     decode(): V | DecodingFailure {
         const [scope, name] = this.loc;
         const res = scope._lookup(name);
@@ -52,7 +52,7 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
         loc: [BaseScope, string],
         private byteOffset: number
     ) {
-        super(types.byte, loc);
+        super(bytes1, loc);
     }
 
     decode(): bigint | DecodingFailure {
@@ -114,11 +114,11 @@ export class ArrayLikeLocalView
     implements ArrayLikeView<any, SingleByteLocalView>
 {
     size(): bigint {
-        return BigInt(this.type.size);
+        return BigInt(this.type.numBytes);
     }
 
     indexView(key: bigint): DecodingFailure | SingleByteLocalView {
-        if (key < 0n || key > this.type.size) {
+        if (key < 0n || key > this.type.numBytes) {
             return new DecodingFailure(`OoB access`);
         }
 

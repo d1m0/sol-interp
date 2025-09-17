@@ -1,4 +1,4 @@
-import { Value, ImmMap } from "sol-dbg";
+import { Value, ImmMap, astToRuntimeType } from "sol-dbg";
 import { Chain } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
@@ -6,7 +6,7 @@ import { loadSamples, SampleInfo, SampleMap } from "./utils";
 import { Assert } from "../../src/interp/exceptions";
 import { bytesToHex, concatBytes, createAddressFromString, hexToBytes } from "@ethereumjs/util";
 import { ArtifactManager } from "../../src/interp/artifactManager";
-import { abiValueToBaseValue } from "../../src/interp/abi";
+import { abiTypeToCanonicalName, abiValueToBaseValue, toABIEncodedType } from "../../src/interp/abi";
 
 type ExceptionConstructors = typeof Assert;
 const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstructors]> = [
@@ -81,14 +81,13 @@ describe("Simple function call tests", () => {
                     )
                 )
             );
-            const abiRetTs = fun.vReturnParameters.vParameters.map((decl) =>
-                infer.toABIEncodedType(
-                    infer.variableDeclarationToTypeNode(decl),
-                    sol.ABIEncoderVersion.V2
-                )
-            );
 
-            const canonicalRetTNames = abiRetTs.map(sol.abiTypeToCanonicalName);
+            const abiRetTs = fun.vReturnParameters.vParameters.map((decl) =>
+                toABIEncodedType(
+                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer),
+                ));
+
+            const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT, false));
 
             const data = concatBytes(
                 hexToBytes(`0x${infer.signatureHash(fun)}`),

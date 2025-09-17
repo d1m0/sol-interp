@@ -10,6 +10,7 @@ import {
 } from "sol-dbg";
 import { StateArea, View } from "sol-dbg";
 import * as sol from "solc-typed-ast";
+import * as rtt from "sol-dbg";
 import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
@@ -23,7 +24,7 @@ export abstract class BaseInterpValue implements sol.PPAble {
 export class BuiltinFunction extends BaseInterpValue {
     constructor(
         public readonly name: string,
-        public readonly type: sol.BuiltinFunctionType,
+        public readonly type: rtt.FunctionType,
         protected readonly _call: (
             interp: Interpreter,
             state: State,
@@ -38,15 +39,17 @@ export class BuiltinFunction extends BaseInterpValue {
         return `<builtin fun ${this.type.pp()}>`;
     }
 
-    concretize(argTs: sol.TypeNode[]): BuiltinFunction {
-        const [concreteFormalArgs, subst] = concretize(this.type.parameters, argTs);
-        const concreteFormalRets = this.type.returns.map((retT) => substitute(retT, subst));
+    concretize(argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
+        const [concreteFormalArgs, subst] = concretize(this.type.argTs, argTs);
+        const concreteFormalRets = this.type.retTs.map((retT) => substitute(retT, subst));
 
-        const concreteT = new sol.BuiltinFunctionType(
-            this.type.name,
+        const concreteT = new rtt.FunctionType(
             concreteFormalArgs,
+            this.type.external,
+            this.type.mutability,
             concreteFormalRets
         );
+
         return new BuiltinFunction(this.name, concreteT, this._call, this.implicitFirstArg);
     }
 
@@ -58,7 +61,7 @@ export class BuiltinFunction extends BaseInterpValue {
 export class BuiltinStruct extends BaseInterpValue {
     constructor(
         public readonly name: string,
-        public readonly type: sol.BuiltinStructType,
+        public readonly type: rtt.StructType,
         public readonly fields: Array<[string, Array<[Value, string]>]>
     ) {
         super();
@@ -134,7 +137,7 @@ export class NoneValue extends Poison {
 export abstract class BaseTypeValue extends BaseInterpValue {}
 
 export class TypeValue extends BaseTypeValue {
-    constructor(public readonly type: sol.TypeNode) {
+    constructor(public readonly type: rtt.BaseRuntimeType) {
         super();
     }
     pp(): string {
@@ -151,13 +154,13 @@ export class TypeTuple extends BaseTypeValue {
     }
 }
 
-export function typeValueToType(t: BaseTypeValue): sol.TypeNode {
+export function typeValueToType(t: BaseTypeValue): rtt.BaseRuntimeType {
     if (t instanceof TypeValue) {
         return t.type;
     }
 
     if (t instanceof TypeTuple) {
-        return new sol.TupleType(t.elements.map(typeValueToType));
+        return new rtt.TupleType(t.elements.map(typeValueToType));
     }
 
     nyi(`typeValueToType(${t.constructor.name})`);
@@ -182,7 +185,7 @@ type NonPoisonPrimitiveValue =
     | Address // address
     | FunctionValue // function types
     | Slice // array slices
-    | View<any, BaseValue, any, sol.TypeNode> // Pointer Values
+    | View<any, BaseValue, any, rtt.BaseRuntimeType> // Pointer Values
     | TypeValue // Type Values and TypeTuples are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
     | TypeTuple;
 
@@ -194,7 +197,7 @@ export type NonPoisonValue =
     | Value[];
 
 export type LValue =
-    | View<StateArea, BaseValue, any, sol.TypeNode>
+    | View<StateArea, BaseValue, any, rtt.BaseRuntimeType>
     | null // empty components of tuple assignments
     | LValue[]; // Tuple assignments
 

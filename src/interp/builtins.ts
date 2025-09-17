@@ -1,5 +1,5 @@
-import { BuiltinFunctionType, types } from "solc-typed-ast";
 import * as sol from "solc-typed-ast";
+import * as rtt from "sol-dbg";
 import { BuiltinFunction, BuiltinStruct, none, TypeTuple, typeValueToType, Value } from "./value";
 import { State } from "./state";
 import { Assert, EmptyArrayPop, InternalError } from "./exceptions";
@@ -12,11 +12,10 @@ import {
     DecodingFailure,
     IntStorageView,
     PointerMemView,
-    simplifyType,
     uint256,
     View
 } from "sol-dbg";
-import { bytes1, decodeView, getContract, makeZeroValue } from "./utils";
+import { bytes1, bytesT, decodeView, getContract, makeZeroValue, memBytesT } from "./utils";
 import { concatBytes } from "@ethereumjs/util";
 import { decode, encode } from "./abi";
 
@@ -34,7 +33,7 @@ function getArgs(numArgs: number, state: State): Value[] {
 
 export const assertBuiltin = new BuiltinFunction(
     "assert",
-    new BuiltinFunctionType("assert", [types.bool], []),
+    new rtt.FunctionType([rtt.bool], false, sol.FunctionStateMutability.NonPayable, []),
     (interp: Interpreter, state: State): Value[] => {
         const [flag] = getArgs(1, state);
 
@@ -51,12 +50,11 @@ const b = new TVar("b");
 
 export const pushBuiltin = new BuiltinFunction(
     "push",
-    new BuiltinFunctionType(
-        "push",
+    new rtt.FunctionType(
         [
             new TUnion([
-                new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Storage),
-                new sol.PointerType(new sol.BytesType(), sol.DataLocation.Storage)
+                new rtt.PointerType(new rtt.ArrayType(a), sol.DataLocation.Storage),
+                new rtt.PointerType(new rtt.BytesType(), sol.DataLocation.Storage)
             ]),
             // Note we allow the new element type to be different from the array element type to support things like
             // arr.push("foo") since "foo" is a memory string. We handle the
@@ -64,10 +62,12 @@ export const pushBuiltin = new BuiltinFunction(
             // context since we don't know the exact location in storage yet.
             new TOptional(b)
         ],
+        false,
+        sol.FunctionStateMutability.NonPayable,
         []
     ),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const args = getArgs(self.type.parameters.length, state);
+        const args = getArgs(self.type.argTs.length, state);
         const arr = args[0] as ArrayStorageView | BytesStorageView;
         let el: Value;
 
@@ -117,14 +117,15 @@ export const pushBuiltin = new BuiltinFunction(
 
 export const popBuiltin = new BuiltinFunction(
     "pop",
-    new BuiltinFunctionType(
-        "pop",
+    new rtt.FunctionType(
         [
             new TUnion([
-                new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Storage),
-                new sol.PointerType(new sol.BytesType(), sol.DataLocation.Storage)
+                new rtt.PointerType(new rtt.ArrayType(a), sol.DataLocation.Storage),
+                new rtt.PointerType(new rtt.BytesType(), sol.DataLocation.Storage)
             ])
         ],
+        false,
+        sol.FunctionStateMutability.NonPayable,
         []
     ),
     (interp: Interpreter, state: State): Value[] => {
@@ -167,27 +168,23 @@ export const popBuiltin = new BuiltinFunction(
 
 export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
-    new BuiltinFunctionType("encode", [new TRest()], [types.bytesMemory]),
+    new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [
+        memBytesT
+    ]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const paramTs = self.type.parameters;
+        const paramTs = self.type.argTs;
         if (paramTs.length === 0) {
             return [new Uint8Array()];
         }
 
-        const generalizedParamTs = paramTs.map((t) => sol.generalizeType(t)[0]);
         const args = getArgs(paramTs.length, state);
         const contract = getContract(state);
 
-        const encBytes = encode(
-            args,
-            generalizedParamTs,
-            state,
-            contract.kind === sol.ContractKind.Library
-        );
+        const encBytes = encode(args, paramTs, state, contract.kind === sol.ContractKind.Library);
 
         const res = PointerMemView.allocMemFor(
             encBytes,
-            types.bytesMemory.to,
+            bytesT,
             state.memAllocator
         ) as BytesMemView;
         res.encode(encBytes, state.memory);
@@ -198,41 +195,37 @@ export const abiEncodeBuiltin = new BuiltinFunction(
 
 export const abiDecodeBuitin = new BuiltinFunction(
     "decode",
-    new BuiltinFunctionType(
-        "decode",
-        [types.bytesMemory, new sol.TupleType([new TRest()])],
+    new rtt.FunctionType(
+        [memBytesT, new rtt.TupleType([new TRest()])],
+        false,
+        sol.FunctionStateMutability.Pure,
         [new TRest()]
     ),
     (interp: Interpreter, state: State): Value[] => {
         const args = getArgs(2, state);
-        const contract = getContract(state);
 
         interp.expect(args[0] instanceof View, ``);
         const bytes = decodeView(args[0], state);
         interp.expect(bytes instanceof Uint8Array, ``);
         interp.expect(args[1] instanceof TypeTuple);
-        const typesTuple = typeValueToType(args[1]) as sol.TupleType;
+        const typesTuple = typeValueToType(args[1]);
 
-        // The passed-in types here are already without memory location. However during simplification they will get
-        // locations so we need to re-generalize. so we don't need to generalize.
-        const types: sol.TypeNode[] = typesTuple.elements.map((t) =>
-            generalizeType(simplifyType(t as sol.TypeNode, interp._infer, sol.DataLocation.Memory))
+        sol.assert(typesTuple instanceof rtt.TupleType, ``);
+        return decode(
+            bytes,
+            typesTuple.elementTypes.map((t) => rtt.specializeType(t, sol.DataLocation.Memory)),
+            state
         );
-
-        return decode(bytes, types, state, contract.kind === sol.ContractKind.Library);
     },
     false
 );
 
 export const abi = new BuiltinStruct(
     "abi",
-    new sol.BuiltinStructType(
-        "abi",
-        new Map([
-            ["encode", [[abiEncodeBuiltin.type, ">=0.4.22"]]],
-            ["decode", [[abiDecodeBuitin.type, ">=0.4.22"]]]
-        ])
-    ),
+    new rtt.StructType("abi", [
+        ["encode", abiEncodeBuiltin.type],
+        ["decode", abiDecodeBuitin.type]
+    ]),
     [
         ["encode", [[abiEncodeBuiltin, ">=0.4.22"]]],
         ["decode", [[abiDecodeBuitin, ">=0.4.22"]]]

@@ -1,6 +1,5 @@
 import {
     bigIntToNum,
-    ExpStructType,
     makeMemoryView,
     nyi,
     PointerMemView,
@@ -24,6 +23,7 @@ import { none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { BaseLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
+import { DefType, TypeType } from "./types";
 
 /**
  * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
@@ -33,42 +33,42 @@ export function panic(msg: string): never {
     sol.assert(false, `Panic: ${msg}`);
 }
 
-export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
-    if (t instanceof sol.IntType) {
+export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveValue {
+    if (t instanceof rtt.IntType) {
         return 0n;
     }
 
-    if (t instanceof sol.BoolType) {
+    if (t instanceof rtt.BoolType) {
         return false;
     }
 
-    if (t instanceof sol.FixedBytesType) {
-        return new Uint8Array(t.size);
+    if (t instanceof rtt.FixedBytesType) {
+        return new Uint8Array(t.numBytes);
     }
 
-    if (t instanceof sol.AddressType) {
+    if (t instanceof rtt.AddressType) {
         return ZERO_ADDRESS;
     }
 
-    if (t instanceof sol.PointerType) {
+    if (t instanceof rtt.PointerType) {
         // The only reazon we treat mem pointers differently is that uninitialized local mem variables are pre-allocated by default.
         if (t.location === sol.DataLocation.Memory) {
             let zeroValue: BaseValue;
 
-            if (t.to instanceof sol.ArrayType) {
-                const len = t.to.size !== undefined ? bigIntToNum(t.to.size) : 0;
+            if (t.toType instanceof rtt.ArrayType) {
+                const len = t.toType.size !== undefined ? bigIntToNum(t.toType.size) : 0;
                 zeroValue = [];
 
                 for (let i = 0; i < len; i++) {
-                    zeroValue.push(makeZeroValue(t.to.elementT, state));
+                    zeroValue.push(makeZeroValue(t.toType.elementT, state));
                 }
-            } else if (t.to instanceof sol.BytesType) {
+            } else if (t.toType instanceof rtt.BytesType) {
                 zeroValue = new Uint8Array();
-            } else if (t.to instanceof sol.StringType) {
+            } else if (t.toType instanceof rtt.StringType) {
                 zeroValue = "";
-            } else if (t.to instanceof ExpStructType) {
+            } else if (t.toType instanceof rtt.StructType) {
                 const fieldVals: Array<[string, PrimitiveValue]> = [];
-                for (const [fieldName, fieldT] of t.to.fields) {
+                for (const [fieldName, fieldT] of t.toType.fields) {
                     fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
                 }
                 zeroValue = new Struct(fieldVals);
@@ -76,8 +76,8 @@ export function makeZeroValue(t: sol.TypeNode, state: State): PrimitiveValue {
                 nyi(`makeZeroValue of memory pointer type ${t.pp()}`);
             }
 
-            const addr = state.memAllocator.alloc(PointerMemView.allocSize(zeroValue, t.to));
-            const res = makeMemoryView(t.to, addr);
+            const addr = state.memAllocator.alloc(PointerMemView.allocSize(zeroValue, t.toType));
+            const res = makeMemoryView(t.toType, addr);
             res.encode(zeroValue, state.memory, state.memAllocator);
 
             return res;
@@ -121,24 +121,19 @@ export function decodeView(lv: View, state: State): BaseValue {
 
 // @todo move to solc-typed-ast
 // @todo dimo: Is it sufficient here to say !(type instancesof sol.PointerType) ?
-export function isValueType(type: sol.TypeNode): boolean {
+export function isValueType(type: rtt.BaseRuntimeType): boolean {
     return (
-        type instanceof sol.IntType ||
-        type instanceof sol.NumericLiteralType ||
-        type instanceof sol.BoolType ||
-        type instanceof sol.AddressType ||
-        type instanceof sol.FixedBytesType ||
-        (type instanceof sol.UserDefinedType &&
-            (type.definition instanceof sol.EnumDefinition ||
-                type.definition instanceof sol.ContractDefinition ||
-                type.definition instanceof sol.UserDefinedValueTypeDefinition))
+        type instanceof rtt.IntType ||
+        type instanceof rtt.BoolType ||
+        type instanceof rtt.AddressType ||
+        type instanceof rtt.FixedBytesType
     );
 }
 
 //@todo move to sol-dbg
 export function isStructView(
     v: any
-): v is StructView<any, View<any, BaseValue, any, sol.TypeNode>> {
+): v is StructView<any, View<any, BaseValue, any, rtt.BaseRuntimeType>> {
     return (
         v instanceof StructMemView ||
         v instanceof StructCalldataView ||
@@ -177,37 +172,41 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
     nyi(`View type ${v.pp()}`);
 }
 
-export const stringT = new sol.StringType();
-export const bytesT = new sol.BytesType();
+/**
+ * Returns true IFF `t1` and `t2` are structuraly the same, except for any data locations.
+ * @param t1 
+ * @param t2 
+ */
+export function typesEqualModuloLocation(t1: rtt.BaseRuntimeType, t2: rtt.BaseRuntimeType): boolean {
+    return changeLocTo(t1, sol.DataLocation.Memory).pp() == changeLocTo(t2, sol.DataLocation.Memory).pp();
+}
 
 /**
  * Recursively change the location of all pointer in `type` to `loc`.
- * This duplicates code in `solc-typed-ast` because it needs to handle `ExpStructType`
+ * This duplicates code in `solc-typed-ast` because it needs to handle `StructType`
  */
-export function changeLocTo(type: sol.TypeNode, loc: sol.DataLocation): sol.TypeNode {
-    if (type instanceof sol.PointerType) {
-        return new sol.PointerType(changeLocTo(type.to, loc), loc);
+export function changeLocTo(type: rtt.BaseRuntimeType, loc: sol.DataLocation): rtt.BaseRuntimeType {
+    if (type instanceof rtt.PointerType) {
+        return new rtt.PointerType(changeLocTo(type.toType, loc), loc);
     }
 
-    if (type instanceof sol.ArrayType) {
-        return new sol.ArrayType(changeLocTo(type.elementT, loc), type.size);
+    if (type instanceof rtt.ArrayType) {
+        return new rtt.ArrayType(changeLocTo(type.elementT, loc), type.size);
     }
 
-    if (type instanceof sol.MappingType) {
+    if (type instanceof rtt.MappingType) {
         const genearlKeyT = changeLocTo(type.keyType, loc);
         const newValueT = changeLocTo(type.valueType, loc);
 
-        return new sol.MappingType(genearlKeyT, newValueT);
+        return new rtt.MappingType(genearlKeyT, newValueT);
     }
 
-    if (type instanceof sol.TupleType) {
-        return new sol.TupleType(
-            type.elements.map((elT) => (elT === null ? null : changeLocTo(elT, loc)))
-        );
+    if (type instanceof rtt.TupleType) {
+        return new rtt.TupleType(type.elementTypes.map((elT) => changeLocTo(elT, loc)));
     }
 
-    if (type instanceof ExpStructType) {
-        return new ExpStructType(
+    if (type instanceof rtt.StructType) {
+        return new rtt.StructType(
             type.name,
             type.fields.map(([name, type]) => [name, changeLocTo(type, loc)])
         );
@@ -324,8 +323,6 @@ export function isMethod(f: sol.FunctionDefinition | sol.VariableDeclaration): b
     );
 }
 
-export const bytes1 = new sol.FixedBytesType(1);
-
 export function solcValueToValue(solV: sol.Value): Value {
     if (typeof solV === "bigint" || typeof solV === "boolean") {
         return solV;
@@ -338,21 +335,57 @@ export function solcValueToValue(solV: sol.Value): Value {
     sol.assert(false, `Cannot convert solc value ${solV}`);
 }
 
-// @todo remove after sol-dbg ver bump
-export function hasSelector(callee: sol.FunctionDefinition | sol.VariableDeclaration): boolean {
-    if (callee instanceof sol.VariableDeclaration) {
-        return true;
-    }
+/**
+ * Helper to cast the bigint `val` to the `IntType` `type`.
+ */
+export function clampIntToType(val: bigint, type: rtt.IntType): bigint {
+    const min = type.min();
+    const max = type.max();
 
-    if (
-        callee.isConstructor ||
-        callee.kind === sol.FunctionKind.Receive ||
-        callee.kind === sol.FunctionKind.Fallback
-    ) {
-        return false;
-    }
+    const size = max - min + 1n;
 
-    return true;
+    return val < min ? ((val - max) % size) + max : ((val - min) % size) + min;
 }
 
-export const int256 = new sol.IntType(256, true);
+export function removeLiteralTypes(t: sol.TypeNode, e: sol.Expression, infer: sol.InferType): sol.TypeNode {
+    if (t instanceof sol.IntLiteralType) {
+        const v = sol.evalConstantExpr(e, infer);
+        sol.assert(typeof v === 'bigint', ``);
+        const smallestT = sol.smallestFittingType(v)
+        sol.assert(smallestT !== undefined, ``);
+        return smallestT;
+    }
+
+    if (t instanceof sol.StringLiteralType) {
+        return sol.types.stringMemory;
+    }
+
+    // Tuples
+    if (t instanceof sol.TupleType && e instanceof sol.TupleExpression) {
+        let elTs: (sol.TypeNode | null)[] = [];
+
+        for (let i = 0; i < t.elements.length; i++) {
+            let elT = t.elements[i];
+
+            if (elT instanceof sol.IntLiteralType) {
+                elT = removeLiteralTypes(elT, e.vOriginalComponents[i] as sol.Expression, infer);
+            }
+
+            elTs.push(elT);
+        }
+
+        return new sol.TupleType(elTs)
+    }
+
+    return t;
+}
+
+export const int256 = new rtt.IntType(256, true);
+export const bytes24 = new rtt.FixedBytesType(24);
+export const stringT = new rtt.StringType();
+export const memStringT = new rtt.PointerType(stringT, sol.DataLocation.Memory);
+export const bytesT = new rtt.BytesType();
+export const memBytesT = new rtt.PointerType(bytesT, sol.DataLocation.Memory);
+export const bytes1 = new rtt.FixedBytesType(1);
+export const defT = new DefType();
+export const typeT = new TypeType();

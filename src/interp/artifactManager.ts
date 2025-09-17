@@ -3,12 +3,12 @@ import {
     ArtifactManager as BaseArtifactManager,
     BaseMemoryView,
     Memory,
-    Value
+    Value,
+    BaseRuntimeType
 } from "sol-dbg";
-import * as sol from "solc-typed-ast";
 import { gatherConstants } from "./constants";
 
-export type ConstantsMap = Map<number, BaseMemoryView<Value, sol.TypeNode>>;
+export type ConstantsMap = Map<number, BaseMemoryView<Value, BaseRuntimeType>>;
 export type ConstantsInfo = [ConstantsMap, Memory];
 
 export class ArtifactManager extends BaseArtifactManager {

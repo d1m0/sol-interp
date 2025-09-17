@@ -6,12 +6,13 @@ import {
     DecodingFailure,
     Memory,
     PointerMemView,
-    simplifyType,
     Value
 } from "sol-dbg";
 import { StringMemView } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { topoSort, worldFailMock } from "./utils";
+import * as rtt from "sol-dbg";
+
+import { bytesT, stringT, topoSort, worldFailMock } from "./utils";
 import { Interpreter } from "./interp";
 import { ContractScope, GlobalScope } from "./scope";
 import { makeNoContractState } from "./state";
@@ -84,9 +85,9 @@ function buildConstantDepGraph(
     return [constNodes, res];
 }
 
-const NoneT = new sol.TupleType([]);
+const NoneT = new rtt.TupleType([]);
 
-class NoneView extends BaseMemoryView<NoneValue, sol.TupleType> {
+class NoneView extends BaseMemoryView<NoneValue, rtt.TupleType> {
     encode(): void {
         throw new Error("Can't encode NoneView.");
     }
@@ -116,7 +117,7 @@ class NoneView extends BaseMemoryView<NoneValue, sol.TupleType> {
 export function gatherConstants(
     artifactManager: ArtifactManager,
     artifact: ArtifactInfo
-): [Map<number, BaseMemoryView<Value, sol.TypeNode>>, Memory] {
+): [Map<number, BaseMemoryView<Value, rtt.BaseRuntimeType>>, Memory] {
     const version = artifact.compilerVersion;
     const state = makeNoContractState();
 
@@ -139,14 +140,14 @@ export function gatherConstants(
             if (nd.kind === sol.LiteralKind.String || nd.kind === sol.LiteralKind.UnicodeString) {
                 view = PointerMemView.allocMemFor(
                     nd.value,
-                    sol.types.stringMemory.to,
+                    stringT,
                     state.memAllocator
                 ) as StringMemView;
                 view.encode(nd.value, state.memory);
             } else {
                 view = PointerMemView.allocMemFor(
                     nd.hexValue,
-                    sol.types.bytesMemory.to,
+                    bytesT,
                     state.memAllocator
                 ) as BytesMemView;
                 const buf = hexToBytes(`0x${nd.hexValue}`);
@@ -170,11 +171,12 @@ export function gatherConstants(
     const infer = new sol.InferType(version);
 
     for (const nd of sortedNodes) {
-        const typ = simplifyType(
+        const typ = rtt.astToRuntimeType(
             infer.variableDeclarationToTypeNode(nd),
             infer,
             sol.DataLocation.Memory
         );
+
         const scope = interp.makeStaticScope(nd, state);
         sol.assert(scope instanceof GlobalScope || scope instanceof ContractScope, ``);
         state.scope = scope;
@@ -182,7 +184,7 @@ export function gatherConstants(
         sol.assert(nd.vValue !== undefined, `Unexpected constant variable with no initializer`);
         const val = interp.eval(nd.vValue, state);
 
-        let view: BaseMemoryView<Value, sol.TypeNode>;
+        let view: BaseMemoryView<Value, rtt.BaseRuntimeType>;
 
         if (val instanceof BaseMemoryView) {
             view = val;

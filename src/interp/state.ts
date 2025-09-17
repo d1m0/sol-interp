@@ -9,12 +9,8 @@ import {
     ContractInfo
 } from "sol-dbg";
 import { BaseScope, LocalsScope } from "./scope";
-import {
-    FunctionDefinition,
-    ModifierInvocation,
-    TypeNode,
-    VariableDeclaration
-} from "solc-typed-ast";
+import { FunctionDefinition, ModifierInvocation, VariableDeclaration } from "solc-typed-ast";
+import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction } from "./value";
 import { ArtifactManager } from "./artifactManager";
@@ -56,7 +52,7 @@ export interface State {
     msg: SolMessage;
     intCallStack: InternalCallFrame[];
     scope: BaseScope | undefined;
-    constantsMap: Map<number, BaseMemoryView<BaseValue, TypeNode>>;
+    constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
 }
 
 /**

@@ -1,8 +1,7 @@
-import { BaseRuntimeType, StructType } from "sol-dbg";
-import * as sol from "solc-typed-ast";
+import { assert, DataLocation } from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 
-export abstract class BasePolyType extends BaseRuntimeType {}
+export abstract class BasePolyType extends rtt.BaseRuntimeType { }
 
 export class BaseTVar extends BasePolyType {
     constructor(public readonly name: string) {
@@ -15,7 +14,7 @@ export class BaseTVar extends BasePolyType {
 }
 
 // Single type var
-export class TVar extends BaseTVar {}
+export class TVar extends BaseTVar { }
 
 export class TUnion extends BaseTVar {
     private static ctr: number = 0;
@@ -50,22 +49,34 @@ export class TRest extends BaseTVar {
     }
 }
 
-function containsTVar(t: BaseRuntimeType, v: BaseTVar): boolean {
+function containsTVar(t: rtt.BaseRuntimeType, v: BaseTVar): boolean {
     if (t instanceof BaseTVar && t.name === v.name) {
         return true;
     }
 
-    if (t instanceof sol.PointerType) {
-        return containsTVar(t.to, v);
+    if (t instanceof rtt.PointerType) {
+        return containsTVar(t.toType, v);
     }
 
-    if (t instanceof sol.ArrayType) {
+    if (t instanceof rtt.ArrayType) {
         return containsTVar(t.elementT, v);
     }
 
-    if (t instanceof StructType) {
+    if (t instanceof rtt.StructType) {
         for (const [, fieldT] of t.fields) {
             if (containsTVar(fieldT, v)) {
+                return true;
+            }
+        }
+    }
+
+    if (t instanceof rtt.MappingType) {
+        return containsTVar(t.keyType, v) || containsTVar(t.valueType, v);
+    }
+
+    if (t instanceof rtt.TupleType) {
+        for (const elT of t.elementTypes) {
+            if (containsTVar(elT, v)) {
                 return true;
             }
         }
@@ -88,20 +99,20 @@ function containsTVar(t: BaseRuntimeType, v: BaseTVar): boolean {
     return false;
 }
 
-export function isPolymorphic(t: sol.TypeNode): boolean {
+export function isPolymorphic(t: rtt.BaseRuntimeType): boolean {
     if (t instanceof BasePolyType) {
         return true;
     }
 
-    if (t instanceof sol.PointerType) {
-        return isPolymorphic(t.to);
+    if (t instanceof rtt.PointerType) {
+        return isPolymorphic(t.toType);
     }
 
-    if (t instanceof sol.ArrayType) {
+    if (t instanceof rtt.ArrayType) {
         return isPolymorphic(t.elementT);
     }
 
-    if (t instanceof ExpStructType) {
+    if (t instanceof rtt.StructType) {
         for (const [, fieldT] of t.fields) {
             if (isPolymorphic(fieldT)) {
                 return true;
@@ -109,15 +120,29 @@ export function isPolymorphic(t: sol.TypeNode): boolean {
         }
     }
 
+    if (t instanceof rtt.MappingType) {
+        return isPolymorphic(t.keyType) || isPolymorphic(t.valueType);
+    }
+
+    if (t instanceof rtt.TupleType) {
+        for (const elT of t.elementTypes) {
+            if (isPolymorphic(elT)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     return false;
 }
 
-export type TSubst = Map<string, sol.TypeNode>;
+export type TSubst = Map<string, rtt.BaseRuntimeType>;
 
 /**
  * Returns true IFF t1 unifies with t2 under type substitution subst. It modifies subst
  */
-export function unify(t1: sol.TypeNode, t2: sol.TypeNode, subst: TSubst): boolean {
+export function unify(t1: rtt.BaseRuntimeType, t2: rtt.BaseRuntimeType, subst: TSubst): boolean {
     t1 = substitute(t1, subst);
     t2 = substitute(t2, subst);
 
@@ -141,13 +166,13 @@ export function unify(t1: sol.TypeNode, t2: sol.TypeNode, subst: TSubst): boolea
         return true;
     }
 
-    if (t1 instanceof sol.ArrayType && t2 instanceof sol.ArrayType && t1.size === t2.size) {
+    if (t1 instanceof rtt.ArrayType && t2 instanceof rtt.ArrayType && t1.size === t2.size) {
         return unify(t1.elementT, t2.elementT, subst);
     }
 
     if (
-        t1 instanceof ExpStructType &&
-        t2 instanceof ExpStructType &&
+        t1 instanceof rtt.StructType &&
+        t2 instanceof rtt.StructType &&
         t1.fields.length === t2.fields.length
     ) {
         for (let i = 0; i < t1.fields.length; i++) {
@@ -162,43 +187,46 @@ export function unify(t1: sol.TypeNode, t2: sol.TypeNode, subst: TSubst): boolea
         return true;
     }
 
-    if (t1 instanceof sol.PointerType && t2 instanceof sol.PointerType) {
+    if (t1 instanceof rtt.PointerType && t2 instanceof rtt.PointerType) {
         // As a hack we consider DataLocation.Default to be a * for locations
         if (
             t1.location !== t2.location &&
-            t1.location !== sol.DataLocation.Default &&
-            t2.location !== sol.DataLocation.Default
+            t1.location !== DataLocation.Default &&
+            t2.location !== DataLocation.Default
         ) {
             return false;
         }
 
-        return unify(t1.to, t2.to, subst);
+        return unify(t1.toType, t2.toType, subst);
     }
 
     // Unify tuples with some fields being optional
-    if (t1 instanceof sol.TupleType && t2 instanceof sol.TupleType) {
-        if (t2.elements.length < t1.elements.length) {
-            const tmp: sol.TupleType = t1;
-            t1 = t2 as sol.TupleType;
-            t2 = tmp as sol.TupleType;
+    if (t1 instanceof rtt.TupleType && t2 instanceof rtt.TupleType) {
+        if (t2.elementTypes.length < t1.elementTypes.length) {
+            const tmp: rtt.TupleType = t1;
+            t1 = t2 as rtt.TupleType;
+            t2 = tmp as rtt.TupleType;
         }
 
         // Pacify typescript
-        sol.assert(t1 instanceof sol.TupleType && t2 instanceof sol.TupleType, ``);
+        assert(t1 instanceof rtt.TupleType && t2 instanceof rtt.TupleType, ``);
 
-        for (let i = 0; i < t1.elements.length; i++) {
-            const t1El = t1.elements[i];
-            const t2El = t2.elements[i];
+        for (let i = 0; i < t1.elementTypes.length; i++) {
+            const t1El = t1.elementTypes[i];
+            const t2El = t2.elementTypes[i];
 
-            sol.assert(t1El !== null && t2El !== null, ``);
+            if (t1El instanceof TRest && i === t1.elementTypes.length - 1) {
+                subst.set(t1El.name, new rtt.TupleType(t2.elementTypes.slice(i)))
+                return true;
+            }
 
             if (!unify(t1El, t2El, subst)) {
                 return false;
             }
         }
 
-        for (let i = t1.elements.length; i < t2.elements.length; i++) {
-            if (!(t2.elements[i] instanceof TOptional)) {
+        for (let i = t1.elementTypes.length; i < t2.elementTypes.length; i++) {
+            if (!(t2.elementTypes[i] instanceof TOptional)) {
                 return false;
             }
         }
@@ -248,18 +276,18 @@ export function unify(t1: sol.TypeNode, t2: sol.TypeNode, subst: TSubst): boolea
  * Also this handles TRest.
  */
 export function concretize(
-    formalTypes: sol.TypeNode[],
-    concreteTypes: sol.TypeNode[]
-): [sol.TypeNode[], TSubst] {
+    formalTypes: rtt.BaseRuntimeType[],
+    concreteTypes: rtt.BaseRuntimeType[]
+): [rtt.BaseRuntimeType[], TSubst] {
     const subst: TSubst = new Map();
-    const res: sol.TypeNode[] = [];
+    const res: rtt.BaseRuntimeType[] = [];
 
     for (let i = 0; i < formalTypes.length; i++) {
         let formalT = formalTypes[i];
 
         if (formalT instanceof TRest) {
-            res.push(...(concreteTypes.slice(i) as sol.TypeNode[]));
-            sol.assert(
+            res.push(...concreteTypes.slice(i));
+            assert(
                 i === formalTypes.length - 1,
                 `Unexpected TRest not in the last position in concretize`
             );
@@ -275,11 +303,11 @@ export function concretize(
         }
 
         let substitutedT = substitute(formalT, subst);
-        sol.assert(i < concreteTypes.length, `Fewer concrete types than formal`);
-        const concreteT = concreteTypes[i] as sol.TypeNode;
+        assert(i < concreteTypes.length, `Fewer concrete types than formal`);
+        const concreteT = concreteTypes[i];
 
         if (isPolymorphic(substitutedT)) {
-            sol.assert(
+            assert(
                 unify(substitutedT, concreteT, subst),
                 `Couldn't unify {0} and {1}`,
                 substitutedT,
@@ -298,34 +326,45 @@ export function concretize(
  * Replace all TVars inside `t` according to `subst`.
  * As a small optimization, if no substitution happened, we return the same type without allocations
  */
-export function substitute(t: sol.TypeNode, subst: TSubst): sol.TypeNode {
+export function substitute(t: rtt.BaseRuntimeType, subst: TSubst): rtt.BaseRuntimeType {
     if (t instanceof BaseTVar) {
         const res = subst.get(t.name);
         return res !== undefined ? substitute(res, subst) : t;
     }
 
-    if (t instanceof sol.PointerType) {
-        const toT = substitute(t.to, subst);
-        return toT === t.to ? t : new sol.PointerType(toT, t.location, t.kind);
+    if (t instanceof rtt.PointerType) {
+        const toT = substitute(t.toType, subst);
+        return toT === t.toType ? t : new rtt.PointerType(toT, t.location);
     }
 
-    if (t instanceof sol.ArrayType) {
+    if (t instanceof rtt.ArrayType) {
         const elT = substitute(t.elementT, subst);
-        return elT === t.elementT ? t : new sol.ArrayType(elT, t.size);
+        return elT === t.elementT ? t : new rtt.ArrayType(elT, t.size);
     }
 
-    if (t instanceof ExpStructType) {
-        const fields: Array<[string, sol.TypeNode]> = t.fields.map(([name, fieldT]) => [
+    if (t instanceof rtt.StructType) {
+        const fields: Array<[string, rtt.BaseRuntimeType]> = t.fields.map(([name, fieldT]) => [
             name,
             substitute(fieldT, subst)
         ]);
-        return new ExpStructType(t.name, fields);
+        return new rtt.StructType(t.name, fields);
     }
 
     if (t instanceof TOptional) {
         const innerT = substitute(t.subT, subst);
 
         return innerT === t.subT ? t : new TOptional(innerT);
+    }
+
+    if (t instanceof rtt.TupleType) {
+        return new rtt.TupleType(t.elementTypes.map((elT) => substitute(elT, subst)));
+    }
+
+    if (t instanceof rtt.MappingType) {
+        const keyT = substitute(t.keyType, subst);
+        const valueT = substitute(t.valueType, subst);
+
+        return keyT == t.keyType && valueT == t.valueType ? t : new rtt.MappingType(keyT, valueT);
     }
 
     // Shouldn't contain types inside

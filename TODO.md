@@ -182,11 +182,28 @@
 166 - add decode_fail test.
 167 - add decoding builtin
 168 - move over some decoding tests
-
-- switch over to types branch of sol-dbg
+169 - switch over to types branch of sol-dbg
 - refactor types to subclass BaseRuntimeType
-    - remove duplicating types
-    -
+170    - abi.ts
+171    - polymorphic.ts
+172    - check that encode/decode are called with specialized types - they will need a re-write anyway
+173    - value.ts
+174    - constants.ts
+175    - utils.ts
+176    - scope.ts
+177    - artifactManager.ts
+178    - builtins.ts
+179    - interp.ts
+180    - clean compile
+181    - convert astToRuntimeType(infer.variableDeclarationToType...) into a helper
+182    - check all uses of _infer
+183    - fix compile errors in tests
+184    - in typeOf() handle int literals, string literals, address literals
+
+- clean test run
+
+    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
+    Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`
 
 - finish evalExternalCall.
     - Don't forget putAccount and getAccount around the actual call
