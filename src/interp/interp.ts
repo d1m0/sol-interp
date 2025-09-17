@@ -65,7 +65,7 @@ import {
     Value,
     ValueTypeConstructors
 } from "./value";
-import { Address, bigIntToBytes, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
+import { Address, bigIntToBytes, bytesToHex, concatBytes, equalsBytes, hexToBytes } from "@ethereumjs/util";
 import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
     changeLocTo,
@@ -97,7 +97,7 @@ import {
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import { abi, abiEncodeBuiltin, assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
-import { encode } from "./abi";
+import { decode, encode } from "./abi";
 import { BaseInterpType } from "./types";
 
 enum ControlFlow {
@@ -235,7 +235,7 @@ export class Interpreter {
         const entryPoint = this.artifactManager.findEntryPoint(msg.data, contract);
 
         if (entryPoint === undefined) {
-            nyi(`Couldn't find entry point for ${msg}`);
+            nyi(`Couldn't find entry point for ${bytesToHex(msg.data)}`);
         }
 
         // Decode args
@@ -1539,10 +1539,18 @@ export class Interpreter {
         this.expect(callee instanceof sol.MemberAccess, `Unexpected callee ${callee.print()}`);
         const astTarget = callee.vReferencedDeclaration;
         const argTs: rtt.BaseRuntimeType[] = [];
+        const retTs: rtt.BaseRuntimeType[] = [];
+        let selector: Uint8Array;
 
         if (astTarget instanceof sol.FunctionDefinition) {
-            for (const arg of astTarget.vParameters.vParameters) {
-                argTs.push(changeLocTo(this.varDeclToRuntimeType(arg), sol.DataLocation.Memory));
+            selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`)
+
+            for (const argT of astTarget.vParameters.vParameters) {
+                argTs.push(changeLocTo(this.varDeclToRuntimeType(argT), sol.DataLocation.Memory));
+            }
+
+            for (const retT of astTarget.vReturnParameters.vParameters) {
+                retTs.push(changeLocTo(this.varDeclToRuntimeType(retT), sol.DataLocation.Memory));
             }
         } else {
             nyi(`External call target ${astTarget}`);
@@ -1556,8 +1564,11 @@ export class Interpreter {
 
         // Next compute the msg data
         const argVs = expr.vArguments.map((arg) => this.eval(arg, state));
-        const [data] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
-        this.expect(data instanceof Uint8Array, ``)
+        const [dataView] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
+        this.expect(dataView instanceof BytesMemView, `Expected encoded data not ${ppValue(dataView)}`)
+        const argData = dataView.decode(state.memory);
+        this.expect(argData instanceof Uint8Array)
+        const data = concatBytes(selector, argData)
 
         const msg: SolMessage = {
             to,
@@ -1580,7 +1591,9 @@ export class Interpreter {
         this.expect(acc !== undefined, `We shouldn't have been destroyed`);
         state.account = acc;
 
-        return none;
+        const rets = decode(res.data, retTs, state);
+
+        return rets.length === 0 ? none : rets.length === 1 ? rets[0] : rets;
     }
 
     resolveCallee(
@@ -1826,6 +1839,10 @@ export class Interpreter {
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
+        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === 'this') {
+            return state.account.address;
+        }
+
         // contract name
         if (expr.vReferencedDeclaration instanceof sol.ContractDefinition) {
             return new DefValue(expr.vReferencedDeclaration);

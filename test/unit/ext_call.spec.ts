@@ -28,7 +28,8 @@ const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstr
         "setByteMem",
         [hexToBytes("0x010203"), 1n, "0x04"],
         [hexToBytes("0x010403")]
-    ]
+    ],
+    ["self_call.sol", "Foo", "main", [], []],
 ];
 
 describe("Simple function call tests", () => {
