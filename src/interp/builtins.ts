@@ -1,19 +1,23 @@
-import { BuiltinFunctionType, types } from "solc-typed-ast";
 import * as sol from "solc-typed-ast";
-import { BuiltinFunction, none, Value } from "./value";
+import * as rtt from "sol-dbg";
+import { BuiltinFunction, BuiltinStruct, none, TypeTuple, typeValueToType, Value } from "./value";
 import { State } from "./state";
 import { Assert, EmptyArrayPop, InternalError } from "./exceptions";
 import { Interpreter } from "./interp";
-import { TOptional, TUnion, TVar } from "./polymorphic";
+import { TOptional, TRest, TUnion, TVar } from "./polymorphic";
 import {
     ArrayStorageView,
+    BytesMemView,
     BytesStorageView,
     DecodingFailure,
     IntStorageView,
-    uint256
+    PointerMemView,
+    uint256,
+    View
 } from "sol-dbg";
-import { bytes1, makeZeroValue } from "./utils";
+import { bytes1, bytesT, decodeView, getContract, makeZeroValue, memBytesT } from "./utils";
 import { concatBytes } from "@ethereumjs/util";
+import { decode, encode } from "./abi";
 
 function getArgs(numArgs: number, state: State): Value[] {
     const res: Value[] = [];
@@ -29,7 +33,7 @@ function getArgs(numArgs: number, state: State): Value[] {
 
 export const assertBuiltin = new BuiltinFunction(
     "assert",
-    new BuiltinFunctionType("assert", [types.bool], []),
+    new rtt.FunctionType([rtt.bool], false, sol.FunctionStateMutability.NonPayable, []),
     (interp: Interpreter, state: State): Value[] => {
         const [flag] = getArgs(1, state);
 
@@ -46,12 +50,11 @@ const b = new TVar("b");
 
 export const pushBuiltin = new BuiltinFunction(
     "push",
-    new BuiltinFunctionType(
-        "push",
+    new rtt.FunctionType(
         [
             new TUnion([
-                new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Storage),
-                new sol.PointerType(new sol.BytesType(), sol.DataLocation.Storage)
+                new rtt.PointerType(new rtt.ArrayType(a), sol.DataLocation.Storage),
+                new rtt.PointerType(new rtt.BytesType(), sol.DataLocation.Storage)
             ]),
             // Note we allow the new element type to be different from the array element type to support things like
             // arr.push("foo") since "foo" is a memory string. We handle the
@@ -59,10 +62,12 @@ export const pushBuiltin = new BuiltinFunction(
             // context since we don't know the exact location in storage yet.
             new TOptional(b)
         ],
+        false,
+        sol.FunctionStateMutability.NonPayable,
         []
     ),
-    (interp: Interpreter, state: State, nArgs): Value[] => {
-        const args = getArgs(nArgs, state);
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const args = getArgs(self.type.argTs.length, state);
         const arr = args[0] as ArrayStorageView | BytesStorageView;
         let el: Value;
 
@@ -75,15 +80,15 @@ export const pushBuiltin = new BuiltinFunction(
 
         if (arr instanceof ArrayStorageView) {
             const sizeView = new IntStorageView(uint256, [arr.key, arr.endOffsetInWord]);
-            const curSize = sizeView.decode(state.storage);
+            const curSize = sizeView.decode(state.account.storage);
 
             if (curSize instanceof DecodingFailure) {
                 interp.fail(InternalError, `push(): couldn't decode array size`);
             }
 
-            state.storage = sizeView.encode(curSize + 1n, state.storage);
+            state.account.storage = sizeView.encode(curSize + 1n, state.account.storage);
 
-            const elView = arr.indexView(curSize, state.storage);
+            const elView = arr.indexView(curSize, state.account.storage);
 
             if (elView instanceof DecodingFailure) {
                 interp.fail(InternalError, `push(): couldn't get new element view`);
@@ -93,7 +98,7 @@ export const pushBuiltin = new BuiltinFunction(
                 interp.assign(elView, el, state);
             }
         } else {
-            let bytes = arr.decode(state.storage);
+            let bytes = arr.decode(state.account.storage);
 
             if (bytes instanceof DecodingFailure) {
                 interp.fail(InternalError, `push(): couldn't decode bytes`);
@@ -102,7 +107,7 @@ export const pushBuiltin = new BuiltinFunction(
             const newByte = el instanceof Uint8Array ? el : new Uint8Array([Number(el)]);
 
             bytes = concatBytes(bytes, newByte);
-            state.storage = arr.encode(bytes, state.storage);
+            state.account.storage = arr.encode(bytes, state.account.storage);
         }
 
         return [];
@@ -112,14 +117,15 @@ export const pushBuiltin = new BuiltinFunction(
 
 export const popBuiltin = new BuiltinFunction(
     "pop",
-    new BuiltinFunctionType(
-        "pop",
+    new rtt.FunctionType(
         [
             new TUnion([
-                new sol.PointerType(new sol.ArrayType(a), sol.DataLocation.Storage),
-                new sol.PointerType(new sol.BytesType(), sol.DataLocation.Storage)
+                new rtt.PointerType(new rtt.ArrayType(a), sol.DataLocation.Storage),
+                new rtt.PointerType(new rtt.BytesType(), sol.DataLocation.Storage)
             ])
         ],
+        false,
+        sol.FunctionStateMutability.NonPayable,
         []
     ),
     (interp: Interpreter, state: State): Value[] => {
@@ -128,7 +134,7 @@ export const popBuiltin = new BuiltinFunction(
 
         if (arr instanceof ArrayStorageView) {
             const sizeView = new IntStorageView(uint256, [arr.key, arr.endOffsetInWord]);
-            const curSize = sizeView.decode(state.storage);
+            const curSize = sizeView.decode(state.account.storage);
 
             if (curSize instanceof DecodingFailure) {
                 interp.fail(InternalError, `pop(): couldn't decode array size`);
@@ -138,10 +144,10 @@ export const popBuiltin = new BuiltinFunction(
                 interp.runtimeError(EmptyArrayPop, `pop() from empty array`);
             }
 
-            state.storage = sizeView.encode(curSize - 1n, state.storage);
+            state.account.storage = sizeView.encode(curSize - 1n, state.account.storage);
             // @todo zero-out deleted element
         } else {
-            const bytes = arr.decode(state.storage);
+            const bytes = arr.decode(state.account.storage);
 
             if (bytes instanceof DecodingFailure) {
                 interp.fail(InternalError, `pop(): couldn't decode bytes`);
@@ -151,11 +157,77 @@ export const popBuiltin = new BuiltinFunction(
                 interp.runtimeError(EmptyArrayPop, `pop() from empty array`);
             }
 
-            state.storage = arr.encode(bytes.slice(0, -1), state.storage);
+            state.account.storage = arr.encode(bytes.slice(0, -1), state.account.storage);
             // @todo zero-out deleted element
         }
 
         return [];
     },
     true
+);
+
+export const abiEncodeBuiltin = new BuiltinFunction(
+    "encode",
+    new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [
+        memBytesT
+    ]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const paramTs = self.type.argTs;
+        if (paramTs.length === 0) {
+            return [new Uint8Array()];
+        }
+
+        const args = getArgs(paramTs.length, state);
+        const contract = getContract(state);
+
+        const encBytes = encode(args, paramTs, state, contract.kind === sol.ContractKind.Library);
+
+        const res = PointerMemView.allocMemFor(
+            encBytes,
+            bytesT,
+            state.memAllocator
+        ) as BytesMemView;
+        res.encode(encBytes, state.memory);
+        return [res];
+    },
+    false
+);
+
+export const abiDecodeBuitin = new BuiltinFunction(
+    "decode",
+    new rtt.FunctionType(
+        [memBytesT, new rtt.TupleType([new TRest()])],
+        false,
+        sol.FunctionStateMutability.Pure,
+        [new TRest()]
+    ),
+    (interp: Interpreter, state: State): Value[] => {
+        const args = getArgs(2, state);
+
+        interp.expect(args[0] instanceof View, ``);
+        const bytes = decodeView(args[0], state);
+        interp.expect(bytes instanceof Uint8Array, ``);
+        interp.expect(args[1] instanceof TypeTuple);
+        const typesTuple = typeValueToType(args[1]);
+
+        sol.assert(typesTuple instanceof rtt.TupleType, ``);
+        return decode(
+            bytes,
+            typesTuple.elementTypes.map((t) => rtt.specializeType(t, sol.DataLocation.Memory)),
+            state
+        );
+    },
+    false
+);
+
+export const abi = new BuiltinStruct(
+    "abi",
+    new rtt.StructType("abi", [
+        ["encode", abiEncodeBuiltin.type],
+        ["decode", abiDecodeBuitin.type]
+    ]),
+    [
+        ["encode", [[abiEncodeBuiltin, ">=0.4.22"]]],
+        ["decode", [[abiDecodeBuitin, ">=0.4.22"]]]
+    ]
 );

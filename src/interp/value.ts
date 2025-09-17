@@ -10,10 +10,12 @@ import {
 } from "sol-dbg";
 import { StateArea, View } from "sol-dbg";
 import * as sol from "solc-typed-ast";
+import * as rtt from "sol-dbg";
 import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
 import { concretize, substitute } from "./polymorphic";
+import { satisfies } from "semver";
 
 export abstract class BaseInterpValue implements sol.PPAble {
     abstract pp(): string;
@@ -22,8 +24,12 @@ export abstract class BaseInterpValue implements sol.PPAble {
 export class BuiltinFunction extends BaseInterpValue {
     constructor(
         public readonly name: string,
-        public readonly type: sol.BuiltinFunctionType,
-        protected readonly _call: (interp: Interpreter, state: State, nArgs: number) => Value[],
+        public readonly type: rtt.FunctionType,
+        protected readonly _call: (
+            interp: Interpreter,
+            state: State,
+            self: BuiltinFunction
+        ) => Value[],
         public readonly implicitFirstArg = false
     ) {
         super();
@@ -33,27 +39,30 @@ export class BuiltinFunction extends BaseInterpValue {
         return `<builtin fun ${this.type.pp()}>`;
     }
 
-    concretize(argTs: sol.TypeNode[]): BuiltinFunction {
-        const [concreteFormalArgs, subst] = concretize(this.type.parameters, argTs);
-        const concreteFormalRets = this.type.returns.map((retT) => substitute(retT, subst));
+    concretize(argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
+        const [concreteFormalArgs, subst] = concretize(this.type.argTs, argTs);
+        const concreteFormalRets = this.type.retTs.map((retT) => substitute(retT, subst));
 
-        const concreteT = new sol.BuiltinFunctionType(
-            this.type.name,
+        const concreteT = new rtt.FunctionType(
             concreteFormalArgs,
+            this.type.external,
+            this.type.mutability,
             concreteFormalRets
         );
+
         return new BuiltinFunction(this.name, concreteT, this._call, this.implicitFirstArg);
     }
 
-    call(interp: Interpreter, state: State, nArgs: number): Value[] {
-        return this._call(interp, state, nArgs);
+    call(interp: Interpreter, state: State, concretizedBuiltin: BuiltinFunction): Value[] {
+        return this._call(interp, state, concretizedBuiltin);
     }
 }
 
 export class BuiltinStruct extends BaseInterpValue {
     constructor(
         public readonly name: string,
-        public readonly fields: Array<[string, Value]>
+        public readonly type: rtt.StructType,
+        public readonly fields: Array<[string, Array<[Value, string]>]>
     ) {
         super();
     }
@@ -61,10 +70,25 @@ export class BuiltinStruct extends BaseInterpValue {
     pp(): string {
         return `<builtin struct ${this.name}>`;
     }
+
+    getFieldForVersion(field: string, ver: string): Value | undefined {
+        const options = this.fields.filter(([name]) => name === field);
+        if (options.length !== 1) {
+            return undefined;
+        }
+
+        for (const [res, versionRange] of options[0][1]) {
+            if (satisfies(ver, versionRange)) {
+                return res;
+            }
+        }
+
+        return undefined;
+    }
 }
 
 /**
- * Value corresponding to a contract our source unit definition. For example in this code:
+ * Value corresponding to a contract or source unit definition. For example in this code:
  * ```
  *   contract Foo {
  *      uint x;
@@ -84,6 +108,9 @@ export class DefValue extends BaseInterpValue {
             | sol.FunctionDefinition
             | sol.EventDefinition
             | sol.ErrorDefinition
+            | sol.StructDefinition
+            | sol.EnumDefinition
+            | sol.UserDefinedValueTypeDefinition
     ) {
         super();
     }
@@ -107,9 +134,48 @@ export class NoneValue extends Poison {
     }
 }
 
+export abstract class BaseTypeValue extends BaseInterpValue {}
+
+export class TypeValue extends BaseTypeValue {
+    constructor(public readonly type: rtt.BaseRuntimeType) {
+        super();
+    }
+    pp(): string {
+        return `<typename ${this.type.pp()}>`;
+    }
+}
+
+export class TypeTuple extends BaseTypeValue {
+    constructor(public readonly elements: BaseTypeValue[]) {
+        super();
+    }
+    pp(): string {
+        return `<typename ${this.elements.map((e) => e.pp()).join(", ")}>`;
+    }
+}
+
+export function typeValueToType(t: BaseTypeValue): rtt.BaseRuntimeType {
+    if (t instanceof TypeValue) {
+        return t.type;
+    }
+
+    if (t instanceof TypeTuple) {
+        return new rtt.TupleType(t.elements.map(typeValueToType));
+    }
+
+    nyi(`typeValueToType(${t.constructor.name})`);
+}
+
 export const none = new NoneValue();
 
-export type Value = PrimitiveValue | BuiltinFunction | BuiltinStruct | DefValue | Value[];
+export type Value =
+    | PrimitiveValue
+    | BuiltinFunction
+    | BuiltinStruct
+    | DefValue
+    | TypeValue
+    | TypeTuple
+    | Value[];
 
 // @todo migrate to sol-dbg
 type NonPoisonPrimitiveValue =
@@ -119,7 +185,10 @@ type NonPoisonPrimitiveValue =
     | Address // address
     | FunctionValue // function types
     | Slice // array slices
-    | View<any, BaseValue, any, sol.TypeNode>; // Pointer Values
+    | View<any, BaseValue, any, rtt.BaseRuntimeType> // Pointer Values
+    | TypeValue // Type Values and TypeTuples are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
+    | TypeTuple;
+
 export type NonPoisonValue =
     | NonPoisonPrimitiveValue
     | BuiltinFunction
@@ -128,7 +197,7 @@ export type NonPoisonValue =
     | Value[];
 
 export type LValue =
-    | View<StateArea, BaseValue, any, sol.TypeNode>
+    | View<StateArea, BaseValue, any, rtt.BaseRuntimeType>
     | null // empty components of tuple assignments
     | LValue[]; // Tuple assignments
 
@@ -143,7 +212,8 @@ export function isPrimitiveValue(v: any): v is PrimitiveValue {
         v instanceof InternalFunRef ||
         v instanceof Slice ||
         v instanceof View ||
-        v instanceof Poison
+        v instanceof Poison ||
+        v instanceof BaseTypeValue
     );
 }
 

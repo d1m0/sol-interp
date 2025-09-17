@@ -2,7 +2,7 @@ import { Struct, Value, View } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import { loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
-import { worldFailMock } from "../../src/interp/utils";
+import { decodeView, worldFailMock } from "../../src/interp/utils";
 import { ArtifactManager } from "../../src/interp/artifactManager";
 
 const samples: Array<[string, string, Array<[string, Value]>, Value]> = [
@@ -137,7 +137,7 @@ describe("Eval unit tests", () => {
             let v: any = interp.eval(expr, state);
 
             if (v instanceof View) {
-                v = interp.decode(v, state);
+                v = decodeView(v, state);
             }
 
             expect(v).toEqual(expValue);

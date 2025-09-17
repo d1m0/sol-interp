@@ -165,8 +165,86 @@
 152 - Add a test with fun returning an uninitialized local struct
 153 - units on literals
 154 - rationals in constant expressions
-
 - mock up external world stuff
+155    - add abi.encode() helper 
+156    - finish call
+157    - add test harness for call with some simple tests
+158 - refactor State to hold account instead of storage; add makeStateForAccount?
+159 - remove getStorage from WorldInterface
+160 - remove state.contract
+161 - replace state.mdc with state.account.contract.ast?
+    - how is delegatecall implemented then?
+        - add delegatedAccount to state and update getContractInfo()
+162 - get clean test run
+163 - add abi.encode builtin and use it in evalExternallCall
+164 - move over abi.encode() tests from sol2maruir
+165 - add decode
+166 - add decode_fail test.
+167 - add decoding builtin
+168 - move over some decoding tests
+169 - switch over to types branch of sol-dbg
+- refactor types to subclass BaseRuntimeType
+170    - abi.ts
+171    - polymorphic.ts
+172    - check that encode/decode are called with specialized types - they will need a re-write anyway
+173    - value.ts
+174    - constants.ts
+175    - utils.ts
+176    - scope.ts
+177    - artifactManager.ts
+178    - builtins.ts
+179    - interp.ts
+180    - clean compile
+181    - convert astToRuntimeType(infer.variableDeclarationToType...) into a helper
+182    - check all uses of _infer
+183    - fix compile errors in tests
+184    - in typeOf() handle int literals, string literals, address literals
+185    - clean test run
+186    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
+
+- finish evalExternalCall.
+    - Don't forget putAccount and getAccount around the actual call
+    - add balance handling
+- add simple call test
+- clean test run
+
+    Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`
+
+- (address).call builtin
+
+- implement delegate call
+- consider if I want to add a static call flag as well? How would we check that?
+- try and add a test where we call a contract function during constant initialization (maybe library routine?)
+- test with delegate call with matching layout
+- test with delegate call with mismatched layout
+- test with delegate call where the call fails
+- test with nested delegate call
+- test with nested delegate call where the nested call fails
+
+- add test with order of operations for old and new style gas/value/salt passing
+- add test with balance
+- add test with external calls
+- add test with external calls where an inner one fails (should propagate up)
+- test with non-constant expression for size in abi.decode array type
+- add abi.encode family
+- add abi.decode family
+- gatherDefs across ContractScope and UnitScope can be unified. Unneccessary code duplication. Maybe a base DefScope? With an interface that both implement?
+
+    - plan staticcall()
+        - add a static flag to state?
+    - plan delegatecall()
+        - is there a way to test it without assembly?
+
+- make bugs for:
+    - polymorphism doesnt work well for decode
+    - builtinstruct type doesnt quite work for builtins
+
+- maybe move constants cache to Chain from Artifact? Though logically it feels like it fits better there....
+- Interp.makeState duplicates logic in Chain
+- write external call logic
+- add unit test with empty constructors and calling
+- add abi.encodeCall test with failure in type checking
+
 - builtins (nyi for anything needing external call state)
 - migrate builtin tests
 

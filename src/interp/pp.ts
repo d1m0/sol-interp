@@ -4,6 +4,7 @@ import {
     BuiltinStruct,
     DefValue,
     LValue,
+    TypeValue,
     Value,
     ValueTypeConstructors
 } from "./value";
@@ -42,7 +43,7 @@ export function ppValue(v: Value): string {
         return `<internal fun ref to ${v.fun.name}>`;
     } else if (v instanceof Slice) {
         return `<slice [${v.start}:${v.end}]>`;
-    } else if (v instanceof DefValue) {
+    } else if (v instanceof DefValue || v instanceof TypeValue) {
         return v.pp();
     } else {
         return `${v}`;
