@@ -201,16 +201,15 @@
 184    - in typeOf() handle int literals, string literals, address literals
 185    - clean test run
 186    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
+187    - add forget putAccount and getAccount around the actual call
+188    - add simple call test
 
-- finish evalExternalCall.
-    - Don't forget putAccount and getAccount around the actual call
+    - add multi-contract test setup
     - add balance handling
-- add simple call test
-- clean test run
+    - (address).call builtin
+    - add state revert test
 
     Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`
-
-- (address).call builtin
 
 - implement delegate call
 - consider if I want to add a static call flag as well? How would we check that?
