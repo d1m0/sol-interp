@@ -168,9 +168,7 @@ export const popBuiltin = new BuiltinFunction(
 
 export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
-    new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [
-        memBytesT
-    ]),
+    new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = self.type.argTs;
         if (paramTs.length === 0) {
@@ -188,6 +186,7 @@ export const abiEncodeBuiltin = new BuiltinFunction(
             state.memAllocator
         ) as BytesMemView;
         res.encode(encBytes, state.memory);
+        console.error(res);
         return [res];
     },
     false

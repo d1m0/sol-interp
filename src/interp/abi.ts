@@ -157,7 +157,6 @@ export function encode(
     return hexToBytes(ethABI.encodeParameters(typeNames, abiVals) as `0x${string}`);
 }
 
-
 /**
  * Convert an abi value obtained from web3-eth-abi to a BaseValue.
  * I.e. this may produce complex values such as `Struct`s and arrays.
@@ -230,25 +229,25 @@ function liftABIBaseValue(v: BaseValue, type: rtt.BaseRuntimeType): BaseValue {
     }
 
     if (type instanceof rtt.ArrayType) {
-        assert(v instanceof Array, ``)
+        assert(v instanceof Array, ``);
         return v.map((el) => liftABIBaseValue(el, type.elementT));
     }
 
     if (type instanceof rtt.TupleType) {
-        assert(v instanceof Array, ``)
+        assert(v instanceof Array, ``);
         return v.map((el, i) => liftABIBaseValue(el, type.elementTypes[i]));
     }
 
     if (type instanceof rtt.StructType) {
         assert(v instanceof Array && v.length === type.fields.length, ``);
-        const fields: [string, BaseValue][] = [];
+        const fields: Array<[string, BaseValue]> = [];
 
         for (let i = 0; i < v.length; i++) {
             const [name, fieldT] = type.fields[i];
-            fields.push([name, liftABIBaseValue(v[i], fieldT)])
+            fields.push([name, liftABIBaseValue(v[i], fieldT)]);
         }
 
-        return new Struct(fields)
+        return new Struct(fields);
     }
 
     return v;

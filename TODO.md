@@ -201,11 +201,28 @@
 184    - in typeOf() handle int literals, string literals, address literals
 185    - clean test run
 186    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
+187    - add simple call test
+
+https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
+https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
+https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
+
+Constructors:
+    - implement new and old order of state var init
+    - test state var init
+    - implement computation of base arguments from most derived to most base
+    - implement calling constructors in order
+    - add code gen type to ArtifactInfo
+    - implement storage for immutable state vars
+    - can I implement computing the corrrect final deployed bytecode??
+
+    - add a test with an abstract constructor taking storage pointers
+    - add test with difference in initializing order depending on old codegen or new codegen
+    - add codegenType to ArtifactInfo
 
 - finish evalExternalCall.
     - Don't forget putAccount and getAccount around the actual call
     - add balance handling
-- add simple call test
 - clean test run
 
     Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`

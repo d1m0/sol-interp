@@ -9,7 +9,12 @@ import {
     ContractInfo
 } from "sol-dbg";
 import { BaseScope, LocalsScope } from "./scope";
-import { FunctionDefinition, ModifierInvocation, VariableDeclaration } from "solc-typed-ast";
+import {
+    assert,
+    FunctionDefinition,
+    ModifierInvocation,
+    VariableDeclaration
+} from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction } from "./value";
@@ -19,6 +24,7 @@ import { AccountInfo } from "./chain";
 export interface CallResult {
     reverted: boolean;
     data: Uint8Array;
+    newContract?: Address;
 }
 
 export interface WorldInterface {
@@ -31,6 +37,7 @@ export interface WorldInterface {
 }
 
 export interface SolMessage {
+    from: Address;
     to: Address;
     data: Uint8Array;
     gas: bigint;
@@ -71,6 +78,7 @@ export function makeNoContractState(): State {
         memory: memAllocator.memory,
         memAllocator,
         msg: {
+            from: ZERO_ADDRESS,
             to: ZERO_ADDRESS,
             data: new Uint8Array(),
             gas: 0n,
@@ -102,7 +110,9 @@ export function makeStateWithConstants(
 
 export function makeStateForAccount(artifactManager: ArtifactManager, account: AccountInfo): State {
     const memAllocator = new DefaultAllocator();
-    const [constantsMap, constantsMemory] = artifactManager.getConstants(account.contract.artifact);
+    const contract = account.contract;
+    assert(contract !== undefined, ``);
+    const [constantsMap, constantsMemory] = artifactManager.getConstants(contract.artifact);
 
     // Copy over the constants into the new memory
     memAllocator.alloc(constantsMemory.length);
@@ -113,6 +123,7 @@ export function makeStateForAccount(artifactManager: ArtifactManager, account: A
         memory: memAllocator.memory,
         memAllocator,
         msg: {
+            from: ZERO_ADDRESS,
             to: ZERO_ADDRESS,
             data: new Uint8Array(),
             gas: 0n,

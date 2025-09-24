@@ -1,7 +1,7 @@
 import { assert, DataLocation } from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 
-export abstract class BasePolyType extends rtt.BaseRuntimeType { }
+export abstract class BasePolyType extends rtt.BaseRuntimeType {}
 
 export class BaseTVar extends BasePolyType {
     constructor(public readonly name: string) {
@@ -14,7 +14,7 @@ export class BaseTVar extends BasePolyType {
 }
 
 // Single type var
-export class TVar extends BaseTVar { }
+export class TVar extends BaseTVar {}
 
 export class TUnion extends BaseTVar {
     private static ctr: number = 0;
@@ -216,7 +216,7 @@ export function unify(t1: rtt.BaseRuntimeType, t2: rtt.BaseRuntimeType, subst: T
             const t2El = t2.elementTypes[i];
 
             if (t1El instanceof TRest && i === t1.elementTypes.length - 1) {
-                subst.set(t1El.name, new rtt.TupleType(t2.elementTypes.slice(i)))
+                subst.set(t1El.name, new rtt.TupleType(t2.elementTypes.slice(i)));
                 return true;
             }
 

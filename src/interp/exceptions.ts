@@ -64,6 +64,12 @@ export class Overflow extends RuntimeError {
     }
 }
 
+export class InsufficientBalance extends RuntimeError {
+    constructor(node: FailLoc, trace: Trace) {
+        super(node, trace, `Insufficient balance`);
+    }
+}
+
 export class Assert extends RuntimeError {
     constructor(
         node: FailLoc,

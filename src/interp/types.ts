@@ -8,7 +8,7 @@ export class DefType extends BaseRuntimeType {
 
 export class TypeType extends BaseRuntimeType {
     pp(): string {
-        return `<type>`
+        return `<type>`;
     }
 }
 

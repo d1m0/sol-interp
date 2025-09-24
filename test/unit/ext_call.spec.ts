@@ -6,7 +6,11 @@ import { loadSamples, SampleInfo, SampleMap } from "./utils";
 import { Assert } from "../../src/interp/exceptions";
 import { bytesToHex, concatBytes, createAddressFromString, hexToBytes } from "@ethereumjs/util";
 import { ArtifactManager } from "../../src/interp/artifactManager";
-import { abiTypeToCanonicalName, abiValueToBaseValue, toABIEncodedType } from "../../src/interp/abi";
+import {
+    abiTypeToCanonicalName,
+    abiValueToBaseValue,
+    toABIEncodedType
+} from "../../src/interp/abi";
 
 type ExceptionConstructors = typeof Assert;
 const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstructors]> = [
@@ -30,7 +34,11 @@ const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstr
         [hexToBytes("0x010403")]
     ],
     ["self_call.sol", "Foo", "main", [], []],
+    ["constructor_args1.sol", "Main", "main", [], []]
 ];
+
+const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
+const RECEIVER = createAddressFromString("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4");
 
 describe("Simple function call tests", () => {
     let artifactManager: ArtifactManager;
@@ -63,11 +71,11 @@ describe("Simple function call tests", () => {
 
             const chain = new Chain(artifactManager);
             const contractInfo = artifactManager.getContractInfo(fun);
-            const addr = createAddressFromString("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4");
             sol.assert(contractInfo !== undefined, `No info for contract ${contract}`);
 
-            chain.setAccount(addr, {
-                address: addr,
+            chain.makeEOA(SENDER, 1000000n);
+            chain.setAccount(RECEIVER, {
+                address: RECEIVER,
                 contract: contractInfo,
                 storage: ImmMap.fromEntries([]),
                 balance: 0n,
@@ -84,9 +92,8 @@ describe("Simple function call tests", () => {
             );
 
             const abiRetTs = fun.vReturnParameters.vParameters.map((decl) =>
-                toABIEncodedType(
-                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer),
-                ));
+                toABIEncodedType(astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer))
+            );
 
             const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT, false));
 
@@ -96,7 +103,8 @@ describe("Simple function call tests", () => {
             );
 
             const res = chain.call({
-                to: addr,
+                from: SENDER,
+                to: RECEIVER,
                 data,
                 gas: 0n,
                 value: 0n,

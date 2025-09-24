@@ -95,7 +95,7 @@ export function getMsg(state: State): Uint8Array {
 }
 
 export function getContractInfo(state: State): ContractInfo {
-    return state.account.contract;
+    return state.account.contract as ContractInfo;
 }
 
 export function getContract(state: State): sol.ContractDefinition {
@@ -174,11 +174,17 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
 
 /**
  * Returns true IFF `t1` and `t2` are structuraly the same, except for any data locations.
- * @param t1 
- * @param t2 
+ * @param t1
+ * @param t2
  */
-export function typesEqualModuloLocation(t1: rtt.BaseRuntimeType, t2: rtt.BaseRuntimeType): boolean {
-    return changeLocTo(t1, sol.DataLocation.Memory).pp() == changeLocTo(t2, sol.DataLocation.Memory).pp();
+export function typesEqualModuloLocation(
+    t1: rtt.BaseRuntimeType,
+    t2: rtt.BaseRuntimeType
+): boolean {
+    return (
+        changeLocTo(t1, sol.DataLocation.Memory).pp() ==
+        changeLocTo(t2, sol.DataLocation.Memory).pp()
+    );
 }
 
 /**
@@ -347,11 +353,15 @@ export function clampIntToType(val: bigint, type: rtt.IntType): bigint {
     return val < min ? ((val - max) % size) + max : ((val - min) % size) + min;
 }
 
-export function removeLiteralTypes(t: sol.TypeNode, e: sol.Expression, infer: sol.InferType): sol.TypeNode {
+export function removeLiteralTypes(
+    t: sol.TypeNode,
+    e: sol.Expression,
+    infer: sol.InferType
+): sol.TypeNode {
     if (t instanceof sol.IntLiteralType) {
         const v = sol.evalConstantExpr(e, infer);
-        sol.assert(typeof v === 'bigint', ``);
-        const smallestT = sol.smallestFittingType(v)
+        sol.assert(typeof v === "bigint", ``);
+        const smallestT = sol.smallestFittingType(v);
         sol.assert(smallestT !== undefined, ``);
         return smallestT;
     }
@@ -362,7 +372,7 @@ export function removeLiteralTypes(t: sol.TypeNode, e: sol.Expression, infer: so
 
     // Tuples
     if (t instanceof sol.TupleType && e instanceof sol.TupleExpression) {
-        let elTs: (sol.TypeNode | null)[] = [];
+        const elTs: Array<sol.TypeNode | null> = [];
 
         for (let i = 0; i < t.elements.length; i++) {
             let elT = t.elements[i];
@@ -374,7 +384,7 @@ export function removeLiteralTypes(t: sol.TypeNode, e: sol.Expression, infer: so
             elTs.push(elT);
         }
 
-        return new sol.TupleType(elTs)
+        return new sol.TupleType(elTs);
     }
 
     return t;
