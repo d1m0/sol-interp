@@ -202,31 +202,35 @@
 185    - clean test run
 186    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
 187    - add simple call test
+188    - add code gen type to ArtifactInfo
+189    - implement old order of state var init
+190    - test state var init
+191    - test state var init calls method function, global function
+192    - implement computation of base arguments from most derived to most base
+193    - implement calling constructors in order
 
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
 https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
 
+
 Constructors:
-    - implement new and old order of state var init
-    - test state var init
-    - implement computation of base arguments from most derived to most base
-    - implement calling constructors in order
-    - add code gen type to ArtifactInfo
+    - implement new order of state var init
     - implement storage for immutable state vars
     - can I implement computing the corrrect final deployed bytecode??
 
     - add a test with an abstract constructor taking storage pointers
     - add test with difference in initializing order depending on old codegen or new codegen
-    - add codegenType to ArtifactInfo
+
+    - implement try/catch
+    - implement revert/throw
+    - test state reverting
+    - test balance reverting
+    - test contract nonce reverting
 
 - finish evalExternalCall.
-    - Don't forget putAccount and getAccount around the actual call
     - add balance handling
 - clean test run
-
-    Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`
-
 - (address).call builtin
 
 - implement delegate call
@@ -306,7 +310,6 @@ Constructors:
     - test virtual function resolves to public getter
     - note - getters are only ever called externally :)
 - external calls
-- add evalNew for contracts
 - more coercions
 - cli for playing
 - try/catch etc...

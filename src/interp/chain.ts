@@ -13,8 +13,8 @@ export interface AccountInfo {
     nonce: bigint;
 }
 
-export abstract class EVMError extends Error {}
-export class InsufficientBalance extends EVMError {}
+export abstract class EVMError extends Error { }
+export class InsufficientBalance extends EVMError { }
 
 /**
  * Simple BlockChain implementation supporting only contracts with source artifacts.
@@ -71,6 +71,7 @@ export class Chain implements WorldInterface {
     }
 
     encodeError(res: RuntimeError): Uint8Array {
+        console.error(res)
         nyi(`encodeError(${res})`);
     }
 
@@ -99,13 +100,17 @@ export class Chain implements WorldInterface {
         const contract = this.artifactManager.getContractFromCreationBytecode(msg.data);
         this.expect(contract !== undefined);
 
-        return {
+        const res = {
             address,
             contract,
-            storage: ImmMap.fromEntries([]),
+            storage: ImmMap.fromEntries([]) as Storage,
             balance: msg.value,
             nonce: 0n
         };
+
+        this.setAccount(address, res);
+
+        return res;
     }
 
     private execMsg(msg: SolMessage): CallResult {

@@ -34,7 +34,9 @@ const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstr
         [hexToBytes("0x010403")]
     ],
     ["self_call.sol", "Foo", "main", [], []],
-    ["constructor_args1.sol", "Main", "main", [], []]
+    ["constructor_args1.sol", "Main", "main", [], []],
+    ["state_var_init.sol", "Main", "main", [], []],
+    ["state_arr_assign.sol", "Foo", "main", [], []]
 ];
 
 const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");

@@ -6,7 +6,6 @@ contract Base {
 
     constructor(uint x) public {
         b = x;
-
     }
 }
 

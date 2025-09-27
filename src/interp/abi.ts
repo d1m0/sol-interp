@@ -10,6 +10,25 @@ import { bytes24, decodeView, isValueType } from "./utils";
 import { BaseInterpType } from "./types";
 
 /**
+ * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
+ */
+export function skipFieldDueToMap(t: rtt.BaseRuntimeType): boolean {
+    if (t instanceof rtt.MappingType) {
+        return true;
+    }
+
+    if (t instanceof rtt.PointerType) {
+        return skipFieldDueToMap(t.toType);
+    }
+
+    if (t instanceof rtt.ArrayType) {
+        return skipFieldDueToMap(t.elementT);
+    }
+
+    return false;
+}
+
+/**
  * Convert an interpreter type to an ABI type. This is analogous to `InferType.toABIEncodedType`,
  * however it handles runtime types only.
  */
@@ -48,6 +67,8 @@ export function toABIEncodedType(type: BaseInterpType): BaseInterpType {
     return type;
 }
 
+const _NONE_ = new Object();
+
 /**
  * Convert a sol-dbg `Value` (so potentially involving structs) to an abi-like value
  * acceptable to `web3-eth-abi`.
@@ -70,7 +91,7 @@ function valueToAbiValue(v: Value | BaseValue, s: State, isLib: boolean): any {
     }
 
     if (v instanceof Array) {
-        return v.map((x) => valueToAbiValue(x, s, isLib));
+        return v.map((x) => valueToAbiValue(x, s, isLib)).filter(v => v !== _NONE_);
     }
 
     if (v instanceof View) {
@@ -85,15 +106,15 @@ function valueToAbiValue(v: Value | BaseValue, s: State, isLib: boolean): any {
     }
 
     if (v instanceof Struct) {
-        return valueToAbiValue(
-            v.entries.map(([, entry]) => entry),
+        return v.entries.map(([, entry]) => valueToAbiValue(
+            entry,
             s,
             isLib
-        );
+        )).filter(v => v !== _NONE_);
     }
 
     if (v instanceof Map) {
-        assert(false, `Shouldn't encounter maps directly`);
+        return _NONE_;
     }
 
     // External fun refs are stored as bytes24 - address then selector
@@ -149,7 +170,7 @@ export function encode(
     state: State,
     isLibrary: boolean = false
 ): Uint8Array {
-    const abiTypes = ts.map((t) => toABIEncodedType(t));
+    const abiTypes = ts.map((t) => toABIEncodedType(t)).filter((t) => !skipFieldDueToMap(t));
     const typeNames = abiTypes.map((t) => abiTypeToCanonicalName(t, isLibrary));
 
     const abiVals = vs.map((v) => valueToAbiValue(v, state, isLibrary));
@@ -177,6 +198,11 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         return hexToBytes(v);
     }
 
+    if (type instanceof rtt.AddressType) {
+        return createAddressFromString(v);
+    }
+
+
     if (type instanceof rtt.PointerType && type.toType instanceof rtt.StringType) {
         return v;
     }
@@ -185,7 +211,9 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         const elT = type.toType.elementT;
         const res: BaseValue[] = [];
 
-        for (let i = 0; i < v.__length__; i++) {
+        let len = v.length !== undefined ? v.length : v.__length__;
+
+        for (let i = 0; i < len; i++) {
             res.push(abiValueToBaseValue(v[i], elT));
         }
 
@@ -207,17 +235,6 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         }
 
         return res;
-    }
-
-    if (type instanceof rtt.StructType) {
-        const fieldTs: rtt.BaseRuntimeType[] = type.fields.map(([, type]) => type);
-        const fieldVals = (v as any[]).map((el, i) => abiValueToBaseValue(el, fieldTs[i]));
-
-        return new Struct(type.fields.map(([name], i) => [name, fieldVals[i]]));
-    }
-
-    if (type instanceof rtt.AddressType) {
-        return createAddressFromString(v);
     }
 
     nyi(`abiValueToBaseValue(${v}, ${type.pp()})`);

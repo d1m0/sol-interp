@@ -171,14 +171,16 @@ export const abiEncodeBuiltin = new BuiltinFunction(
     new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = self.type.argTs;
+        let encBytes: Uint8Array;
+
         if (paramTs.length === 0) {
-            return [new Uint8Array()];
+            encBytes = new Uint8Array();
+        } else {
+            const args = getArgs(paramTs.length, state);
+            const contract = getContract(state);
+
+            encBytes = encode(args, paramTs, state, contract.kind === sol.ContractKind.Library);
         }
-
-        const args = getArgs(paramTs.length, state);
-        const contract = getContract(state);
-
-        const encBytes = encode(args, paramTs, state, contract.kind === sol.ContractKind.Library);
 
         const res = PointerMemView.allocMemFor(
             encBytes,
@@ -186,7 +188,7 @@ export const abiEncodeBuiltin = new BuiltinFunction(
             state.memAllocator
         ) as BytesMemView;
         res.encode(encBytes, state.memory);
-        console.error(res);
+
         return [res];
     },
     false

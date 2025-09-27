@@ -99,16 +99,16 @@ export interface SampleInfo {
 
 export type SampleMap = Map<string, SampleInfo>;
 
-export async function loadSamples(names: string[]): Promise<[ArtifactManager, SampleMap]> {
+export async function loadSamples(names: string[], basePath = `test/samples`): Promise<[ArtifactManager, SampleMap]> {
     const res: SampleMap = new Map();
     const compileResults: Array<[PartialSolcOutput, string]> = [];
     for (const fileName of names) {
-        const file = fse.readFileSync(`test/samples/${fileName}`, {
+        const file = fse.readFileSync(`${basePath}/${fileName}`, {
             encoding: "utf-8"
         });
         const version = getVersion(file);
         const compileResult = await sol.compileSol(
-            `test/samples/${fileName}`,
+            `${basePath}/${fileName}`,
             version,
             undefined,
             undefined,
