@@ -99,7 +99,10 @@ export interface SampleInfo {
 
 export type SampleMap = Map<string, SampleInfo>;
 
-export async function loadSamples(names: string[], basePath = `test/samples`): Promise<[ArtifactManager, SampleMap]> {
+export async function loadSamples(
+    names: string[],
+    basePath = `test/samples`
+): Promise<[ArtifactManager, SampleMap]> {
     const res: SampleMap = new Map();
     const compileResults: Array<[PartialSolcOutput, string]> = [];
     for (const fileName of names) {

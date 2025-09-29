@@ -174,20 +174,36 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
 
 /**
  * Returns true IFF a value of `rType` is directly assignable to an LValue of `lvType`.
- * @param lvType 
- * @param rType 
+ * @param lvType
+ * @param rType
  */
-export function isDirectlyAssignable(lvType: rtt.BaseRuntimeType, rType: rtt.BaseRuntimeType): boolean {
+export function isDirectlyAssignable(
+    lvType: rtt.BaseRuntimeType,
+    rType: rtt.BaseRuntimeType
+): boolean {
     if (lvType instanceof rtt.PointerType) {
         // We have more permissive casting for assignments to storage arrays
-        if (lvType.toType instanceof rtt.ArrayType && lvType.location === sol.DataLocation.Storage && rType instanceof rtt.ArrayType) {
-            return (lvType.toType.size === undefined || lvType.toType.size === rType.size) && // Sizes match
+        if (
+            lvType.toType instanceof rtt.ArrayType &&
+            lvType.location === sol.DataLocation.Storage &&
+            rType instanceof rtt.ArrayType
+        ) {
+            return (
+                (lvType.toType.size === undefined || lvType.toType.size === rType.size) && // Sizes match
                 isDirectlyAssignable(lvType.toType.elementT, rType.elementT)
+            );
         }
 
-        if (lvType.toType instanceof rtt.ArrayType && lvType.location === sol.DataLocation.Storage && rType instanceof rtt.PointerType && rType.toType instanceof rtt.ArrayType) {
-            return (lvType.toType.size === undefined || lvType.toType.size === rType.toType.size) && // Sizes match
+        if (
+            lvType.toType instanceof rtt.ArrayType &&
+            lvType.location === sol.DataLocation.Storage &&
+            rType instanceof rtt.PointerType &&
+            rType.toType instanceof rtt.ArrayType
+        ) {
+            return (
+                (lvType.toType.size === undefined || lvType.toType.size === rType.toType.size) && // Sizes match
                 isDirectlyAssignable(lvType.toType.elementT, rType.toType.elementT)
+            );
         }
 
         return typesEqualModuloLocation(lvType.toType, rType);
@@ -419,9 +435,14 @@ export function removeLiteralTypes(
     return t;
 }
 
-export function getGetterArgAndReturnTs(getter: sol.VariableDeclaration, infer: sol.InferType): [BaseInterpType[], BaseInterpType[]] {
+export function getGetterArgAndReturnTs(
+    getter: sol.VariableDeclaration,
+    infer: sol.InferType
+): [BaseInterpType[], BaseInterpType[]] {
     const [solArgTs, solRetT] = infer.getterArgsAndReturn(getter);
-    const argTs: BaseInterpType[] = solArgTs.map((solT) => rtt.astToRuntimeType(solT, infer, sol.DataLocation.CallData))
+    const argTs: BaseInterpType[] = solArgTs.map((solT) =>
+        rtt.astToRuntimeType(solT, infer, sol.DataLocation.CallData)
+    );
     const retT = rtt.astToRuntimeType(solRetT, infer, sol.DataLocation.CallData);
     return [argTs, retT instanceof rtt.TupleType ? retT.elementTypes : [retT]];
 }

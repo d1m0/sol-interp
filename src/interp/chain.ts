@@ -3,7 +3,9 @@ import { CallResult, makeStateForAccount, SolMessage, WorldInterface } from "./s
 import { Interpreter } from "./interp";
 import { ArtifactManager } from "./artifactManager";
 import { Address, createContractAddress } from "@ethereumjs/util";
-import { RuntimeError } from "./exceptions";
+import { ExceptionStep, ExtCallStep, Trace } from "./step";
+import { InsufficientBalance } from "./exceptions";
+import { ContractDefinition } from "solc-typed-ast";
 
 export interface AccountInfo {
     address: Address;
@@ -13,17 +15,16 @@ export interface AccountInfo {
     nonce: bigint;
 }
 
-export abstract class EVMError extends Error { }
-export class InsufficientBalance extends EVMError { }
-
 /**
  * Simple BlockChain implementation supporting only contracts with source artifacts.
  */
 export class Chain implements WorldInterface {
     state: ImmMap<string, AccountInfo>;
+    public fullTrace: Trace;
 
     constructor(public readonly artifactManager: ArtifactManager) {
         this.state = ImmMap.fromEntries([]);
+        this.fullTrace = [];
     }
 
     create(msg: SolMessage): CallResult {
@@ -70,11 +71,6 @@ export class Chain implements WorldInterface {
         }
     }
 
-    encodeError(res: RuntimeError): Uint8Array {
-        console.error(res)
-        nyi(`encodeError(${res})`);
-    }
-
     call(msg: SolMessage): CallResult {
         this.expect(!msg.to.equals(ZERO_ADDRESS));
         return this.execMsg(msg);
@@ -119,9 +115,7 @@ export class Chain implements WorldInterface {
         const fromAccount = this.getAccount(msg.from);
         this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);
 
-        if (msg.value > fromAccount.balance) {
-            throw new InsufficientBalance();
-        }
+        this.fullTrace.push(new ExtCallStep(msg));
 
         fromAccount.balance -= msg.value;
         // @todo what about overflow here?
@@ -129,11 +123,24 @@ export class Chain implements WorldInterface {
 
         const contract = toAccount.contract;
         this.expect(contract !== undefined, `Not an EoA`);
+
+        if (msg.value > fromAccount.balance) {
+            const err = new InsufficientBalance(toAccount.contract?.ast as ContractDefinition, []);
+            this.fullTrace.push(new ExceptionStep(err));
+
+            return {
+                reverted: true,
+                data: err.payload
+            };
+        }
+
         const interp = new Interpreter(this, this.artifactManager, contract.artifact);
 
         const interpState = makeStateForAccount(this.artifactManager, toAccount);
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);
+
+        this.fullTrace.push(...interp.trace);
 
         if (res instanceof Uint8Array) {
             const callRes: CallResult = {
@@ -152,7 +159,7 @@ export class Chain implements WorldInterface {
 
             return {
                 reverted: true,
-                data: this.encodeError(res)
+                data: res.payload
             };
         }
     }

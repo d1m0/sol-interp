@@ -2,7 +2,7 @@ import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { BuiltinFunction, BuiltinStruct, none, TypeTuple, typeValueToType, Value } from "./value";
 import { State } from "./state";
-import { Assert, EmptyArrayPop, InternalError } from "./exceptions";
+import { AssertError, EmptyArrayPopError, InternalError } from "./exceptions";
 import { Interpreter } from "./interp";
 import { TOptional, TRest, TUnion, TVar } from "./polymorphic";
 import {
@@ -38,7 +38,7 @@ export const assertBuiltin = new BuiltinFunction(
         const [flag] = getArgs(1, state);
 
         if (!flag) {
-            throw new Assert(interp.curNode, interp.trace, ``);
+            throw new AssertError(interp.curNode, interp.trace);
         }
 
         return [];
@@ -141,7 +141,7 @@ export const popBuiltin = new BuiltinFunction(
             }
 
             if (curSize === 0n) {
-                interp.runtimeError(EmptyArrayPop, `pop() from empty array`);
+                interp.runtimeError(EmptyArrayPopError, `pop() from empty array`);
             }
 
             state.account.storage = sizeView.encode(curSize - 1n, state.account.storage);
@@ -154,7 +154,7 @@ export const popBuiltin = new BuiltinFunction(
             }
 
             if (bytes.length === 0) {
-                interp.runtimeError(EmptyArrayPop, `pop() from empty array`);
+                interp.runtimeError(EmptyArrayPopError, `pop() from empty array`);
             }
 
             state.account.storage = arr.encode(bytes.slice(0, -1), state.account.storage);

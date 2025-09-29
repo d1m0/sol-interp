@@ -3,7 +3,7 @@ import { Chain } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
 import { loadSamples, SampleInfo, SampleMap } from "./utils";
-import { Assert } from "../../src/interp/exceptions";
+import { AssertError } from "../../src/interp/exceptions";
 import { bytesToHex, concatBytes, createAddressFromString, hexToBytes } from "@ethereumjs/util";
 import { ArtifactManager } from "../../src/interp/artifactManager";
 import {
@@ -12,7 +12,7 @@ import {
     toABIEncodedType
 } from "../../src/interp/abi";
 
-type ExceptionConstructors = typeof Assert;
+type ExceptionConstructors = typeof AssertError;
 const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstructors]> = [
     ["initial.sol", "Foo", "sqr", [2n], [4n]],
     ["calls.sol", "Calls", "fib", [4n], [3n]],

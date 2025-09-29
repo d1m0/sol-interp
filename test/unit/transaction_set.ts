@@ -1,11 +1,28 @@
-import { Address, bytesToHex, concatBytes, createAddressFromString, hexToBytes } from "@ethereumjs/util";
-import { BaseRuntimeType, Value as BaseValue, ContractInfo, Struct, ZERO_ADDRESS, astToRuntimeType } from "sol-dbg";
+import {
+    Address,
+    bytesToHex,
+    concatBytes,
+    createAddressFromString,
+    hexToBytes
+} from "@ethereumjs/util";
+import {
+    BaseRuntimeType,
+    Value as BaseValue,
+    ContractInfo,
+    Struct,
+    ZERO_ADDRESS,
+    astToRuntimeType
+} from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
 import { CallResult, SolMessage } from "../../src/interp/state";
 import { ArtifactManager } from "../../src/interp/artifactManager";
-import { abiTypeToCanonicalName, abiValueToBaseValue, toABIEncodedType } from "../../src/interp/abi";
-import { Chain } from "../../src";
+import {
+    abiTypeToCanonicalName,
+    abiValueToBaseValue,
+    toABIEncodedType
+} from "../../src/interp/abi";
+import { Chain, Trace } from "../../src";
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
 
 const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
@@ -25,14 +42,14 @@ interface ResultRevert {
     data?: Uint8Array;
 }
 
-type Results = ResultCallSuccess | ResultRevert | ResultCreateSuccess
+type Results = ResultCallSuccess | ResultRevert | ResultCreateSuccess;
 
 export interface TransactionDesc {
-    type: "call" | "deploy",
-    contract: string,
-    method: string,
-    args: BaseValue[],
-    result: Results,
+    type: "call" | "deploy";
+    contract: string;
+    method: string;
+    args: BaseValue[];
+    result: Results;
     value?: bigint;
 }
 
@@ -42,11 +59,11 @@ function pp(v: BaseValue): string {
     }
 
     if (v instanceof Array) {
-        return '[' + v.map(pp).join(", ") + ']';
+        return "[" + v.map(pp).join(", ") + "]";
     }
 
     if (v instanceof Struct) {
-        return `{${v.entries.map(([name, val]) => `${name}: ${pp(val)}`)}}`
+        return `{${v.entries.map(([name, val]) => `${name}: ${pp(val)}`)}}`;
     }
 
     return sol.pp(v as unknown as any);
@@ -54,14 +71,21 @@ function pp(v: BaseValue): string {
 
 export class TransactionSet {
     contractMap = new Map<string, Address>();
-    chain: Chain
+    chain: Chain;
 
-    constructor(public readonly _artifactManager: ArtifactManager, private readonly steps: TransactionDesc[]) {
+    constructor(
+        public readonly _artifactManager: ArtifactManager,
+        private readonly steps: TransactionDesc[]
+    ) {
         this.chain = new Chain(this._artifactManager);
         this.chain.makeEOA(SENDER, 1000000n);
     }
 
-    encodeArgs(args: BaseValue[], target: sol.FunctionDefinition | sol.VariableDeclaration, infer: sol.InferType): Uint8Array {
+    encodeArgs(
+        args: BaseValue[],
+        target: sol.FunctionDefinition | sol.VariableDeclaration,
+        infer: sol.InferType
+    ): Uint8Array {
         let argTs: string[];
 
         if (target instanceof sol.FunctionDefinition) {
@@ -74,21 +98,26 @@ export class TransactionSet {
                 )
             );
         } else {
-            argTs = infer.getterArgsAndReturn(target)[0].map((argT) =>
-                sol.abiTypeToCanonicalName(infer.toABIEncodedType(argT, sol.ABIEncoderVersion.V2))
-            )
+            argTs = infer
+                .getterArgsAndReturn(target)[0]
+                .map((argT) =>
+                    sol.abiTypeToCanonicalName(
+                        infer.toABIEncodedType(argT, sol.ABIEncoderVersion.V2)
+                    )
+                );
         }
 
-        return hexToBytes(ethABI.encodeParameters(argTs, args) as `0x${string}`)
+        return hexToBytes(ethABI.encodeParameters(argTs, args) as `0x${string}`);
     }
 
-    encodeCallArgs(args: BaseValue[], fun: sol.FunctionDefinition | sol.VariableDeclaration, infer: sol.InferType): Uint8Array {
+    encodeCallArgs(
+        args: BaseValue[],
+        fun: sol.FunctionDefinition | sol.VariableDeclaration,
+        infer: sol.InferType
+    ): Uint8Array {
         const argBytes = this.encodeArgs(args, fun, infer);
 
-        return concatBytes(
-            hexToBytes(`0x${infer.signatureHash(fun)}`),
-            argBytes
-        );
+        return concatBytes(hexToBytes(`0x${infer.signatureHash(fun)}`), argBytes);
     }
 
     encodeCreateArgs(args: BaseValue[], contract: ContractInfo, infer: sol.InferType): Uint8Array {
@@ -99,16 +128,17 @@ export class TransactionSet {
             sol.assert(constructor !== undefined, `No constructor on ${contract.contractName}`);
             argBytes = this.encodeArgs(args, constructor, infer);
         } else {
-            argBytes = new Uint8Array(0)
+            argBytes = new Uint8Array(0);
         }
 
-        return concatBytes(
-            contract.bytecode.bytecode,
-            argBytes
-        );
+        return concatBytes(contract.bytecode.bytecode, argBytes);
     }
 
-    decodeReturns(data: Uint8Array, fun: sol.FunctionDefinition | sol.VariableDeclaration, infer: sol.InferType): BaseValue[] {
+    decodeReturns(
+        data: Uint8Array,
+        fun: sol.FunctionDefinition | sol.VariableDeclaration,
+        infer: sol.InferType
+    ): BaseValue[] {
         let abiRetTs: BaseRuntimeType[];
         let retTs: BaseRuntimeType[];
 
@@ -118,8 +148,8 @@ export class TransactionSet {
             );
             abiRetTs = retTs.map(toABIEncodedType);
         } else {
-            retTs = getGetterArgAndReturnTs(fun, infer)[1]
-            abiRetTs = retTs.map(toABIEncodedType)
+            retTs = getGetterArgAndReturnTs(fun, infer)[1];
+            abiRetTs = retTs.map(toABIEncodedType);
         }
 
         const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT, false));
@@ -127,12 +157,10 @@ export class TransactionSet {
 
         const decodedReturns: BaseValue[] = [];
         for (let i = 0; i < abiRes.__length__; i++) {
-            decodedReturns.push(
-                abiValueToBaseValue(abiRes[i] as any as BaseValue, abiRetTs[i])
-            );
+            decodedReturns.push(abiValueToBaseValue(abiRes[i] as any as BaseValue, abiRetTs[i]));
         }
 
-        return decodedReturns
+        return decodedReturns;
     }
 
     /**
@@ -144,25 +172,32 @@ export class TransactionSet {
         return res[0];
     }
 
-    getEntypoint(step: TransactionDesc): [ContractInfo, sol.FunctionDefinition | sol.VariableDeclaration | undefined] {
-        let info: ContractInfo = this.getContract(step.contract);
-        sol.assert(info.ast !== undefined, ``)
+    getEntypoint(
+        step: TransactionDesc
+    ): [ContractInfo, sol.FunctionDefinition | sol.VariableDeclaration | undefined] {
+        const info: ContractInfo = this.getContract(step.contract);
+        sol.assert(info.ast !== undefined, ``);
 
-        for (const base of info.ast?.vLinearizedBaseContracts) {
+        for (const base of info.ast.vLinearizedBaseContracts) {
             if (step.type === "call") {
-                let entrypoints: (sol.FunctionDefinition | sol.VariableDeclaration)[] = base.vFunctions.filter((fun) => fun.name === step.method)
+                let entrypoints: Array<sol.FunctionDefinition | sol.VariableDeclaration> =
+                    base.vFunctions.filter((fun) => fun.name === step.method);
                 if (entrypoints.length === 1) {
                     return [info, entrypoints[0]];
                 }
 
-                entrypoints = base.vStateVariables.filter((v) => v.name === step.method && v.visibility === sol.StateVariableVisibility.Public);
+                entrypoints = base.vStateVariables.filter(
+                    (v) =>
+                        v.name === step.method &&
+                        v.visibility === sol.StateVariableVisibility.Public
+                );
 
                 if (entrypoints.length === 1) {
                     return [info, entrypoints[0]];
                 }
             } else {
                 if (base.vConstructor) {
-                    return [info, base.vConstructor]
+                    return [info, base.vConstructor];
                 }
             }
         }
@@ -177,8 +212,8 @@ export class TransactionSet {
     messageFromStep(step: TransactionDesc): SolMessage {
         let to: Address | undefined;
 
-        let [info, entrypoint] = this.getEntypoint(step);
-        const infer = this._artifactManager.infer(info.artifact.compilerVersion)
+        const [info, entrypoint] = this.getEntypoint(step);
+        const infer = this._artifactManager.infer(info.artifact.compilerVersion);
 
         if (step.type === "deploy") {
             to = ZERO_ADDRESS;
@@ -190,9 +225,13 @@ export class TransactionSet {
         let data: Uint8Array;
 
         if (step.type === "call") {
-            data = this.encodeCallArgs(step.args, entrypoint as sol.FunctionDefinition | sol.VariableDeclaration, infer)
+            data = this.encodeCallArgs(
+                step.args,
+                entrypoint as sol.FunctionDefinition | sol.VariableDeclaration,
+                infer
+            );
         } else {
-            data = this.encodeCreateArgs(step.args, info, infer)
+            data = this.encodeCreateArgs(step.args, info, infer);
         }
 
         return {
@@ -202,18 +241,18 @@ export class TransactionSet {
             gas: 0n,
             value: step.value === undefined ? 0n : step.value,
             salt: undefined
-        }
+        };
     }
 
     ppStep(step: TransactionDesc): string {
-        return `${step.type} ${step.contract}.${step.method}(${step.args.map(pp).join(", ")})`
+        return `${step.type} ${step.contract}.${step.method}(${step.args.map(pp).join(", ")})`;
     }
 
     run(): boolean {
         for (const step of this.steps) {
             const msg = this.messageFromStep(step);
             const [info, entrypoint] = this.getEntypoint(step);
-            const infer = this._artifactManager.infer(info.artifact.compilerVersion)
+            const infer = this._artifactManager.infer(info.artifact.compilerVersion);
             let res: CallResult;
 
             if (step.type === "call") {
@@ -229,38 +268,50 @@ export class TransactionSet {
 
             if (step.result.tag === "call_success") {
                 if (res.reverted) {
-                    console.error(`${this.ppStep(step)}: Unexpected revert`)
+                    console.error(`${this.ppStep(step)}: Unexpected revert`);
                     return false;
                 }
 
                 const expectedReturnsStr = pp(step.result.returns);
-                const actualReturns = this.decodeReturns(res.data, entrypoint as sol.FunctionDefinition | sol.VariableDeclaration, infer);
+                const actualReturns = this.decodeReturns(
+                    res.data,
+                    entrypoint as sol.FunctionDefinition | sol.VariableDeclaration,
+                    infer
+                );
                 const actualReturnsStr = pp(actualReturns);
 
                 if (expectedReturnsStr !== actualReturnsStr) {
-                    console.error(`${this.ppStep(step)}: Mismatch in returns - expected \n${expectedReturnsStr}\nReceived:\n${actualReturnsStr}`)
+                    console.error(
+                        `${this.ppStep(step)}: Mismatch in returns - expected \n${expectedReturnsStr}\nReceived:\n${actualReturnsStr}`
+                    );
                     return false;
                 }
                 return true;
             } else if (step.result.tag === "create_success") {
                 if (res.reverted) {
-                    console.error(`${this.ppStep(step)}: Unexpected revert`)
+                    console.error(`${this.ppStep(step)}: Unexpected revert`);
                     return false;
                 }
 
                 sol.assert(res.newContract !== undefined, ``);
                 if (step.result.newAddress && !step.result.newAddress.equals(res.newContract)) {
-                    console.error(`${this.ppStep(step)}: Expected new address at ${step.result.newAddress.toString()} instead got it at ${res.newContract.toString()}`)
+                    console.error(
+                        `${this.ppStep(step)}: Expected new address at ${step.result.newAddress.toString()} instead got it at ${res.newContract.toString()}`
+                    );
                     return false;
                 }
             } else {
                 if (!res.reverted) {
-                    console.error(`${this.ppStep(step)}: Unexpected success`)
+                    console.error(`${this.ppStep(step)}: Unexpected success`);
                     return false;
                 }
             }
         }
 
         return true;
+    }
+
+    getTrace(): Trace {
+        return this.chain.fullTrace;
     }
 }

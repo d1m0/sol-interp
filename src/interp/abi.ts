@@ -91,7 +91,7 @@ function valueToAbiValue(v: Value | BaseValue, s: State, isLib: boolean): any {
     }
 
     if (v instanceof Array) {
-        return v.map((x) => valueToAbiValue(x, s, isLib)).filter(v => v !== _NONE_);
+        return v.map((x) => valueToAbiValue(x, s, isLib)).filter((v) => v !== _NONE_);
     }
 
     if (v instanceof View) {
@@ -106,11 +106,9 @@ function valueToAbiValue(v: Value | BaseValue, s: State, isLib: boolean): any {
     }
 
     if (v instanceof Struct) {
-        return v.entries.map(([, entry]) => valueToAbiValue(
-            entry,
-            s,
-            isLib
-        )).filter(v => v !== _NONE_);
+        return v.entries
+            .map(([, entry]) => valueToAbiValue(entry, s, isLib))
+            .filter((v) => v !== _NONE_);
     }
 
     if (v instanceof Map) {
@@ -202,7 +200,6 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         return createAddressFromString(v);
     }
 
-
     if (type instanceof rtt.PointerType && type.toType instanceof rtt.StringType) {
         return v;
     }
@@ -211,7 +208,7 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         const elT = type.toType.elementT;
         const res: BaseValue[] = [];
 
-        let len = v.length !== undefined ? v.length : v.__length__;
+        const len = v.length !== undefined ? v.length : v.__length__;
 
         for (let i = 0; i < len; i++) {
             res.push(abiValueToBaseValue(v[i], elT));
