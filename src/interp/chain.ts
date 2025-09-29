@@ -3,9 +3,7 @@ import { CallResult, makeStateForAccount, SolMessage, WorldInterface } from "./s
 import { Interpreter } from "./interp";
 import { ArtifactManager } from "./artifactManager";
 import { Address, createContractAddress } from "@ethereumjs/util";
-import { ExceptionStep, ExtCallStep, Trace } from "./step";
-import { InsufficientBalance } from "./exceptions";
-import { ContractDefinition } from "solc-typed-ast";
+import { InterpVisitor } from "./visitors";
 
 export interface AccountInfo {
     address: Address;
@@ -20,11 +18,15 @@ export interface AccountInfo {
  */
 export class Chain implements WorldInterface {
     state: ImmMap<string, AccountInfo>;
-    public fullTrace: Trace;
+    visitors: InterpVisitor[];
 
     constructor(public readonly artifactManager: ArtifactManager) {
         this.state = ImmMap.fromEntries([]);
-        this.fullTrace = [];
+        this.visitors = [];
+    }
+
+    addVisitor(v: InterpVisitor): void {
+        this.visitors.push(v);
     }
 
     create(msg: SolMessage): CallResult {
@@ -115,7 +117,9 @@ export class Chain implements WorldInterface {
         const fromAccount = this.getAccount(msg.from);
         this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);
 
-        this.fullTrace.push(new ExtCallStep(msg));
+        // Increment sender nonce
+        fromAccount.nonce++;
+        this.setAccount(msg.from, fromAccount);
 
         fromAccount.balance -= msg.value;
         // @todo what about overflow here?
@@ -124,23 +128,16 @@ export class Chain implements WorldInterface {
         const contract = toAccount.contract;
         this.expect(contract !== undefined, `Not an EoA`);
 
-        if (msg.value > fromAccount.balance) {
-            const err = new InsufficientBalance(toAccount.contract?.ast as ContractDefinition, []);
-            this.fullTrace.push(new ExceptionStep(err));
-
-            return {
-                reverted: true,
-                data: err.payload
-            };
-        }
-
-        const interp = new Interpreter(this, this.artifactManager, contract.artifact);
+        const interp = new Interpreter(
+            this,
+            this.artifactManager,
+            contract.artifact,
+            this.visitors
+        );
 
         const interpState = makeStateForAccount(this.artifactManager, toAccount);
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);
-
-        this.fullTrace.push(...interp.trace);
 
         if (res instanceof Uint8Array) {
             const callRes: CallResult = {

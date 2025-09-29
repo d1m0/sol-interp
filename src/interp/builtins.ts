@@ -38,7 +38,7 @@ export const assertBuiltin = new BuiltinFunction(
         const [flag] = getArgs(1, state);
 
         if (!flag) {
-            throw new AssertError(interp.curNode, interp.trace);
+            interp.runtimeError(AssertError, state);
         }
 
         return [];
@@ -141,7 +141,7 @@ export const popBuiltin = new BuiltinFunction(
             }
 
             if (curSize === 0n) {
-                interp.runtimeError(EmptyArrayPopError, `pop() from empty array`);
+                interp.runtimeError(EmptyArrayPopError, state);
             }
 
             state.account.storage = sizeView.encode(curSize - 1n, state.account.storage);
@@ -154,7 +154,7 @@ export const popBuiltin = new BuiltinFunction(
             }
 
             if (bytes.length === 0) {
-                interp.runtimeError(EmptyArrayPopError, `pop() from empty array`);
+                interp.runtimeError(EmptyArrayPopError, state);
             }
 
             state.account.storage = arr.encode(bytes.slice(0, -1), state.account.storage);
@@ -232,3 +232,8 @@ export const abi = new BuiltinStruct(
         ["decode", [[abiDecodeBuitin, ">=0.4.22"]]]
     ]
 );
+
+export const implicitFirstArgBuiltins = new Map<string, BuiltinFunction>([
+    ["push", pushBuiltin],
+    ["pop", popBuiltin]
+]);

@@ -37,7 +37,6 @@ import {
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { WorldInterface, State, SolMessage } from "./state";
-import { EvalStep, ExecStep, Trace } from "./step";
 import {
     InternalError,
     InterpError,
@@ -104,10 +103,18 @@ import {
     PointerLocalView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
-import { abi, abiEncodeBuiltin, assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
+import {
+    abi,
+    abiEncodeBuiltin,
+    assertBuiltin,
+    implicitFirstArgBuiltins,
+    popBuiltin,
+    pushBuiltin
+} from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 import { decode, encode, skipFieldDueToMap } from "./abi";
 import { BaseInterpType } from "./types";
+import { InterpVisitor } from "./visitors";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -136,7 +143,6 @@ const scratchWord = new Uint8Array(32);
  */
 export class Interpreter {
     nodes: Array<sol.ASTNode | BuiltinFunction>;
-    _trace: Trace;
 
     get compilerVersion(): string {
         return this.artifact.compilerVersion;
@@ -147,20 +153,16 @@ export class Interpreter {
     constructor(
         protected readonly world: WorldInterface,
         public readonly artifactManager: ArtifactManager,
-        public readonly artifact: ArtifactInfo
+        public readonly artifact: ArtifactInfo,
+        private readonly visitors: InterpVisitor[]
     ) {
         this.nodes = [];
-        this._trace = [];
         this._infer = new sol.InferType(this.compilerVersion);
     }
 
     get curNode(): sol.ASTNode | BuiltinFunction {
         sol.assert(this.nodes.length > 0, `No cur node`);
         return this.nodes[this.nodes.length - 1];
-    }
-
-    get trace(): Trace {
-        return this._trace;
     }
 
     /**
@@ -171,14 +173,22 @@ export class Interpreter {
         msg: string,
         ctx: sol.ASTNode | BuiltinFunction = this.curNode
     ): never {
-        throw new errorConstr(ctx, this._trace, msg);
+        throw new errorConstr(ctx, msg);
     }
 
     /**
      * A runtime error. This indicates an actual EVM exception at runtime
      */
-    runtimeError(errorConstr: new (...args: any[]) => RuntimeError, ...args: any[]): never {
-        throw new errorConstr(this.curNode, this._trace, ...args);
+    runtimeError(
+        errorConstr: new (...args: any[]) => RuntimeError,
+        state: State,
+        ...args: any[]
+    ): never {
+        const err = new errorConstr(this.curNode, ...args);
+        for (const v of this.visitors) {
+            v.exception(this, state, err);
+        }
+        throw err;
     }
 
     astToRuntimeType(t: sol.TypeNode, loc?: sol.DataLocation): BaseInterpType {
@@ -220,6 +230,10 @@ export class Interpreter {
      */
     public create(msg: SolMessage, state: State): Uint8Array | RuntimeError {
         state.msg = msg;
+
+        for (const v of this.visitors) {
+            v.call(this, state, msg);
+        }
 
         const mdc = getContractInfo(state);
         this.expect(mdc.ast !== undefined, `Can't create a contract with no AST`);
@@ -278,6 +292,10 @@ export class Interpreter {
             this.nodes.pop();
         }
 
+        for (const v of this.visitors) {
+            v.return(this, state, mdc.deployedBytecode.bytecode);
+        }
+
         // @todo implement IR path
         // @todo implement immutables
         return mdc.deployedBytecode.bytecode;
@@ -290,6 +308,10 @@ export class Interpreter {
      */
     public call(msg: SolMessage, state: State): Uint8Array | RuntimeError {
         state.msg = msg;
+
+        for (const v of this.visitors) {
+            v.call(this, state, msg);
+        }
 
         const contract = getContractInfo(state);
         // This handles dispatch including fallback and receive functions.
@@ -339,6 +361,8 @@ export class Interpreter {
             sol.assert(false, `Unexpected calldata arg ${ppValue(arg)}`);
         });
 
+        let resBytecode: Uint8Array;
+
         if (entryPoint instanceof sol.FunctionDefinition) {
             let res: Value[];
 
@@ -359,7 +383,7 @@ export class Interpreter {
 
             const isLib = getContract(state).kind === sol.ContractKind.Library;
 
-            return encode(res, resTs, state, isLib);
+            resBytecode = encode(res, resTs, state, isLib);
         } else if (entryPoint instanceof sol.VariableDeclaration) {
             let res: Value[];
 
@@ -375,10 +399,16 @@ export class Interpreter {
 
             // Encode returns
             const resTs = getGetterArgAndReturnTs(entryPoint, this._infer)[1];
-            return encode(res, resTs, state, false);
+            resBytecode = encode(res, resTs, state, false);
         } else {
             nyi(`public getter`);
         }
+
+        for (const v of this.visitors) {
+            v.return(this, state, resBytecode);
+        }
+
+        return resBytecode;
     }
 
     private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
@@ -650,7 +680,10 @@ export class Interpreter {
             nyi(`Stmt ${stmt.constructor.name}`);
         }
 
-        this._trace.push(new ExecStep(stmt));
+        for (const v of this.visitors) {
+            v.exec(this, state, stmt);
+        }
+
         this.nodes.pop();
 
         return res;
@@ -981,7 +1014,10 @@ export class Interpreter {
         }
 
         // console.error(`eval(${printNode(expr)})->${ppValue(res)}`)
-        this._trace.push(new EvalStep(expr, res));
+        for (const v of this.visitors) {
+            v.eval(this, state, expr, res);
+        }
+
         this.nodes.pop();
 
         return res;
@@ -1115,7 +1151,7 @@ export class Interpreter {
             }
 
             if (idxView instanceof DecodingFailure) {
-                this.runtimeError(OOBError);
+                this.runtimeError(OOBError, state);
             }
 
             res = idxView;
@@ -1145,7 +1181,10 @@ export class Interpreter {
             nyi(`evalLV(${expr.print()})`);
         }
 
-        this._trace.push(new EvalStep(expr, res));
+        for (const v of this.visitors) {
+            v.eval(this, state, expr, res);
+        }
+
         this.nodes.pop();
 
         return res;
@@ -1258,7 +1297,15 @@ export class Interpreter {
             const lType = this.typeOf(expr.vLeftHandSide);
             // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
 
-            rvalue = this.computeBinary(lVal, op, rvalue, lType, undefined, this.isUnchecked(expr));
+            rvalue = this.computeBinary(
+                lVal,
+                op,
+                rvalue,
+                lType,
+                undefined,
+                this.isUnchecked(expr),
+                state
+            );
             this.assign(lv, rvalue, state);
         } else {
             this.assign(lv, rvalue, state);
@@ -1268,12 +1315,17 @@ export class Interpreter {
         return rvalue;
     }
 
-    private clamp(val: bigint, type: rtt.BaseRuntimeType, unchecked: boolean): bigint {
+    private clamp(
+        val: bigint,
+        type: rtt.BaseRuntimeType,
+        unchecked: boolean,
+        state: State
+    ): bigint {
         const clampedVal = type instanceof rtt.IntType ? clampIntToType(val, type) : val;
         const overflow = clampedVal !== val;
 
         if (overflow && !unchecked) {
-            this.runtimeError(OverflowError);
+            this.runtimeError(OverflowError, state);
         }
 
         return clampedVal;
@@ -1303,7 +1355,8 @@ export class Interpreter {
         right: Value,
         type: BaseInterpType,
         userFunction: sol.FunctionDefinition | undefined,
-        unchecked: boolean
+        unchecked: boolean,
+        state: State
     ): NonPoisonValue {
         // @todo - need to detect
         if (userFunction) {
@@ -1406,7 +1459,7 @@ export class Interpreter {
                 nyi(`Unknown arithmetic operator ${operator}`);
             }
 
-            return this.clamp(res, type, unchecked);
+            return this.clamp(res, type, unchecked, state);
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
@@ -1461,7 +1514,8 @@ export class Interpreter {
             rVal,
             this.typeOf(expr),
             expr.vUserFunction,
-            this.isUnchecked(expr)
+            this.isUnchecked(expr),
+            state
         );
     }
 
@@ -1711,8 +1765,27 @@ export class Interpreter {
         return structView;
     }
 
-    evalBuiltinCall(expr: sol.FunctionCall, state: State): Value {
-        const callee = this.evalNP(expr.vExpression, state);
+    evalBuiltinCall(
+        expr: sol.FunctionCall,
+        calleeE: sol.Expression,
+        gas: bigint | undefined,
+        value: bigint | undefined,
+        salt: Uint8Array | undefined,
+        state: State
+    ): Value {
+        let callee: Value;
+        let implFirstArg: Value | undefined = undefined;
+
+        if (
+            calleeE instanceof sol.MemberAccess &&
+            implicitFirstArgBuiltins.has(calleeE.memberName)
+        ) {
+            implFirstArg = this.evalNP(calleeE.vExpression, state);
+            callee = implicitFirstArgBuiltins.get(calleeE.memberName) as BuiltinFunction;
+        } else {
+            callee = this.evalNP(calleeE, state);
+        }
+
         this.expect(callee instanceof BuiltinFunction);
 
         let args: Value[];
@@ -1737,20 +1810,13 @@ export class Interpreter {
             argTs = expr.vArguments.map((argExpr) => this.typeOf(argExpr));
         }
 
-        if (callee.implicitFirstArg) {
-            this.expect(
-                expr.vExpression instanceof sol.MemberAccess,
-                `Expected member access in builtin callee ${printNode(expr)}`
-            );
+        if (implFirstArg !== undefined) {
+            args.unshift(implFirstArg);
+            argTs.unshift(this.typeOf((calleeE as sol.MemberAccess).vExpression));
+        }
 
-            const savedTrace = this._trace;
-            // Small hack - we don't want to add to the trace the re-evaluation of the base
-            this._trace = [];
-            const firstArg = this.eval(expr.vExpression.vExpression, state);
-            this._trace = savedTrace;
-
-            args.unshift(firstArg);
-            argTs.unshift(this.typeOf(expr.vExpression.vExpression));
+        if (["call", "delegatecall", "staticcall", "callcode"].includes(callee.name)) {
+            nyi(`Passing implicit args value, gas, salt to callcode family ${[value, gas, salt]}`);
         }
 
         const results = this._execCall(callee, args, argTs, state);
@@ -1879,7 +1945,7 @@ export class Interpreter {
         const res = this.world.call(msg);
 
         if (res.reverted) {
-            throw new RuntimeError(expr, this.trace, `External call failed`, res.data);
+            this.runtimeError(RuntimeError, state, `External call failed`, res.data);
         }
 
         // Refresh our account from the world in case our state has changed
@@ -2095,7 +2161,7 @@ export class Interpreter {
             });
 
             if (res.reverted) {
-                this.runtimeError(ErrorError, res.data);
+                this.runtimeError(ErrorError, state, res.data);
             }
 
             this.expect(res.newContract !== undefined);
@@ -2168,7 +2234,7 @@ export class Interpreter {
                 return this.evalNewCall(expr, callee, gas, value, salt, state);
             }
 
-            return this.evalBuiltinCall(expr, state);
+            return this.evalBuiltinCall(expr, callee, gas, value, salt, state);
         }
 
         if (this._infer.isFunctionCallExternal(expr)) {
@@ -2236,7 +2302,7 @@ export class Interpreter {
             }
 
             if (res instanceof Poison) {
-                this.runtimeError(OOBError);
+                this.runtimeError(OOBError, state);
             }
 
             res = this.lvToValue(res, state);
@@ -2248,7 +2314,7 @@ export class Interpreter {
             );
 
             if (indexVal < 0n || indexVal >= baseT.numBytes) {
-                this.runtimeError(OOBError);
+                this.runtimeError(OOBError, state);
             }
 
             res = BigInt(baseVal[Number(indexVal)]);
@@ -2264,7 +2330,7 @@ export class Interpreter {
         }
 
         if (res instanceof DecodingFailure) {
-            this.runtimeError(OOBError);
+            this.runtimeError(OOBError, state);
         }
 
         // @todo add test for order of operations
@@ -2502,7 +2568,8 @@ export class Interpreter {
             const newVal = this.clamp(
                 expr.operator === "++" ? subVal + 1n : subVal - 1n,
                 t,
-                unchecked
+                unchecked,
+                state
             );
             this.assign(subExprLoc, newVal, state);
             res = expr.prefix ? newVal : subVal;
@@ -2521,7 +2588,7 @@ export class Interpreter {
             nyi(`Unary operator ${expr.operator}`);
         }
 
-        return this.clamp(res, t, unchecked);
+        return this.clamp(res, t, unchecked, state);
     }
 
     makeBuiltinScope(state: State): BuiltinsScope {

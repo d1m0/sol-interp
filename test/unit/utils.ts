@@ -13,7 +13,7 @@ import { makeStateWithConstants, State } from "../../src/interp/state";
 import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
 import { gt } from "semver";
-import { ArtifactManager } from "../../src/interp/artifactManager";
+import { addSources, ArtifactManager } from "../../src/interp/artifactManager";
 import { Interpreter } from "../../src";
 
 export function makeState(
@@ -114,10 +114,10 @@ export async function loadSamples(
             `${basePath}/${fileName}`,
             version,
             undefined,
-            undefined,
+            [sol.CompilationOutput.ALL],
             gt(version, "0.8.0") ? { viaIR: true } : undefined
         );
-        compileResults.push([compileResult.data, version]);
+        compileResults.push([addSources(compileResult.data, compileResult.files), version]);
     }
 
     const artifactManager = new ArtifactManager(compileResults);

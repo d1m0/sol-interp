@@ -160,7 +160,7 @@ export function gatherConstants(
 
     const [constNodes, depGraph] = buildConstantDepGraph(artifact.units);
     const sortedNodes = topoSort(constNodes, depGraph);
-    const interp = new Interpreter(worldFailMock, artifactManager, artifact);
+    const interp = new Interpreter(worldFailMock, artifactManager, artifact, []);
 
     // Pre-init constantMap with NoneViews to appease Scope constructors
     for (const nd of sortedNodes) {

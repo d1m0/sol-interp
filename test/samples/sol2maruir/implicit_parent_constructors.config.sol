@@ -116,13 +116,17 @@ contract Child10 is Base4(1) {}
 
 contract __IRTest__ {
     function main() public {
+        /*
         Child1 __this__ = new Child1();
         __testCase276__(__this__);
         Child2 __this2__ = new Child2();
         __testCase295__(__this__, __this2__);
         Child3 __this3__ = new Child3();
         __testCase317__(__this__, __this2__, __this3__);
+        */
         Child4 __this4__ = new Child4();
+        __this4__.main();
+        /*
         __testCase342__(__this__, __this2__, __this3__, __this4__);
         Child5 __this5__ = new Child5();
         __testCase370__(__this__, __this2__, __this3__, __this4__, __this5__);
@@ -135,6 +139,7 @@ contract __IRTest__ {
         Child9 __this9__ = new Child9();
         __testCase512__(__this__, __this2__, __this3__, __this4__, __this5__, __this6__, __this7__, __this8__, __this9__);
         Child10 __this10__ = new Child10();
+        */
     }
 
     function __testCase276__(Child1 __this__) internal {

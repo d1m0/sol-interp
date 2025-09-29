@@ -120,7 +120,8 @@ describe("Simple function call tests", () => {
             const interp: Interpreter = new Interpreter(
                 worldFailMock,
                 artifactManager,
-                artifactManager.getArtifact(info.units[0])
+                artifactManager.getArtifact(info.units[0]),
+                []
             );
 
             for (const unit of info.units) {

@@ -11,6 +11,7 @@ import {
     abiValueToBaseValue,
     toABIEncodedType
 } from "../../src/interp/abi";
+import { TraceVisitor } from "../../src/interp/visitors";
 
 type ExceptionConstructors = typeof AssertError;
 const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstructors]> = [
@@ -71,7 +72,10 @@ describe("Simple function call tests", () => {
 
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
 
+            const traceVis = new TraceVisitor();
             const chain = new Chain(artifactManager);
+
+            chain.addVisitor(traceVis);
             const contractInfo = artifactManager.getContractInfo(fun);
             sol.assert(contractInfo !== undefined, `No info for contract ${contract}`);
 

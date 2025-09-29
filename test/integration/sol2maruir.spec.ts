@@ -32,8 +32,9 @@ describe("Old Sol2Marir test", () => {
             ]);
 
             const res = tset.run();
+
             if (!res) {
-                console.error(`Trace: `, ppTrace(tset.getTrace(), artifactManager));
+                console.error(ppTrace(tset.getTrace(), artifactManager));
             }
             expect(res).toBeTruthy();
         });

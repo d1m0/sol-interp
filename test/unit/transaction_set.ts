@@ -24,6 +24,7 @@ import {
 } from "../../src/interp/abi";
 import { Chain, Trace } from "../../src";
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
+import { TraceVisitor } from "../../src/interp/visitors";
 
 const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
 
@@ -71,13 +72,16 @@ function pp(v: BaseValue): string {
 
 export class TransactionSet {
     contractMap = new Map<string, Address>();
+    traceVisitor: TraceVisitor;
     chain: Chain;
 
     constructor(
         public readonly _artifactManager: ArtifactManager,
         private readonly steps: TransactionDesc[]
     ) {
+        this.traceVisitor = new TraceVisitor();
         this.chain = new Chain(this._artifactManager);
+        this.chain.addVisitor(this.traceVisitor);
         this.chain.makeEOA(SENDER, 1000000n);
     }
 
@@ -312,6 +316,6 @@ export class TransactionSet {
     }
 
     getTrace(): Trace {
-        return this.chain.fullTrace;
+        return this.traceVisitor.getTrace();
     }
 }

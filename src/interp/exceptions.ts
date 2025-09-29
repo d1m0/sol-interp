@@ -1,7 +1,6 @@
 import { concatBytes, hexToBytes } from "@ethereumjs/util";
 import * as sol from "solc-typed-ast";
 import { BaseScope } from "./scope";
-import { Trace } from "./step";
 import { printNode } from "./utils";
 import { BuiltinFunction } from "./value";
 import { makeMemoryView, uint256 } from "sol-dbg";
@@ -12,7 +11,6 @@ type FailLoc = sol.ASTNode | BuiltinFunction;
 export class InterpError extends Error {
     constructor(
         public readonly node: FailLoc,
-        public readonly trace: Trace,
         msg: string
     ) {
         const loc = node instanceof BuiltinFunction ? node.pp() : printNode(node);
@@ -27,20 +25,20 @@ export class InterpError extends Error {
 export class InternalError extends InterpError {}
 
 export class NoScope extends InternalError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, `Trying to look-up identifiers with no scope`);
+    constructor(node: FailLoc) {
+        super(node, `Trying to look-up identifiers with no scope`);
     }
 }
 
 export class NotDefined extends InternalError {
-    constructor(node: FailLoc, trace: Trace, name: string) {
-        super(node, trace, `Unknown identifier ${name}`);
+    constructor(node: FailLoc, name: string) {
+        super(node, `Unknown identifier ${name}`);
     }
 }
 
 export class AlreadyDefined extends InternalError {
-    constructor(node: FailLoc, trace: Trace, name: string, scope: BaseScope) {
-        super(node, trace, `Identifier ${name} is already defined at scope ${scope.name}`);
+    constructor(node: FailLoc, name: string, scope: BaseScope) {
+        super(node, `Identifier ${name} is already defined at scope ${scope.name}`);
     }
 }
 
@@ -52,11 +50,10 @@ export class AlreadyDefined extends InternalError {
 export class RuntimeError extends InterpError {
     constructor(
         public readonly node: FailLoc,
-        public readonly trace: Trace,
         public readonly msg: string,
         public readonly payload: Uint8Array
     ) {
-        super(node, trace, msg);
+        super(node, msg);
     }
 }
 
@@ -67,66 +64,65 @@ const PANIC_VIEW = makeMemoryView(uint256, 4n);
 export class PanicError extends RuntimeError {
     constructor(
         node: FailLoc,
-        trace: Trace,
         public readonly code: bigint
     ) {
         PANIC_VIEW.encode(code, PANIC_SCRATCH, null as unknown as any);
-        super(node, trace, `Panic(${code})`, new Uint8Array(PANIC_SCRATCH));
+        super(node, `Panic(${code})`, new Uint8Array(PANIC_SCRATCH));
     }
 }
 
 // Panic(uint256) errors
 export class AssertError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x01n);
+    constructor(node: FailLoc) {
+        super(node, 0x01n);
     }
 }
 
 export class OverflowError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x11n);
+    constructor(node: FailLoc) {
+        super(node, 0x11n);
     }
 }
 
 export class DivBy0Error extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x12n);
+    constructor(node: FailLoc) {
+        super(node, 0x12n);
     }
 }
 
 export class EnumCastError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x21n);
+    constructor(node: FailLoc) {
+        super(node, 0x21n);
     }
 }
 
 export class StorageByteArrayEncodingError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x22n);
+    constructor(node: FailLoc) {
+        super(node, 0x22n);
     }
 }
 
 export class EmptyArrayPopError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x31n);
+    constructor(node: FailLoc) {
+        super(node, 0x31n);
     }
 }
 
 export class OOBError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x32n);
+    constructor(node: FailLoc) {
+        super(node, 0x32n);
     }
 }
 
 export class TooMuchMemError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x41n);
+    constructor(node: FailLoc) {
+        super(node, 0x41n);
     }
 }
 
 export class UninitializedFunPtrError extends PanicError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, 0x51n);
+    constructor(node: FailLoc) {
+        super(node, 0x51n);
     }
 }
 
@@ -137,13 +133,12 @@ const ERROR_SELECTOR = "0x08c379a0";
 export class ErrorError extends RuntimeError {
     constructor(
         node: FailLoc,
-        trace: Trace,
         public readonly msg: string
     ) {
         const payload = hexToBytes(
             ethABI.encodeParameters(["bytes4", "string"], [ERROR_SELECTOR, msg]) as `0x${string}`
         );
-        super(node, trace, `Error(${msg})`, payload);
+        super(node, `Error(${msg})`, payload);
     }
 }
 
@@ -151,13 +146,13 @@ export class ErrorError extends RuntimeError {
  * An error with no payload. (e.g. require(bool), revert())
  */
 export class NoPayloadError extends RuntimeError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, ``, new Uint8Array());
+    constructor(node: FailLoc) {
+        super(node, ``, new Uint8Array());
     }
 }
 
 export class InsufficientBalance extends NoPayloadError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace);
+    constructor(node: FailLoc) {
+        super(node);
     }
 }
