@@ -177,6 +177,8 @@ export function gatherConstants(
             sol.DataLocation.Memory
         );
 
+        state.account.contract = artifactManager.getContractInfo(nd);
+
         const scope = interp.makeStaticScope(nd, state);
         sol.assert(scope instanceof GlobalScope || scope instanceof ContractScope, ``);
         state.scope = scope;

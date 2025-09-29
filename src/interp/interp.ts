@@ -2616,8 +2616,21 @@ export class Interpreter {
         }
 
         while (nd !== undefined) {
-            if (nd instanceof sol.SourceUnit || nd instanceof sol.ContractDefinition) {
+            if (nd instanceof sol.SourceUnit) {
                 scopeNodes.push(nd);
+            }
+
+            if (nd instanceof sol.ContractDefinition) {
+                if (nd.kind === sol.ContractKind.Library) {
+                    // Library internal functions execute in the scope of the library
+                    scopeNodes.push(nd);
+                } else {
+                    // Normal methods execute in the scope of the *most derived contract*, not their defining contract.
+                    // The reason here is to get the correct layout locations for base contract state variables in the MDC's layout
+                    scopeNodes.push(
+                        (state.account.contract as rtt.ContractInfo).ast as sol.ContractDefinition
+                    );
+                }
             }
 
             nd = nd.parent;
