@@ -12,7 +12,6 @@ import { BaseScope, LocalsScope } from "../../src/interp/scope";
 import { makeStateWithConstants, State } from "../../src/interp/state";
 import { Value as InterpValue } from "../../src/interp/value";
 import { isValueType } from "../../src/interp/utils";
-import { gt } from "semver";
 import { addSources, ArtifactManager } from "../../src/interp/artifactManager";
 import { Interpreter } from "../../src";
 
@@ -100,29 +99,46 @@ export interface SampleInfo {
 export type SampleMap = Map<string, SampleInfo>;
 
 export async function loadSamples(
-    names: string[],
+    samples: Array<string | [string, any]>,
     basePath = `test/samples`
 ): Promise<[ArtifactManager, SampleMap]> {
     const res: SampleMap = new Map();
     const compileResults: Array<[PartialSolcOutput, string]> = [];
-    for (const fileName of names) {
+    const names: string[] = [];
+
+    for (const sample of samples) {
+        let fileName;
+        let settings;
+
+        if (sample instanceof Array) {
+            [fileName, settings] = sample;
+        } else {
+            fileName = sample;
+            settings = undefined;
+        }
+
         const file = fse.readFileSync(`${basePath}/${fileName}`, {
             encoding: "utf-8"
         });
         const version = getVersion(file);
+
+        names.push(fileName);
+
         const compileResult = await sol.compileSol(
             `${basePath}/${fileName}`,
             version,
             undefined,
             [sol.CompilationOutput.ALL],
-            gt(version, "0.8.0") ? { viaIR: true } : undefined
+            settings
         );
         compileResults.push([addSources(compileResult.data, compileResult.files), version]);
     }
 
     const artifactManager = new ArtifactManager(compileResults);
+    const artifacts = artifactManager.artifacts();
+
     for (let i = 0; i < names.length; i++) {
-        const artifact = artifactManager.artifacts()[i];
+        const artifact = artifacts[i];
         res.set(names[i], { version: artifact.compilerVersion, units: artifact.units });
     }
 

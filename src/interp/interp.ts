@@ -250,53 +250,78 @@ export class Interpreter {
         // As per:
         // https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
         // Contract initialization proceeds by:
-        //
-        // For old codegen:
-        //
-        // 1. All state variables are zero-initialized at the beginning.
-        // 2. Initialize all state variables in the whole inheritance hierarchy from most base to most derived.
-        for (const base of bases) {
-            for (const v of base.vStateVariables) {
-                this.initializeStateVar(v, state);
-            }
-        }
-
-        // 3. Evaluate base constructor arguments from most derived to most base contract.
-        const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
-
-        if (mdc.ast.vConstructor) {
-            const calldataArgs: Value[] = buildMsgViews(
-                mdc.ast.vConstructor,
-                this._infer,
-                BigInt(mdc.bytecode.bytecode.length)
-            ).map((x) => x[1]);
-
-            const interp = this;
-            const argTs = mdc.ast.vConstructor.vParameters.vParameters.map((decl) =>
-                interp.varDeclToRuntimeType(decl)
-            );
-            baseArgMap.set(mdc.ast.vConstructor, [calldataArgs, argTs]);
-        }
-
-        // 4. Run the constructor, if present, for all contracts in the linearized hierarchy from most base to most derived.
-        for (const base of bases) {
-            if (!base.vConstructor) {
-                continue;
+        if (mdc.artifact.codegen === "old") {
+            // For old codegen:
+            //
+            // 1. All state variables are zero-initialized at the beginning.
+            // 2. Initialize all state variables in the whole inheritance hierarchy from most base to most derived.
+            for (const base of bases) {
+                for (const v of base.vStateVariables) {
+                    this.initializeStateVar(v, state);
+                }
             }
 
-            this.nodes.push(base.vConstructor);
-            const argDesc = baseArgMap.get(base.vConstructor);
-            this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
-            const [args, argTs] = argDesc;
-            this._execCall(base.vConstructor, args, argTs, state);
-            this.nodes.pop();
-        }
+            // 3. Evaluate base constructor arguments from most derived to most base contract.
+            const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
 
+            if (mdc.ast.vConstructor) {
+                const calldataArgs: Value[] = buildMsgViews(
+                    mdc.ast.vConstructor,
+                    this._infer,
+                    BigInt(mdc.bytecode.bytecode.length)
+                ).map((x) => x[1]);
+
+                const interp = this;
+                const argTs = mdc.ast.vConstructor.vParameters.vParameters.map((decl) =>
+                    interp.varDeclToRuntimeType(decl)
+                );
+                baseArgMap.set(mdc.ast.vConstructor, [calldataArgs, argTs]);
+            }
+
+            // 4. Run the constructor, if present, for all contracts in the linearized hierarchy from most base to most derived.
+            for (const base of bases) {
+                if (!base.vConstructor) {
+                    continue;
+                }
+
+                this.nodes.push(base.vConstructor);
+                const argDesc = baseArgMap.get(base.vConstructor);
+                this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
+                const [args, argTs] = argDesc;
+                this._execCall(base.vConstructor, args, argTs, state);
+                this.nodes.pop();
+            }
+        } else {
+            // For IR codegen:
+            //
+            // 1. All state variables are zero-initialized at the beginning.
+            // 2. Evaluate base constructor arguments from most derived to most base contract.
+            const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
+
+            // 3. For every contract in order from most base to most derived in the linearized hierarchy:
+            for (const base of bases) {
+                // 1. Initialize state variables.
+                for (const v of base.vStateVariables) {
+                    this.initializeStateVar(v, state);
+                }
+
+                // 2. Run the constructor (if present).
+                if (!base.vConstructor) {
+                    continue;
+                }
+
+                this.nodes.push(base.vConstructor);
+                const argDesc = baseArgMap.get(base.vConstructor);
+                this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
+                const [args, argTs] = argDesc;
+                this._execCall(base.vConstructor, args, argTs, state);
+                this.nodes.pop();
+            }
+        }
         for (const v of this.visitors) {
             v.return(this, state, mdc.deployedBytecode.bytecode);
         }
 
-        // @todo implement IR path
         // @todo implement immutables
         return mdc.deployedBytecode.bytecode;
     }

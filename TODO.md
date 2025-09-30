@@ -208,6 +208,7 @@
 191    - test state var init calls method function, global function
 192    - implement computation of base arguments from most derived to most base
 193    - implement calling constructors in order
+194    - implement new order of state var init
 
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
@@ -215,7 +216,6 @@ https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-
 
 
 Constructors:
-    - implement new order of state var init
     - implement storage for immutable state vars
     - can I implement computing the corrrect final deployed bytecode??
 
@@ -262,7 +262,6 @@ Constructors:
 
 - maybe move constants cache to Chain from Artifact? Though logically it feels like it fits better there....
 - Interp.makeState duplicates logic in Chain
-- write external call logic
 - add unit test with empty constructors and calling
 - add abi.encodeCall test with failure in type checking
 
@@ -270,29 +269,6 @@ Constructors:
 - migrate builtin tests
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-- Idea: Tying it all toghether at the top-level:
-    - interface PersistentState {
-        artifact: ArtifactInfo;
-        mdc: ContractDefinition;
-        storage: Storage;
-        immutable: Memory;
-        balance: bigint;
-        ...
-      }
-    - World class has an ArtifactManager
-        states: map<Address, PersistentState>
-        makeCallState(msg: SolMessage) -> State
-            - ai = states[msg.to]
-            - construct memory and constant map from artifactManager.gatherConstants(ai)
-            - fill out State - {intCallStack, scope,)
-            
-        makeCreateState(msg: SolMessage) -> State
-            - nyi
-
-    - Implement Interpreter.call
-    - add `msg` builtin struct
-
-    - add a full call test that accesses msg builtin
 
 - Idea: remove reliance on solc-typed-ast's resolve:
     - add remaining named defs to global and struct scopes
@@ -306,10 +282,7 @@ Constructors:
 - make an exhaustive test for coercions from old code
 
 // ---------------
-- getters
-    - test virtual function resolves to public getter
-    - note - getters are only ever called externally :)
-- external calls
+- test virtual function resolves to public getter
 - more coercions
 - cli for playing
 - try/catch etc...
@@ -330,6 +303,7 @@ Eventually:
 
 Writing ideas:
     - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!
+    - care to match low-level behavior: implemeting the differences between IR and old code-gen
 
 Tried and failed:
 - jest debug config
