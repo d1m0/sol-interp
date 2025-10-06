@@ -22,7 +22,7 @@ export class InterpError extends Error {
  * Base class for all exceptions that are internal. I.e. - they are due to an
  * issue with the interpreter, not the interpreted code.
  */
-export class InternalError extends InterpError {}
+export class InternalError extends InterpError { }
 
 export class NoScope extends InternalError {
     constructor(node: FailLoc) {
@@ -57,7 +57,8 @@ export class RuntimeError extends InterpError {
     }
 }
 
-const PANIC_SCRATCH = concatBytes(hexToBytes("0x4e487b71"), new Uint8Array(32));
+export const PANIC_SELECTOR = hexToBytes("0x4e487b71");
+const PANIC_SCRATCH = concatBytes(PANIC_SELECTOR, new Uint8Array(32));
 // Using memory instead of calldata view here since it allows encoding and for uint256 its the same.
 const PANIC_VIEW = makeMemoryView(uint256, 4n);
 
@@ -126,7 +127,7 @@ export class UninitializedFunPtrError extends PanicError {
     }
 }
 
-const ERROR_SELECTOR = "0x08c379a0";
+export const ERROR_SELECTOR = hexToBytes("0x08c379a0");
 /**
  * Error(string) errors.
  */

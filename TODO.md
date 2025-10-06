@@ -209,24 +209,41 @@
 192    - implement computation of base arguments from most derived to most base
 193    - implement calling constructors in order
 194    - implement new order of state var init
+195    - implement try/catch
 
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
 https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
 
-
-Constructors:
+    - implement revert/throw
+    - tests
+        - test state reverting
+        - test balance reverting
+        - test contract nonce reverting
+        - test exception on insufficient balance matches expected bytes
+        - test try new
+        - test exception while decoding Error(string) and Panic(uint256)
+            - without catch {} catch (bytes memory) {}
+            - with only catch{}
+            - with only catch (bytes memory) {}
+            - with both catch {} and catch (bytes memory) {}
+            - break inside clause with mutating statement after break
+            - use type confusion to call a method that succeeds but returns data of the wrong type, causing an exception in the decoding of the success try clause
+            - test with low-level clause before Panic/Error with a Panic/Error exception
+            - test with Panic clause first, then Error with an Error exception
+            - test with Error clause first, then Panic with a Panic exception
+    - implement library calls as delegate calls
+    - implement address.call/address.staticcall
+    - implement address.delegatecall/address.callcode
+    - test builtins
+    - implement emit
     - implement storage for immutable state vars
     - can I implement computing the corrrect final deployed bytecode??
 
+Constructors:
     - add a test with an abstract constructor taking storage pointers
     - add test with difference in initializing order depending on old codegen or new codegen
 
-    - implement try/catch
-    - implement revert/throw
-    - test state reverting
-    - test balance reverting
-    - test contract nonce reverting
 
 - finish evalExternalCall.
     - add balance handling

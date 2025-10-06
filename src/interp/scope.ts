@@ -43,7 +43,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<string, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) {}
+    ) { }
 
     abstract _lookup(name: string): Value | undefined;
     abstract _lookupLocation(name: string): View | undefined;
@@ -95,7 +95,8 @@ export type LocalsScopeNodeType =
     | sol.VariableDeclarationStatement
     | sol.FunctionDefinition
     | sol.ModifierDefinition
-    | BuiltinFunction;
+    | BuiltinFunction
+    | sol.TryCatchClause;
 
 /**
  * Scope corresponding to the current top-level LocalsScope in State.
@@ -187,6 +188,19 @@ export class LocalsScope extends BaseScope {
                     )
                 );
             }
+        } else if (node instanceof sol.TryCatchClause) {
+            if (node.vParameters) {
+                for (const decl of node.vParameters.vParameters) {
+                    res.set(
+                        decl.name,
+                        rtt.astToRuntimeType(
+                            infer.variableDeclarationToTypeNode(decl),
+                            infer,
+                            undefined
+                        )
+                    );
+                }
+            }
         } else {
             for (let i = 0; i < node.type.argTs.length; i++) {
                 res.set(`arg_${i}`, node.type.argTs[i]);
@@ -210,9 +224,11 @@ export class LocalsScope extends BaseScope {
         } else if (node instanceof sol.VariableDeclarationStatement) {
             name = `<locals ${[...defTypesMap.keys()].join(", ")}>`;
         } else if (node instanceof sol.FunctionDefinition) {
-            name = `<args/rets for ${node.print(0)}>`;
+            name = `<args/rets for function ${node.name}>`;
         } else if (node instanceof sol.ModifierDefinition) {
-            name = `<args for ${node.print(0)}>`;
+            name = `<args for modifier ${node.name}>`;
+        } else if (node instanceof sol.TryCatchClause) {
+            name = `<args for try-catch clause#${node.id}>`;
         } else {
             name = `<args for ${node.pp()}>`;
         }
@@ -521,10 +537,10 @@ export class GlobalScope extends BaseScope {
             const type =
                 decl instanceof sol.VariableDeclaration
                     ? rtt.astToRuntimeType(
-                          infer.variableDeclarationToTypeNode(decl),
-                          infer,
-                          sol.DataLocation.Memory
-                      )
+                        infer.variableDeclarationToTypeNode(decl),
+                        infer,
+                        sol.DataLocation.Memory
+                    )
                     : defToType(decl, infer);
             defMap.set(name, type);
         }
