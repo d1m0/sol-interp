@@ -5,7 +5,13 @@ import * as ethABI from "web3-eth-abi";
 import { nyi, View, Value as BaseValue, Struct, PointerMemView, bigIntToNum } from "sol-dbg";
 import { ppValue } from "./pp";
 import { State } from "./state";
-import { Address, concatBytes, createAddressFromString, equalsBytes, hexToBytes } from "@ethereumjs/util";
+import {
+    Address,
+    concatBytes,
+    createAddressFromString,
+    equalsBytes,
+    hexToBytes
+} from "@ethereumjs/util";
 import { bytes24, decodeView, isValueType } from "./utils";
 import { BaseInterpType } from "./types";
 
@@ -285,7 +291,12 @@ function liftABIBaseValue(v: BaseValue, type: rtt.BaseRuntimeType): BaseValue {
  * @param encVersion
  * @returns
  */
-export function decode(data: Uint8Array, ts: BaseInterpType[], state: State, base: bigint = 0n): Value[] {
+export function decode(
+    data: Uint8Array,
+    ts: BaseInterpType[],
+    state: State,
+    base: bigint = 0n
+): Value[] {
     const abiTypes = ts.map((t) => toABIEncodedType(t));
     const views = rtt.makeCalldataViews(abiTypes, base);
 
@@ -334,11 +345,16 @@ export function decode(data: Uint8Array, ts: BaseInterpType[], state: State, bas
  * IF the given data:
  *  - begins with the specified selector
  *  - decodes to the given types `ts` without failures
- * 
+ *
  * Then return the decoded values. Otherwise return undefined.
  */
-export function decodesWithSelector(selector: Uint8Array, data: Uint8Array, ts: BaseInterpType[], state: State): Value[] | undefined {
-    if (!(equalsBytes(data.slice(0, 4), selector))) {
+export function decodesWithSelector(
+    selector: Uint8Array,
+    data: Uint8Array,
+    ts: BaseInterpType[],
+    state: State
+): Value[] | undefined {
+    if (!equalsBytes(data.slice(0, 4), selector)) {
         return undefined;
     }
 

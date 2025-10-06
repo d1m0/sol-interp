@@ -2,7 +2,13 @@ import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { BuiltinFunction, BuiltinStruct, none, TypeTuple, typeValueToType, Value } from "./value";
 import { State } from "./state";
-import { AssertError, EmptyArrayPopError, InternalError } from "./exceptions";
+import {
+    AssertError,
+    EmptyArrayPopError,
+    ErrorError,
+    InternalError,
+    NoPayloadError
+} from "./exceptions";
 import { Interpreter } from "./interp";
 import { TOptional, TRest, TUnion, TVar } from "./polymorphic";
 import {
@@ -15,7 +21,15 @@ import {
     uint256,
     View
 } from "sol-dbg";
-import { bytes1, bytesT, decodeView, getContract, makeZeroValue, memBytesT } from "./utils";
+import {
+    bytes1,
+    bytesT,
+    decodeView,
+    getContract,
+    makeZeroValue,
+    memBytesT,
+    memStringT
+} from "./utils";
 import { concatBytes } from "@ethereumjs/util";
 import { decode, encode } from "./abi";
 
@@ -217,6 +231,55 @@ export const abiDecodeBuitin = new BuiltinFunction(
             typesTuple.elementTypes.map((t) => rtt.specializeType(t, sol.DataLocation.Memory)),
             state
         );
+    },
+    false
+);
+
+export const revertBuiltin = new BuiltinFunction(
+    "revert",
+    new rtt.FunctionType([new TOptional(memStringT)], false, sol.FunctionStateMutability.Pure, []),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const args = getArgs(self.type.argTs.length, state);
+
+        if (args.length === 0) {
+            throw new NoPayloadError(interp.curNode);
+        }
+
+        const msgArg = args[0];
+        interp.expect(msgArg instanceof rtt.StringMemView);
+        const msg = msgArg.decode(state.memory);
+        interp.expect(typeof msg === "string");
+        throw new ErrorError(interp.curNode, msg);
+    },
+    false
+);
+
+export const requireBuiltin = new BuiltinFunction(
+    "require",
+    new rtt.FunctionType(
+        [rtt.bool, new TOptional(memStringT)],
+        false,
+        sol.FunctionStateMutability.Pure,
+        []
+    ),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const args = getArgs(self.type.argTs.length, state);
+
+        const cond = args[0];
+        interp.expect(typeof cond === "boolean");
+        if (cond) {
+            return [];
+        }
+
+        if (args.length === 1) {
+            throw new NoPayloadError(interp.curNode);
+        }
+
+        const msgArg = args[1];
+        interp.expect(msgArg instanceof rtt.StringMemView);
+        const msg = msgArg.decode(state.memory);
+        interp.expect(typeof msg === "string");
+        throw new ErrorError(interp.curNode, msg);
     },
     false
 );

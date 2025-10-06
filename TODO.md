@@ -210,12 +210,14 @@
 193    - implement calling constructors in order
 194    - implement new order of state var init
 195    - implement try/catch
+196    - implement revert/throw
+197    - implement throw
+198    - implement require
 
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
 https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
 https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
 
-    - implement revert/throw
     - tests
         - test state reverting
         - test balance reverting
@@ -235,6 +237,7 @@ https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-
     - implement library calls as delegate calls
     - implement address.call/address.staticcall
     - implement address.delegatecall/address.callcode
+    - finish throw test
     - test builtins
     - implement emit
     - implement storage for immutable state vars

@@ -37,7 +37,8 @@ const samples: Array<[string, string, string, Value[], Value[] | ExceptionConstr
     ["self_call.sol", "Foo", "main", [], []],
     ["constructor_args1.sol", "Main", "main", [], []],
     ["state_var_init.sol", "Main", "main", [], []],
-    ["state_arr_assign.sol", "Foo", "main", [], []]
+    ["state_arr_assign.sol", "Foo", "main", [], []],
+    ["try_catch.sol", "Foo", "main", [], []]
 ];
 
 const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");

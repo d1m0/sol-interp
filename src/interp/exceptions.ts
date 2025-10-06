@@ -22,7 +22,7 @@ export class InterpError extends Error {
  * Base class for all exceptions that are internal. I.e. - they are due to an
  * issue with the interpreter, not the interpreted code.
  */
-export class InternalError extends InterpError { }
+export class InternalError extends InterpError {}
 
 export class NoScope extends InternalError {
     constructor(node: FailLoc) {
@@ -56,6 +56,8 @@ export class RuntimeError extends InterpError {
         super(node, msg);
     }
 }
+
+export class CustomError extends RuntimeError {}
 
 export const PANIC_SELECTOR = hexToBytes("0x4e487b71");
 const PANIC_SCRATCH = concatBytes(PANIC_SELECTOR, new Uint8Array(32));
@@ -136,8 +138,9 @@ export class ErrorError extends RuntimeError {
         node: FailLoc,
         public readonly msg: string
     ) {
-        const payload = hexToBytes(
-            ethABI.encodeParameters(["bytes4", "string"], [ERROR_SELECTOR, msg]) as `0x${string}`
+        const payload = concatBytes(
+            ERROR_SELECTOR,
+            hexToBytes(ethABI.encodeParameters(["string"], [msg]) as `0x${string}`)
         );
         super(node, `Error(${msg})`, payload);
     }
