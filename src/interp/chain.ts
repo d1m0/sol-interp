@@ -4,6 +4,7 @@ import { Interpreter } from "./interp";
 import { ArtifactManager } from "./artifactManager";
 import { Address, createContractAddress } from "@ethereumjs/util";
 import { InterpVisitor } from "./visitors";
+import { ppAccount } from "./pp";
 
 export interface AccountInfo {
     address: Address;
@@ -13,6 +14,17 @@ export interface AccountInfo {
     nonce: bigint;
 }
 
+export function ppChainState(state: ImmMap<string, AccountInfo>): string {
+    const t: string[] = [];
+
+    for (const [addr, account] of state.entries()) {
+        t.push(`${addr}: ${ppAccount(account)}`);
+    }
+
+    return `{
+        ${t.join(",\n")}
+        }`;
+}
 /**
  * Simple BlockChain implementation supporting only contracts with source artifacts.
  */
@@ -43,7 +55,20 @@ export class Chain implements WorldInterface {
     }
 
     getAccount(address: string | Address): AccountInfo | undefined {
-        return this.state.get(typeof address === "string" ? address : address.toString());
+        const key = typeof address === "string" ? address : address.toString();
+        const val = this.state.get(key);
+
+        // We create a new account here, so that any updates to the internal
+        // storage field are not implicitly leaked to the state ImmMap
+        return val === undefined
+            ? val
+            : {
+                  address: val.address,
+                  contract: val.contract,
+                  storage: val.storage,
+                  balance: val.balance,
+                  nonce: val.nonce
+              };
     }
 
     // Make an externally owned account
@@ -81,7 +106,7 @@ export class Chain implements WorldInterface {
     private getAccountForMessage(msg: SolMessage): AccountInfo {
         // Normal call
         if (!msg.to.equals(ZERO_ADDRESS)) {
-            const account = this.state.get(msg.to.toString());
+            const account = this.getAccount(msg.to);
 
             if (account === undefined) {
                 nyi(`calling a missing account`);
@@ -102,8 +127,9 @@ export class Chain implements WorldInterface {
             address,
             contract,
             storage: ImmMap.fromEntries([]) as Storage,
-            balance: msg.value,
-            nonce: 0n
+            balance: 0n,
+            nonce: 0n,
+            gen: 0n
         };
 
         this.setAccount(address, res);
@@ -117,16 +143,19 @@ export class Chain implements WorldInterface {
         const fromAccount = this.getAccount(msg.from);
         this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);
 
+        const contract = toAccount.contract;
+        this.expect(contract !== undefined, `Not an EoA`);
+
+        if (msg.value > fromAccount.balance) {
+            return { reverted: true, data: new Uint8Array() };
+        }
+
         // Increment sender nonce
         fromAccount.nonce++;
-        this.setAccount(msg.from, fromAccount);
-
         fromAccount.balance -= msg.value;
         // @todo what about overflow here?
         toAccount.balance += msg.value;
-
-        const contract = toAccount.contract;
-        this.expect(contract !== undefined, `Not an EoA`);
+        this.setAccount(msg.from, fromAccount);
 
         const interp = new Interpreter(
             this,

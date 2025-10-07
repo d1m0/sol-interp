@@ -96,6 +96,16 @@ contract Foo {
         } catch (bytes memory data) {
             assert(false);
         }
+
+        try this.panicDiv() {
+            assert(false);
+        } catch (bytes memory data) {
+            assert(false);
+        } catch Error(string memory msg) {
+            assert(false);
+        } catch Panic(uint code) {
+            assert(code == 0x12);
+        }
         
         try this.requireNoMsg() {
             assert(false);
@@ -115,6 +125,16 @@ contract Foo {
             assert(bytes(msg).length == 3);
         } catch (bytes memory data) {
             assert(false);
+        }
+
+        try this.requireMsg() {
+            assert(false);
+        } catch (bytes memory data) {
+            assert(false);
+        } catch Panic(uint code) {
+            assert(false);
+        } catch Error(string memory msg) {
+            assert(bytes(msg).length == 3);
         }
 
         try this.throwE1() {
@@ -146,5 +166,17 @@ contract Foo {
         } catch (bytes memory data) {
             assert(bytesEq(data, hex"f02cd4490000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000004000000000000000000000000000000000000000000000000000000000000000046162636400000000000000000000000000000000000000000000000000000000"));
         }
+
+        uint t = 1;
+        while(true) {
+            try this.throwE1() {
+                assert(false);
+            } catch {
+                break;
+            }
+            t = 2;
+        }
+
+        assert(t == 1);
     }
 }

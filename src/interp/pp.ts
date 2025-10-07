@@ -1,4 +1,12 @@
-import { ExternalFunRef, InternalFunRef, Poison, Slice, toHexString, View } from "sol-dbg";
+import {
+    ExternalFunRef,
+    InternalFunRef,
+    Poison,
+    ppStorage,
+    Slice,
+    toHexString,
+    View
+} from "sol-dbg";
 import {
     BuiltinFunction,
     BuiltinStruct,
@@ -12,6 +20,7 @@ import { Address, bytesToHex } from "@ethereumjs/util";
 import { EvalStep, ExceptionStep, ExecStep, ExtCallStep, ExtReturnStep, Trace } from "./step";
 import { printNode } from "./utils";
 import { ArtifactManager } from "./artifactManager";
+import { AccountInfo } from "./chain";
 
 export function ppLValue(v: LValue): string {
     if (v instanceof View) {
@@ -114,4 +123,12 @@ export function ppValueTypeConstructor(typeConstructor: ValueTypeConstructors): 
     }
 
     return typeConstructor.constructor.name;
+}
+
+export function ppAccount(a: AccountInfo): string {
+    return `{
+        balance: ${a.balance},
+        nonce: ${a.nonce},
+        storage: ${ppStorage(a.storage)}
+    }`;
 }

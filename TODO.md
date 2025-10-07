@@ -213,27 +213,18 @@
 196    - implement revert/throw
 197    - implement throw
 198    - implement require
+199    - test state reverting
+200    - implement address.balance
+201    - test balance reverting
+202    - test exception on insufficient balance matches expected bytes
+203    - test contract nonce reverting
+204    - test try new
+205    - test break inside clause with mutating statement after break
+206    - test with low-level clause before Panic/Error with a Panic/Error exception
+207    - test with Panic clause first, then Error with an Error exception
+208    - test with Error clause first, then Panic with a Panic exception
+209    - kill gen
 
-https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
-https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
-https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
-
-    - tests
-        - test state reverting
-        - test balance reverting
-        - test contract nonce reverting
-        - test exception on insufficient balance matches expected bytes
-        - test try new
-        - test exception while decoding Error(string) and Panic(uint256)
-            - without catch {} catch (bytes memory) {}
-            - with only catch{}
-            - with only catch (bytes memory) {}
-            - with both catch {} and catch (bytes memory) {}
-            - break inside clause with mutating statement after break
-            - use type confusion to call a method that succeeds but returns data of the wrong type, causing an exception in the decoding of the success try clause
-            - test with low-level clause before Panic/Error with a Panic/Error exception
-            - test with Panic clause first, then Error with an Error exception
-            - test with Error clause first, then Panic with a Panic exception
     - implement library calls as delegate calls
     - implement address.call/address.staticcall
     - implement address.delegatecall/address.callcode
@@ -298,14 +289,12 @@ Constructors:
 - add BaseWorld class that has an ArtifactManager
 
 - need an "immutable" var space somewhere in the state
-
 - make an exhaustive test for coercions from old code
 
 // ---------------
 - test virtual function resolves to public getter
 - more coercions
 - cli for playing
-- try/catch etc...
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos
@@ -325,5 +314,14 @@ Writing ideas:
     - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!
     - care to match low-level behavior: implemeting the differences between IR and old code-gen
 
-Tried and failed:
-- jest debug config
+https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
+https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
+https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
+
+Tests requiring inline assembly:
+- test exception while decoding Error(string) and Panic(uint256)
+    - without catch {} catch (bytes memory) {}
+    - with only catch{}
+    - with only catch (bytes memory) {}
+    - with both catch {} and catch (bytes memory) {}
+    - use type confusion to call a method that succeeds but returns data of the wrong type, causing an exception in the decoding of the success try clause

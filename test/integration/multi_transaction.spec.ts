@@ -29,6 +29,29 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 }
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/state_revert.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 11n
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                }
+            }
+        ]
     ]
 ];
 

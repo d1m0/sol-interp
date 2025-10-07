@@ -253,80 +253,92 @@ export class Interpreter {
                     mdc.ast.vConstructor.vParameters.vParameters.length > 0)
         );
 
-        // As per:
-        // https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
-        // Contract initialization proceeds by:
-        if (mdc.artifact.codegen === "old") {
-            // For old codegen:
-            //
-            // 1. All state variables are zero-initialized at the beginning.
-            // 2. Initialize all state variables in the whole inheritance hierarchy from most base to most derived.
-            for (const base of bases) {
-                for (const v of base.vStateVariables) {
-                    this.initializeStateVar(v, state);
-                }
-            }
-
-            // 3. Evaluate base constructor arguments from most derived to most base contract.
-            const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
-
-            if (mdc.ast.vConstructor) {
-                const calldataArgs: Value[] = buildMsgViews(
-                    mdc.ast.vConstructor,
-                    this._infer,
-                    BigInt(mdc.bytecode.bytecode.length)
-                ).map((x) => x[1]);
-
-                const interp = this;
-                const argTs = mdc.ast.vConstructor.vParameters.vParameters.map((decl) =>
-                    interp.varDeclToRuntimeType(decl)
-                );
-                baseArgMap.set(mdc.ast.vConstructor, [calldataArgs, argTs]);
-            }
-
-            // 4. Run the constructor, if present, for all contracts in the linearized hierarchy from most base to most derived.
-            for (const base of bases) {
-                if (!base.vConstructor) {
-                    continue;
+        try {
+            // As per:
+            // https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
+            // Contract initialization proceeds by:
+            if (mdc.artifact.codegen === "old") {
+                // For old codegen:
+                //
+                // 1. All state variables are zero-initialized at the beginning.
+                // 2. Initialize all state variables in the whole inheritance hierarchy from most base to most derived.
+                for (const base of bases) {
+                    for (const v of base.vStateVariables) {
+                        this.initializeStateVar(v, state);
+                    }
                 }
 
-                this.nodes.push(base.vConstructor);
-                const argDesc = baseArgMap.get(base.vConstructor);
-                this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
-                const [args, argTs] = argDesc;
-                this._execCall(base.vConstructor, args, argTs, state);
-                this.nodes.pop();
-            }
-        } else {
-            // For IR codegen:
-            //
-            // 1. All state variables are zero-initialized at the beginning.
-            // 2. Evaluate base constructor arguments from most derived to most base contract.
-            const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
+                // 3. Evaluate base constructor arguments from most derived to most base contract.
+                const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
 
-            // 3. For every contract in order from most base to most derived in the linearized hierarchy:
-            for (const base of bases) {
-                // 1. Initialize state variables.
-                for (const v of base.vStateVariables) {
-                    this.initializeStateVar(v, state);
+                if (mdc.ast.vConstructor) {
+                    const calldataArgs: Value[] = buildMsgViews(
+                        mdc.ast.vConstructor,
+                        this._infer,
+                        BigInt(mdc.bytecode.bytecode.length)
+                    ).map((x) => x[1]);
+
+                    const interp = this;
+                    const argTs = mdc.ast.vConstructor.vParameters.vParameters.map((decl) =>
+                        interp.varDeclToRuntimeType(decl)
+                    );
+                    baseArgMap.set(mdc.ast.vConstructor, [calldataArgs, argTs]);
                 }
 
-                // 2. Run the constructor (if present).
-                if (!base.vConstructor) {
-                    continue;
-                }
+                // 4. Run the constructor, if present, for all contracts in the linearized hierarchy from most base to most derived.
+                for (const base of bases) {
+                    if (!base.vConstructor) {
+                        continue;
+                    }
 
-                this.nodes.push(base.vConstructor);
-                const argDesc = baseArgMap.get(base.vConstructor);
-                this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
-                const [args, argTs] = argDesc;
-                this._execCall(base.vConstructor, args, argTs, state);
-                this.nodes.pop();
+                    this.nodes.push(base.vConstructor);
+                    const argDesc = baseArgMap.get(base.vConstructor);
+                    this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
+                    const [args, argTs] = argDesc;
+                    this._execCall(base.vConstructor, args, argTs, state);
+                    this.nodes.pop();
+                }
+            } else {
+                // For IR codegen:
+                //
+                // 1. All state variables are zero-initialized at the beginning.
+                // 2. Evaluate base constructor arguments from most derived to most base contract.
+                const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
+
+                // 3. For every contract in order from most base to most derived in the linearized hierarchy:
+                for (const base of bases) {
+                    // 1. Initialize state variables.
+                    for (const v of base.vStateVariables) {
+                        this.initializeStateVar(v, state);
+                    }
+
+                    // 2. Run the constructor (if present).
+                    if (!base.vConstructor) {
+                        continue;
+                    }
+
+                    this.nodes.push(base.vConstructor);
+                    const argDesc = baseArgMap.get(base.vConstructor);
+                    this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
+                    const [args, argTs] = argDesc;
+                    this._execCall(base.vConstructor, args, argTs, state);
+                    this.nodes.pop();
+                }
             }
+        } catch (e) {
+            if (e instanceof RuntimeError) {
+                return e;
+            }
+
+            throw e;
         }
+
         for (const v of this.visitors) {
             v.return(this, state, mdc.deployedBytecode.bytecode);
         }
+
+        // If we succeed update the world on our new state
+        this.world.setAccount(state.account.address, state.account);
 
         // @todo implement immutables
         return mdc.deployedBytecode.bytecode;
@@ -438,6 +450,9 @@ export class Interpreter {
         for (const v of this.visitors) {
             v.return(this, state, resBytecode);
         }
+
+        // If we succeed update the world on our new state
+        this.world.setAccount(state.account.address, state.account);
 
         return resBytecode;
     }
@@ -824,16 +839,29 @@ export class Interpreter {
         }
 
         this.expect(stmt.vClauses.length >= 2);
-        this.expect(callee instanceof sol.MemberAccess, `Unexpected callee ${callee.print()}`);
-        const target = callee.vReferencedDeclaration;
+
+        // Success case. Parse out the return values
         this.expect(
-            target instanceof sol.FunctionDefinition || target instanceof sol.VariableDeclaration,
-            `NYI external call target`
+            callee instanceof sol.MemberAccess || callee instanceof sol.NewExpression,
+            `Unexpected callee ${callee.print()}`
         );
 
         if (!res.reverted) {
-            // Success case. Parse out the return values
-            const vals = this.getValuesFromReturnedCalldata(res.data, target, state);
+            let vals: Value[];
+
+            if (callee instanceof sol.MemberAccess) {
+                const target = callee.vReferencedDeclaration;
+                this.expect(
+                    target instanceof sol.FunctionDefinition ||
+                        target instanceof sol.VariableDeclaration,
+                    `NYI external call target`
+                );
+                vals = this.getValuesFromReturnedCalldata(res.data, target, state);
+            } else {
+                this.expect(res.newContract !== undefined);
+                vals = [res.newContract];
+            }
+
             return this.execTryCatchClause(stmt.vClauses[0], vals, state);
         }
 
@@ -2621,6 +2649,13 @@ export class Interpreter {
 
     evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
         let baseVal = this.evalNP(expr.vExpression, state);
+
+        if (baseVal instanceof Address) {
+            if (expr.memberName === "balance") {
+                const account = this.world.getAccount(baseVal);
+                return account === undefined ? 0n : account.balance;
+            }
+        }
 
         if (isPointerView(baseVal)) {
             baseVal = this.deref(baseVal, state);
