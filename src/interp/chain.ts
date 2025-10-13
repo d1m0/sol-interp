@@ -9,6 +9,10 @@ import { ppAccount } from "./pp";
 export interface AccountInfo {
     address: Address;
     contract: ContractInfo | undefined;
+    // Creation bytecode. May differ from the artifact bytecode by link references
+    bytecode: Uint8Array;
+    // Deployed bytecode. May differ from the artifact deployed bytecode by link and immtable references
+    deployedBytecode: Uint8Array;
     storage: Storage;
     balance: bigint;
     nonce: bigint;
@@ -43,15 +47,16 @@ export class Chain implements WorldInterface {
 
     create(msg: SolMessage): CallResult {
         this.expect(msg.to.equals(ZERO_ADDRESS));
-        return this.execMsg(msg);
+        return this.execMsg(msg, false);
     }
 
     staticcall(): CallResult {
         throw new Error("Method not implemented.");
     }
 
-    delegatecall(): CallResult {
-        throw new Error("Method not implemented.");
+    delegatecall(msg: SolMessage): CallResult {
+        this.expect(msg.to.equals(ZERO_ADDRESS));
+        return this.execMsg(msg, true);
     }
 
     getAccount(address: string | Address): AccountInfo | undefined {
@@ -65,10 +70,31 @@ export class Chain implements WorldInterface {
             : {
                   address: val.address,
                   contract: val.contract,
+                  bytecode: val.bytecode,
+                  deployedBytecode: val.deployedBytecode,
                   storage: val.storage,
                   balance: val.balance,
                   nonce: val.nonce
               };
+    }
+
+    setAccount(address: string | Address, account: AccountInfo): void {
+        this.state = this.state.set(
+            typeof address === "string" ? address : address.toString(),
+            {
+                address: account.address,
+                contract: account.contract,
+                bytecode: account.bytecode,
+                deployedBytecode: account.deployedBytecode,
+                storage: account.storage,
+                balance: account.balance,
+                nonce: account.nonce 
+            }
+        );
+    }
+
+    updateAccount(account: AccountInfo): void {
+        this.setAccount(account.address, account)
     }
 
     // Make an externally owned account
@@ -77,19 +103,14 @@ export class Chain implements WorldInterface {
         const newAccount: AccountInfo = {
             address,
             contract: undefined,
+            bytecode: new Uint8Array(),
+            deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]),
             balance: initialBalance,
             nonce: 0n
         };
 
         this.setAccount(address, newAccount);
-    }
-
-    setAccount(address: string | Address, account: AccountInfo): void {
-        this.state = this.state.set(
-            typeof address === "string" ? address : address.toString(),
-            account
-        );
     }
 
     expect(f: boolean, msg: string = ""): asserts f {
@@ -100,7 +121,7 @@ export class Chain implements WorldInterface {
 
     call(msg: SolMessage): CallResult {
         this.expect(!msg.to.equals(ZERO_ADDRESS));
-        return this.execMsg(msg);
+        return this.execMsg(msg, false);
     }
 
     private getAccountForMessage(msg: SolMessage): AccountInfo {
@@ -126,6 +147,8 @@ export class Chain implements WorldInterface {
         const res = {
             address,
             contract,
+            bytecode: msg.data,
+            deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]) as Storage,
             balance: 0n,
             nonce: 0n,
@@ -134,14 +157,14 @@ export class Chain implements WorldInterface {
 
         this.setAccount(address, res);
 
-        return res;
+        return { ...res };
     }
 
-    private execMsg(msg: SolMessage): CallResult {
+    private execMsg(msg: SolMessage, isDelegate: boolean): CallResult {
         const checkpoint = this.state;
-        const toAccount = this.getAccountForMessage(msg);
         const fromAccount = this.getAccount(msg.from);
         this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);
+        const toAccount = this.getAccountForMessage(msg);
 
         const contract = toAccount.contract;
         this.expect(contract !== undefined, `Not an EoA`);
@@ -155,7 +178,9 @@ export class Chain implements WorldInterface {
         fromAccount.balance -= msg.value;
         // @todo what about overflow here?
         toAccount.balance += msg.value;
-        this.setAccount(msg.from, fromAccount);
+
+        this.updateAccount(fromAccount);
+        this.updateAccount(toAccount);
 
         const interp = new Interpreter(
             this,

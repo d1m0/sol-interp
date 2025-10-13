@@ -252,6 +252,10 @@ export class TransactionSet {
         return `${step.type} ${step.contract}.${step.method}(${step.args.map(pp).join(", ")})`;
     }
 
+    trace(): Trace {
+        return this.traceVisitor.getTrace()
+    }
+
     run(): boolean {
         for (const step of this.steps) {
             const msg = this.messageFromStep(step);

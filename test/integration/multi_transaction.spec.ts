@@ -1,6 +1,7 @@
 import { loadSamples } from "../unit/utils";
 import { TransactionDesc, TransactionSet } from "../unit/transaction_set";
 import { basename, dirname } from "path";
+import { ppTrace } from "../../src/interp/pp";
 
 const samples: Array<[string, TransactionDesc[]]> = [
     [
@@ -64,7 +65,13 @@ describe("Multi-transaction tests", () => {
             const [artifactManager] = await loadSamples([basename(file)], dirname(file));
 
             const tset = new TransactionSet(artifactManager, transactions);
-            expect(tset.run()).toBeTruthy();
+            const res = tset.run();
+
+            if (!res) {
+                console.error(ppTrace(tset.trace(), artifactManager))
+            }
+
+            expect(res).toBeTruthy();
         });
     }
 });

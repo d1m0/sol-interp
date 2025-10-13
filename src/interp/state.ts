@@ -54,6 +54,8 @@ export interface InternalCallFrame {
 export interface State {
     //Solidity version of the current contract
     account: AccountInfo;
+    //Account of actual code executing. May be different from `account`s code for delegate calls
+    codeAccount: AccountInfo | undefined;
     memory: Memory;
     memAllocator: Allocator;
     msg: SolMessage;
@@ -70,11 +72,14 @@ export function makeNoContractState(): State {
     return {
         account: {
             address: ZERO_ADDRESS,
-            contract: undefined as unknown as any,
+            contract: undefined,
+            bytecode: new Uint8Array(),
+            deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]),
             balance: 0n,
             nonce: 0n
         },
+        codeAccount: undefined,
         memory: memAllocator.memory,
         memAllocator,
         msg: {
@@ -102,6 +107,8 @@ export function makeStateWithConstants(
     return makeStateForAccount(artifactManager, {
         address: ZERO_ADDRESS,
         contract,
+        bytecode: new Uint8Array(),
+        deployedBytecode: new Uint8Array(),
         storage: ImmMap.fromEntries([]),
         balance: 0n,
         nonce: 0n
@@ -120,6 +127,7 @@ export function makeStateForAccount(artifactManager: ArtifactManager, account: A
 
     return {
         account,
+        codeAccount: undefined,
         memory: memAllocator.memory,
         memAllocator,
         msg: {
