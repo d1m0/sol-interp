@@ -53,6 +53,45 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 }
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/libraries.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Lib1",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 0n
+            },
+            {
+                type: "deploy",
+                contract: "Lib",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 0n
+            },
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 0n
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                }
+            }
+        ]
     ]
 ];
 
@@ -68,7 +107,7 @@ describe("Multi-transaction tests", () => {
             const res = tset.run();
 
             if (!res) {
-                console.error(ppTrace(tset.trace(), artifactManager))
+                console.error(ppTrace(tset.trace(), artifactManager));
             }
 
             expect(res).toBeTruthy();

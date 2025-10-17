@@ -24,6 +24,8 @@ import { CallResult, State, WorldInterface } from "./state";
 import { BaseLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, DefType, TypeType } from "./types";
+import { Address } from "@ethereumjs/util";
+import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 
 /**
  * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
@@ -94,6 +96,19 @@ export function getMsg(state: State): Uint8Array {
     return state.msg.data;
 }
 
+export function getSig(state: State): Uint8Array {
+    if (state.codeAccount !== undefined && state.msg.to.equals(ZERO_ADDRESS)) {
+        return new Uint8Array();
+    }
+
+    // @todo when we send 3 bytes, is msg.data 0?
+    if (state.msg.data.length < 4) {
+        return new Uint8Array();
+    }
+
+    return state.msg.data.slice(0, 4);
+}
+
 export function getContractInfo(state: State): ContractInfo {
     return state.account.contract as ContractInfo;
 }
@@ -105,9 +120,109 @@ export function getContract(state: State): sol.ContractDefinition {
     return res;
 }
 
+/**
+ * Get the `BytecodeInfo` and actual bytecode for the currently running context.
+ * This handles delegate calls and distinguishing between bytecode and deployed bytecode
+ */
+export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
+    if (state.codeAccount) {
+        const info = state.codeAccount.contract;
+        sol.assert(info !== undefined, ``);
+        return [info.deployedBytecode, state.codeAccount.deployedBytecode];
+    }
+
+    const info = state.account.contract;
+    sol.assert(info !== undefined, ``);
+
+    return state.msg.to.equals(rtt.ZERO_ADDRESS)
+        ? [info.bytecode, state.account.bytecode]
+        : [info.deployedBytecode, state.account.deployedBytecode];
+}
+
+/**
+ * Given a library `ContractDefinition` and the current `State` get the linked address
+ * for that library.
+ */
+export function getLibraryLinkedAddress(lib: sol.ContractDefinition, state: State) {
+    sol.assert(lib.kind === sol.ContractKind.Library, ``);
+    const libId = `${lib.vScope.sourceEntryKey}:${lib.name}`;
+    const [bytecodeInfo, bytecode] = getBytecodeInfo(state);
+    const ranges = bytecodeInfo.linkReferences.get(libId);
+
+    sol.assert(ranges !== undefined && ranges.length > 0, `Ranges missing for ${libId}: ${ranges}`);
+
+    const linkMap = decodeLinkMap(bytecodeInfo, bytecode);
+    const addr = linkMap.get(libId);
+
+    sol.assert(addr !== undefined, `No linked address found for ${libId}`);
+    return addr;
+}
+
+/**
+ * Returns the contract info for the *CODE* of the currently executing context. Handles delegate calls
+ * @param state
+ * @returns
+ */
+export function getCodeContractInfo(state: State): ContractInfo {
+    const info =
+        state.codeAccount !== undefined ? state.codeAccount.contract : state.account.contract;
+    sol.assert(info !== undefined, `No contract in current state`);
+    return info;
+}
+
+/**
+ * Returns the address of the currently executing context. Handles delegate calls
+ * @param state
+ * @returns
+ */
+export function getCodeContract(state: State): sol.ContractDefinition {
+    const info =
+        state.codeAccount !== undefined ? state.codeAccount.contract : state.account.contract;
+    sol.assert(info !== undefined, `No contract in current state`);
+    const res = info.ast;
+    sol.assert(res !== undefined, `No AST for contract  ${info.contractName}`);
+    return res;
+}
+
+/**
+ * Returns the storage of the currently executing context. Handles delegate calls
+ * @param state
+ * @returns
+ */
+export function getStateStorage(state: State): rtt.Storage {
+    return state.account.storage;
+}
+
+/**
+ * Set the storage of the state's current context
+ * @param state
+ * @returns
+ */
+export function setStateStorage(state: State, newStorage: rtt.Storage): rtt.Storage {
+    return (state.account.storage = newStorage);
+}
+
+/**
+ * Returns the address of the currently executing contract
+ * @param state
+ * @returns
+ */
+export function getThis(state: State): Address {
+    return state.account.address;
+}
+
+/**
+ * Returns msg.sender
+ * @param state
+ * @returns
+ */
+export function getMsgSender(state: State): Address {
+    return state.msg.from;
+}
+
 export function decodeView(lv: View, state: State): BaseValue {
     if (lv instanceof BaseStorageView) {
-        return lv.decode(state.account.storage);
+        return lv.decode(getStateStorage(state));
     } else if (lv instanceof BaseMemoryView) {
         return lv.decode(state.memory);
     } else if (lv instanceof BaseCalldataView) {
@@ -351,6 +466,9 @@ export const worldFailMock: WorldInterface = {
         throw new Error("Function not implemented.");
     },
     setAccount: function (): void {
+        throw new Error("Function not implemented.");
+    },
+    updateAccount: function (): void {
         throw new Error("Function not implemented.");
     }
 };

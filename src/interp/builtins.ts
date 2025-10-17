@@ -26,12 +26,17 @@ import {
     bytesT,
     decodeView,
     getContract,
+    getMsgSender,
+    getSig,
+    getStateStorage,
     makeZeroValue,
     memBytesT,
-    memStringT
+    memStringT,
+    setStateStorage
 } from "./utils";
 import { concatBytes } from "@ethereumjs/util";
 import { decode, encode } from "./abi";
+import { MsgDataView } from "./view";
 
 function getArgs(numArgs: number, state: State): Value[] {
     const res: Value[] = [];
@@ -94,15 +99,16 @@ export const pushBuiltin = new BuiltinFunction(
 
         if (arr instanceof ArrayStorageView) {
             const sizeView = new IntStorageView(uint256, [arr.key, arr.endOffsetInWord]);
-            const curSize = sizeView.decode(state.account.storage);
+            const curSize = sizeView.decode(getStateStorage(state));
 
             if (curSize instanceof DecodingFailure) {
                 interp.fail(InternalError, `push(): couldn't decode array size`);
             }
 
-            state.account.storage = sizeView.encode(curSize + 1n, state.account.storage);
+            const newStorage = sizeView.encode(curSize + 1n, getStateStorage(state));
+            setStateStorage(state, newStorage);
 
-            const elView = arr.indexView(curSize, state.account.storage);
+            const elView = arr.indexView(curSize, newStorage);
 
             if (elView instanceof DecodingFailure) {
                 interp.fail(InternalError, `push(): couldn't get new element view`);
@@ -112,7 +118,8 @@ export const pushBuiltin = new BuiltinFunction(
                 interp.assign(elView, el, state);
             }
         } else {
-            let bytes = arr.decode(state.account.storage);
+            const storage = getStateStorage(state);
+            let bytes = arr.decode(storage);
 
             if (bytes instanceof DecodingFailure) {
                 interp.fail(InternalError, `push(): couldn't decode bytes`);
@@ -121,7 +128,7 @@ export const pushBuiltin = new BuiltinFunction(
             const newByte = el instanceof Uint8Array ? el : new Uint8Array([Number(el)]);
 
             bytes = concatBytes(bytes, newByte);
-            state.account.storage = arr.encode(bytes, state.account.storage);
+            setStateStorage(state, arr.encode(bytes, storage));
         }
 
         return [];
@@ -148,7 +155,8 @@ export const popBuiltin = new BuiltinFunction(
 
         if (arr instanceof ArrayStorageView) {
             const sizeView = new IntStorageView(uint256, [arr.key, arr.endOffsetInWord]);
-            const curSize = sizeView.decode(state.account.storage);
+            const storage = getStateStorage(state);
+            const curSize = sizeView.decode(storage);
 
             if (curSize instanceof DecodingFailure) {
                 interp.fail(InternalError, `pop(): couldn't decode array size`);
@@ -158,10 +166,11 @@ export const popBuiltin = new BuiltinFunction(
                 interp.runtimeError(EmptyArrayPopError, state);
             }
 
-            state.account.storage = sizeView.encode(curSize - 1n, state.account.storage);
+            setStateStorage(state, sizeView.encode(curSize - 1n, storage));
             // @todo zero-out deleted element
         } else {
-            const bytes = arr.decode(state.account.storage);
+            const storage = getStateStorage(state);
+            const bytes = arr.decode(storage);
 
             if (bytes instanceof DecodingFailure) {
                 interp.fail(InternalError, `pop(): couldn't decode bytes`);
@@ -171,7 +180,7 @@ export const popBuiltin = new BuiltinFunction(
                 interp.runtimeError(EmptyArrayPopError, state);
             }
 
-            state.account.storage = arr.encode(bytes.slice(0, -1), state.account.storage);
+            setStateStorage(state, arr.encode(bytes.slice(0, -1), storage));
             // @todo zero-out deleted element
         }
 
@@ -284,19 +293,33 @@ export const requireBuiltin = new BuiltinFunction(
     false
 );
 
-export const abi = new BuiltinStruct(
-    "abi",
-    new rtt.StructType("abi", [
-        ["encode", abiEncodeBuiltin.type],
-        ["decode", abiDecodeBuitin.type]
-    ]),
-    [
-        ["encode", [[abiEncodeBuiltin, ">=0.4.22"]]],
-        ["decode", [[abiDecodeBuitin, ">=0.4.22"]]]
-    ]
-);
+const abiType = new rtt.StructType("abi", [
+    ["encode", abiEncodeBuiltin.type],
+    ["decode", abiDecodeBuitin.type]
+]);
+
+export const abi = new BuiltinStruct("abi", abiType, [
+    ["encode", [[abiEncodeBuiltin, ">=0.4.22"]]],
+    ["decode", [[abiDecodeBuitin, ">=0.4.22"]]]
+]);
 
 export const implicitFirstArgBuiltins = new Map<string, BuiltinFunction>([
     ["push", pushBuiltin],
     ["pop", popBuiltin]
 ]);
+
+const msgType = new rtt.StructType("msg", [
+    ["data", new rtt.PointerType(bytesT, sol.DataLocation.CallData)],
+    ["sender", new rtt.AddressType()],
+    ["sig", rtt.bytes4],
+    ["value", rtt.uint256]
+]);
+
+export function makeMsgBuiltin(state: State): BuiltinStruct {
+    return new BuiltinStruct("msg", msgType, [
+        ["data", [[new MsgDataView(), ">=0.4.13"]]],
+        ["sender", [[getMsgSender(state), ">=0.4.13"]]],
+        ["sig", [[getSig(state), ">=0.4.13"]]],
+        ["sig", [[state.msg.value, ">=0.4.13"]]]
+    ]);
+}

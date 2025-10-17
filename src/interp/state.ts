@@ -5,8 +5,7 @@ import {
     Value as BaseValue,
     ImmMap,
     DefaultAllocator,
-    ZERO_ADDRESS,
-    ContractInfo
+    ZERO_ADDRESS
 } from "sol-dbg";
 import { BaseScope, LocalsScope } from "./scope";
 import {
@@ -34,10 +33,12 @@ export interface WorldInterface {
     delegatecall(msg: SolMessage): CallResult;
     getAccount(address: string | Address): AccountInfo | undefined;
     setAccount(address: string | Address, account: AccountInfo): void;
+    updateAccount(account: AccountInfo): void;
 }
 
 export interface SolMessage {
     from: Address;
+    delegatingContract: Address | undefined;
     to: Address;
     data: Uint8Array;
     gas: bigint;
@@ -85,6 +86,7 @@ export function makeNoContractState(): State {
         msg: {
             from: ZERO_ADDRESS,
             to: ZERO_ADDRESS,
+            delegatingContract: undefined,
             data: new Uint8Array(),
             gas: 0n,
             value: 0n,
@@ -100,24 +102,13 @@ export function makeNoContractState(): State {
  * Make an empty state containing just the constants
  * @returns
  */
-export function makeStateWithConstants(
+export function makeStateForAccount(
     artifactManager: ArtifactManager,
-    contract: ContractInfo
+    account: AccountInfo,
+    codeAccount: AccountInfo | undefined
 ): State {
-    return makeStateForAccount(artifactManager, {
-        address: ZERO_ADDRESS,
-        contract,
-        bytecode: new Uint8Array(),
-        deployedBytecode: new Uint8Array(),
-        storage: ImmMap.fromEntries([]),
-        balance: 0n,
-        nonce: 0n
-    });
-}
-
-export function makeStateForAccount(artifactManager: ArtifactManager, account: AccountInfo): State {
     const memAllocator = new DefaultAllocator();
-    const contract = account.contract;
+    const contract = (codeAccount !== undefined ? codeAccount : account).contract;
     assert(contract !== undefined, ``);
     const [constantsMap, constantsMemory] = artifactManager.getConstants(contract.artifact);
 
@@ -127,12 +118,13 @@ export function makeStateForAccount(artifactManager: ArtifactManager, account: A
 
     return {
         account,
-        codeAccount: undefined,
+        codeAccount,
         memory: memAllocator.memory,
         memAllocator,
         msg: {
             from: ZERO_ADDRESS,
             to: ZERO_ADDRESS,
+            delegatingContract: undefined,
             data: new Uint8Array(),
             gas: 0n,
             value: 0n,
@@ -142,4 +134,23 @@ export function makeStateForAccount(artifactManager: ArtifactManager, account: A
         scope: undefined,
         constantsMap: constantsMap
     };
+}
+
+export function makeStateWithConstants(
+    artifactManager: ArtifactManager,
+    contract: rtt.ContractInfo
+): State {
+    return makeStateForAccount(
+        artifactManager,
+        {
+            address: ZERO_ADDRESS,
+            contract,
+            bytecode: new Uint8Array(),
+            deployedBytecode: new Uint8Array(),
+            storage: ImmMap.fromEntries([]),
+            balance: 0n,
+            nonce: 0n
+        },
+        undefined
+    );
 }

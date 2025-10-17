@@ -114,6 +114,7 @@ describe("Simple function call tests", () => {
             const res = chain.call({
                 from: SENDER,
                 to: RECEIVER,
+                delegatingContract: undefined,
                 data,
                 gas: 0n,
                 value: 0n,

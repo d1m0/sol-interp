@@ -5,6 +5,7 @@ import { ArtifactManager } from "./artifactManager";
 import { Address, createContractAddress } from "@ethereumjs/util";
 import { InterpVisitor } from "./visitors";
 import { ppAccount } from "./pp";
+import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 
 export interface AccountInfo {
     address: Address;
@@ -47,7 +48,8 @@ export class Chain implements WorldInterface {
 
     create(msg: SolMessage): CallResult {
         this.expect(msg.to.equals(ZERO_ADDRESS));
-        return this.execMsg(msg, false);
+        this.expect(msg.delegatingContract === undefined);
+        return this.execMsg(msg);
     }
 
     staticcall(): CallResult {
@@ -55,8 +57,9 @@ export class Chain implements WorldInterface {
     }
 
     delegatecall(msg: SolMessage): CallResult {
-        this.expect(msg.to.equals(ZERO_ADDRESS));
-        return this.execMsg(msg, true);
+        this.expect(!msg.to.equals(ZERO_ADDRESS));
+        this.expect(msg.delegatingContract !== undefined);
+        return this.execMsg(msg);
     }
 
     getAccount(address: string | Address): AccountInfo | undefined {
@@ -79,22 +82,19 @@ export class Chain implements WorldInterface {
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
-        this.state = this.state.set(
-            typeof address === "string" ? address : address.toString(),
-            {
-                address: account.address,
-                contract: account.contract,
-                bytecode: account.bytecode,
-                deployedBytecode: account.deployedBytecode,
-                storage: account.storage,
-                balance: account.balance,
-                nonce: account.nonce 
-            }
-        );
+        this.state = this.state.set(typeof address === "string" ? address : address.toString(), {
+            address: account.address,
+            contract: account.contract,
+            bytecode: account.bytecode,
+            deployedBytecode: account.deployedBytecode,
+            storage: account.storage,
+            balance: account.balance,
+            nonce: account.nonce
+        });
     }
 
     updateAccount(account: AccountInfo): void {
-        this.setAccount(account.address, account)
+        this.setAccount(account.address, account);
     }
 
     // Make an externally owned account
@@ -121,7 +121,8 @@ export class Chain implements WorldInterface {
 
     call(msg: SolMessage): CallResult {
         this.expect(!msg.to.equals(ZERO_ADDRESS));
-        return this.execMsg(msg, false);
+        this.expect(msg.delegatingContract === undefined);
+        return this.execMsg(msg);
     }
 
     private getAccountForMessage(msg: SolMessage): AccountInfo {
@@ -144,11 +145,17 @@ export class Chain implements WorldInterface {
         const contract = this.artifactManager.getContractFromCreationBytecode(msg.data);
         this.expect(contract !== undefined);
 
+        const linkMap = decodeLinkMap(contract.bytecode, msg.data);
+        const linkedDeployedBytecode = this.artifactManager.link(
+            contract.deployedBytecode,
+            linkMap
+        );
+
         const res = {
             address,
             contract,
             bytecode: msg.data,
-            deployedBytecode: new Uint8Array(),
+            deployedBytecode: linkedDeployedBytecode,
             storage: ImmMap.fromEntries([]) as Storage,
             balance: 0n,
             nonce: 0n,
@@ -160,27 +167,38 @@ export class Chain implements WorldInterface {
         return { ...res };
     }
 
-    private execMsg(msg: SolMessage, isDelegate: boolean): CallResult {
+    private execMsg(msg: SolMessage): CallResult {
         const checkpoint = this.state;
         const fromAccount = this.getAccount(msg.from);
         this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);
+        const delegatingAccount: AccountInfo | undefined =
+            msg.delegatingContract === undefined
+                ? undefined
+                : this.getAccount(msg.delegatingContract);
         const toAccount = this.getAccountForMessage(msg);
 
         const contract = toAccount.contract;
         this.expect(contract !== undefined, `Not an EoA`);
 
-        if (msg.value > fromAccount.balance) {
+        const valueSendingAccount =
+            delegatingAccount !== undefined ? delegatingAccount : fromAccount;
+        const valueReceivingAccount =
+            delegatingAccount !== undefined ? delegatingAccount : toAccount;
+
+        if (msg.value > valueSendingAccount.balance) {
             return { reverted: true, data: new Uint8Array() };
         }
 
         // Increment sender nonce
-        fromAccount.nonce++;
-        fromAccount.balance -= msg.value;
+        valueSendingAccount.nonce++;
+        valueSendingAccount.balance -= msg.value;
         // @todo what about overflow here?
-        toAccount.balance += msg.value;
+        valueReceivingAccount.balance += msg.value;
 
-        this.updateAccount(fromAccount);
-        this.updateAccount(toAccount);
+        this.updateAccount(valueSendingAccount);
+        if (valueReceivingAccount !== valueSendingAccount) {
+            this.updateAccount(valueReceivingAccount);
+        }
 
         const interp = new Interpreter(
             this,
@@ -189,7 +207,11 @@ export class Chain implements WorldInterface {
             this.visitors
         );
 
-        const interpState = makeStateForAccount(this.artifactManager, toAccount);
+        const interpState = makeStateForAccount(
+            this.artifactManager,
+            delegatingAccount ? delegatingAccount : toAccount,
+            delegatingAccount ? toAccount : undefined
+        );
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);
 

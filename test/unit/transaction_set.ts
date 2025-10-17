@@ -72,6 +72,7 @@ function pp(v: BaseValue): string {
 
 export class TransactionSet {
     contractMap = new Map<string, Address>();
+    libMap = new Map<string, Address>();
     traceVisitor: TraceVisitor;
     chain: Chain;
 
@@ -135,7 +136,8 @@ export class TransactionSet {
             argBytes = new Uint8Array(0);
         }
 
-        return concatBytes(contract.bytecode.bytecode, argBytes);
+        const bytecode = this._artifactManager.link(contract.bytecode, this.libMap);
+        return concatBytes(bytecode, argBytes);
     }
 
     decodeReturns(
@@ -241,6 +243,7 @@ export class TransactionSet {
         return {
             from: SENDER,
             to,
+            delegatingContract: undefined,
             data,
             gas: 0n,
             value: step.value === undefined ? 0n : step.value,
@@ -253,7 +256,7 @@ export class TransactionSet {
     }
 
     trace(): Trace {
-        return this.traceVisitor.getTrace()
+        return this.traceVisitor.getTrace();
     }
 
     run(): boolean {
@@ -271,6 +274,10 @@ export class TransactionSet {
                 if (!res.reverted) {
                     sol.assert(res.newContract !== undefined, ``);
                     this.contractMap.set(info.contractName, res.newContract);
+
+                    if (info.ast && info.ast.kind === sol.ContractKind.Library) {
+                        this.libMap.set(`${info.fileName}:${info.contractName}`, res.newContract);
+                    }
                 }
             }
 

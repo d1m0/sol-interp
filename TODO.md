@@ -226,6 +226,7 @@
 209    - kill gen
 
     - implement library calls as delegate calls
+    - add code_in_constructor.sol test
     - implement address.call/address.staticcall
     - implement address.delegatecall/address.callcode
     - finish throw test
@@ -233,6 +234,8 @@
     - implement emit
     - implement storage for immutable state vars
     - can I implement computing the corrrect final deployed bytecode??
+    - test contract creation from delegate context creates the same address as from the source contract
+    - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
 
 Constructors:
     - add a test with an abstract constructor taking storage pointers

@@ -11,7 +11,7 @@ import * as fse from "fs-extra";
 import { BaseScope, LocalsScope } from "../../src/interp/scope";
 import { makeStateWithConstants, State } from "../../src/interp/state";
 import { Value as InterpValue } from "../../src/interp/value";
-import { isValueType } from "../../src/interp/utils";
+import { getStateStorage, isValueType, setStateStorage } from "../../src/interp/utils";
 import { addSources, ArtifactManager } from "../../src/interp/artifactManager";
 import { Interpreter } from "../../src";
 
@@ -55,7 +55,7 @@ export function makeState(
         if (view instanceof BaseMemoryView) {
             view.encode(val, res.memory, res.memAllocator);
         } else if (view instanceof BaseStorageView) {
-            res.account.storage = view.encode(val, res.account.storage);
+            setStateStorage(res, view.encode(val, getStateStorage(res)));
         } else {
             nyi(`Encode ${val} in ${view}`);
         }

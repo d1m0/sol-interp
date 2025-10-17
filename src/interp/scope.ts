@@ -14,7 +14,7 @@ import {
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
-import { defT, isValueType, panic } from "./utils";
+import { defT, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -415,17 +415,18 @@ export class ContractScope extends BaseScope {
             return view.toView();
         }
 
-        return view.decode(this.state.account.storage);
+        return view.decode(getStateStorage(this.state));
     }
 
     _lookupLocation(name: string): View | undefined {
         return this.fieldToView.get(name) as any;
     }
 
+    // @todo is this method really necessary? Don't assignments to storage happen through Interpreter.assign?
     _set(name: string, v: Value): void {
         const view = this.fieldToView.get(name);
         sol.assert(view !== undefined, `Uknown identifier ${name}`);
-        this.state.account.storage = view.encode(v, this.state.account.storage);
+        setStateStorage(this.state, view.encode(v, getStateStorage(this.state)));
     }
 
     public setConst(name: string, v: BaseMemoryView<BaseValue, rtt.BaseRuntimeType>): void {

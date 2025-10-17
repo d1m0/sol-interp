@@ -5,6 +5,7 @@ import * as sol from "solc-typed-ast";
 import { LValue, Value } from "./value";
 import { EvalStep, ExceptionStep, ExecStep, ExtCallStep, ExtReturnStep, Trace } from "./step";
 import { ZERO_ADDRESS } from "sol-dbg";
+import { getThis } from "./utils";
 
 export interface InterpVisitor {
     call(interp: Interpreter, state: State, msg: SolMessage): void;
@@ -32,7 +33,7 @@ export class TraceVisitor implements InterpVisitor {
         };
 
         if (state.msg.to.equals(ZERO_ADDRESS)) {
-            res.newContract = state.account.address;
+            res.newContract = getThis(state);
         }
 
         this.trace.push(new ExtReturnStep(res));
