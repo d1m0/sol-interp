@@ -104,7 +104,7 @@ describe("Simple function call tests", () => {
                 toABIEncodedType(astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer))
             );
 
-            const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT, false));
+            const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT));
 
             const data = concatBytes(
                 hexToBytes(`0x${infer.signatureHash(fun)}`),

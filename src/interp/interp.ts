@@ -82,6 +82,7 @@ import {
     clampIntToType,
     decodeView,
     defT,
+    deref,
     getCodeContractInfo,
     getContract,
     getContractInfo,
@@ -373,11 +374,11 @@ export class Interpreter {
         }
 
         // Decode args
-        let calldataArgs: Value[] = buildMsgViews(entryPoint, this._infer).map((x) => x[1]);
+        let calldataViews: View<rtt.Memory>[] = buildMsgViews(entryPoint, this._infer).map((x) => x[1]);
 
         // Skip selector
         if (rtt.hasSelector(entryPoint)) {
-            calldataArgs = calldataArgs.slice(1);
+            calldataViews = calldataViews.slice(1);
         }
 
         let argTs: BaseInterpType[];
@@ -408,23 +409,26 @@ export class Interpreter {
             nyi("public getters");
         }
 
-        calldataArgs = calldataArgs.map((arg, i) => {
+        const calldataArgs = calldataViews.map((view, i) => {
             const argT = argTs[i];
 
             if (argT instanceof rtt.PointerType && argT.location === sol.DataLocation.Storage) {
+                const v = decodeView(view, state);
+                sol.assert(typeof v === "bigint", ``)
+                return rtt.makeStorageView(argT.toType, [v, 32]);
             }
 
             if (isValueType(argT)) {
-                return decodeView(arg as View, state) as PrimitiveValue;
+                return decodeView(view, state) as PrimitiveValue;
             }
 
-            if (arg instanceof PointerCalldataView) {
-                const innerView = arg.toView(getMsg(state));
+            if (view instanceof PointerCalldataView) {
+                const innerView = view.toView(getMsg(state));
                 this.expect(innerView instanceof BaseCalldataView, ``);
                 return innerView;
             }
 
-            sol.assert(false, `Unexpected calldata arg ${ppValue(arg)}`);
+            sol.assert(false, `Unexpected calldata arg ${ppValue(view)}`);
         });
 
         let resBytecode: Uint8Array;
@@ -677,14 +681,17 @@ export class Interpreter {
 
         // Decode any primitive values
         const returnVals: Value[] = returnViews.map((v) => {
-            const baseVal = v.decode(storage);
-            if (isPrimitiveValue(baseVal)) {
-                return baseVal;
+            if (isValueType(v.type)) {
+                const t = v.decode(storage);
+                this.expect(isPrimitiveValue(t), ``)
+                return t;
             }
 
-            const memLoc = PointerMemView.allocMemFor(baseVal, v.type, state.memAllocator);
-            memLoc.encode(baseVal, state.memory, state.memAllocator);
-            return memLoc;
+            if (isPointerView(v)) {
+                return deref(v, state);
+            }
+
+            return v;
         });
 
         this.nodes.pop();
@@ -2171,21 +2178,18 @@ export class Interpreter {
     ): CallResult {
         this.expect(callee instanceof sol.MemberAccess, `Unexpected callee ${callee.print()}`);
         const astTarget = callee.vReferencedDeclaration;
-        const argTs: rtt.BaseRuntimeType[] = [];
+        let argTs: rtt.BaseRuntimeType[];
         let selector: Uint8Array;
 
         if (astTarget instanceof sol.FunctionDefinition) {
             selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`);
 
-            for (const argT of astTarget.vParameters.vParameters) {
-                argTs.push(changeLocTo(this.varDeclToRuntimeType(argT), sol.DataLocation.Memory));
-            }
+            argTs = astTarget.vParameters.vParameters.map((argT) => this.varDeclToRuntimeType(argT))
         } else if (astTarget instanceof sol.VariableDeclaration) {
             selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`);
 
             this.expect(astTarget.stateVariable);
-            const [getterArgsTs] = getGetterArgAndReturnTs(astTarget, this._infer);
-            argTs.push(...getterArgsTs);
+            [argTs] = getGetterArgAndReturnTs(astTarget, this._infer);
         } else {
             nyi(`External call target ${astTarget?.print()}`);
         }

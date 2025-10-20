@@ -13,6 +13,7 @@ library Lib {
     function push(uint[] storage p, uint v, bool nested) external {
         if (nested) {
             Lib1.push(p, v);
+            return;
         }
 
         p.push(v);

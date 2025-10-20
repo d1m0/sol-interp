@@ -158,7 +158,7 @@ export class TransactionSet {
             abiRetTs = retTs.map(toABIEncodedType);
         }
 
-        const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT, false));
+        const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT));
         const abiRes = ethABI.decodeParameters(canonicalRetTNames, bytesToHex(data));
 
         const decodedReturns: BaseValue[] = [];
