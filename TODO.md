@@ -201,15 +201,50 @@
 184    - in typeOf() handle int literals, string literals, address literals
 185    - clean test run
 186    - replace call to encode in evalExternalCall into a call to builtin encode to handle coercions
+187    - add simple call test
+188    - add code gen type to ArtifactInfo
+189    - implement old order of state var init
+190    - test state var init
+191    - test state var init calls method function, global function
+192    - implement computation of base arguments from most derived to most base
+193    - implement calling constructors in order
+194    - implement new order of state var init
+195    - implement try/catch
+196    - implement revert/throw
+197    - implement throw
+198    - implement require
+199    - test state reverting
+200    - implement address.balance
+201    - test balance reverting
+202    - test exception on insufficient balance matches expected bytes
+203    - test contract nonce reverting
+204    - test try new
+205    - test break inside clause with mutating statement after break
+206    - test with low-level clause before Panic/Error with a Panic/Error exception
+207    - test with Panic clause first, then Error with an Error exception
+208    - test with Error clause first, then Panic with a Panic exception
+209    - kill gen
+
+    - implement library calls as delegate calls
+    - add code_in_constructor.sol test
+    - implement address.call/address.staticcall
+    - implement address.delegatecall/address.callcode
+    - finish throw test
+    - test builtins
+    - implement emit
+    - implement storage for immutable state vars
+    - can I implement computing the corrrect final deployed bytecode??
+    - test contract creation from delegate context creates the same address as from the source contract
+    - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
+
+Constructors:
+    - add a test with an abstract constructor taking storage pointers
+    - add test with difference in initializing order depending on old codegen or new codegen
+
 
 - finish evalExternalCall.
-    - Don't forget putAccount and getAccount around the actual call
     - add balance handling
-- add simple call test
 - clean test run
-
-    Reminder: - go through and replace `sol.*` imports when only assert and 1-2 things are imported with `import {assert, ...} from 'solc-typed-ast'`
-
 - (address).call builtin
 
 - implement delegate call
@@ -241,7 +276,6 @@
 
 - maybe move constants cache to Chain from Artifact? Though logically it feels like it fits better there....
 - Interp.makeState duplicates logic in Chain
-- write external call logic
 - add unit test with empty constructors and calling
 - add abi.encodeCall test with failure in type checking
 
@@ -249,29 +283,6 @@
 - migrate builtin tests
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
-- Idea: Tying it all toghether at the top-level:
-    - interface PersistentState {
-        artifact: ArtifactInfo;
-        mdc: ContractDefinition;
-        storage: Storage;
-        immutable: Memory;
-        balance: bigint;
-        ...
-      }
-    - World class has an ArtifactManager
-        states: map<Address, PersistentState>
-        makeCallState(msg: SolMessage) -> State
-            - ai = states[msg.to]
-            - construct memory and constant map from artifactManager.gatherConstants(ai)
-            - fill out State - {intCallStack, scope,)
-            
-        makeCreateState(msg: SolMessage) -> State
-            - nyi
-
-    - Implement Interpreter.call
-    - add `msg` builtin struct
-
-    - add a full call test that accesses msg builtin
 
 - Idea: remove reliance on solc-typed-ast's resolve:
     - add remaining named defs to global and struct scopes
@@ -281,18 +292,12 @@
 - add BaseWorld class that has an ArtifactManager
 
 - need an "immutable" var space somewhere in the state
-
 - make an exhaustive test for coercions from old code
 
 // ---------------
-- getters
-    - test virtual function resolves to public getter
-    - note - getters are only ever called externally :)
-- external calls
-- add evalNew for contracts
+- test virtual function resolves to public getter
 - more coercions
 - cli for playing
-- try/catch etc...
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos
@@ -310,6 +315,16 @@ Eventually:
 
 Writing ideas:
     - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!
+    - care to match low-level behavior: implemeting the differences between IR and old code-gen
 
-Tried and failed:
-- jest debug config
+https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructors
+https://docs.soliditylang.org/en/v0.8.30/contracts.html#constructor
+https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
+
+Tests requiring inline assembly:
+- test exception while decoding Error(string) and Panic(uint256)
+    - without catch {} catch (bytes memory) {}
+    - with only catch{}
+    - with only catch (bytes memory) {}
+    - with both catch {} and catch (bytes memory) {}
+    - use type confusion to call a method that succeeds but returns data of the wrong type, causing an exception in the decoding of the success try clause

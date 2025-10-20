@@ -1,13 +1,39 @@
-import { assert, repeat, DataLocation } from "solc-typed-ast";
+import { assert, repeat, DataLocation, } from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { Value } from "./value";
 import * as ethABI from "web3-eth-abi";
 import { nyi, View, Value as BaseValue, Struct, PointerMemView, bigIntToNum } from "sol-dbg";
 import { ppValue } from "./pp";
 import { State } from "./state";
-import { Address, concatBytes, createAddressFromString, hexToBytes } from "@ethereumjs/util";
-import { bytes24, decodeView, isValueType } from "./utils";
+import {
+    Address,
+    concatBytes,
+    createAddressFromString,
+    equalsBytes,
+    hexToBytes
+} from "@ethereumjs/util";
+import { bytes24, decodeView, deref, indexView, isStructView, isValueType, length } from "./utils";
 import { BaseInterpType } from "./types";
+import { isArrayLikeView } from "./view";
+
+/**
+ * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
+ */
+export function skipFieldDueToMap(t: rtt.BaseRuntimeType): boolean {
+    if (t instanceof rtt.MappingType) {
+        return true;
+    }
+
+    if (t instanceof rtt.PointerType) {
+        return skipFieldDueToMap(t.toType);
+    }
+
+    if (t instanceof rtt.ArrayType) {
+        return skipFieldDueToMap(t.elementT);
+    }
+
+    return false;
+}
 
 /**
  * Convert an interpreter type to an ABI type. This is analogous to `InferType.toABIEncodedType`,
@@ -49,66 +75,146 @@ export function toABIEncodedType(type: BaseInterpType): BaseInterpType {
 }
 
 /**
- * Convert a sol-dbg `Value` (so potentially involving structs) to an abi-like value
- * acceptable to `web3-eth-abi`.
+ * Convert an interpreter `Value` to an abi value acceptable to `web3-eth-abi`.
  *
  * Note that storage pointers and libraries are a special case - they are passed directly as
  * addresses since libraries are called with DELEGATECALL.
+ * @todo re-write valueToAbiValue - seems confusing
+ * @todo write rules about the correspondance between Run-time Types and Values
  */
-function valueToAbiValue(v: Value | BaseValue, s: State, isLib: boolean): any {
-    if (
-        typeof v === "bigint" ||
-        typeof v === "boolean" ||
-        v instanceof Uint8Array ||
-        typeof v === "string"
-    ) {
+function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
+    // Storage pointers are encoded as ints in library calls
+    if (typ instanceof rtt.IntType && (v instanceof rtt.ArrayStorageView || v instanceof rtt.StructStorageView || v instanceof rtt.PackedArrayStorageView)) {
+        assert(v.endOffsetInWord === 32, `Unexpected non-aligned view {0}`, v);
+        return v.key;
+    }
+
+    // Primitive values
+    if (isValueType(typ) && v instanceof View) {
+        v = decodeView(v, s) as Value;
+    }
+
+    if (rtt.isPointerView(v)) {
+        v = deref(v, s);
+    }
+
+    if (typ instanceof rtt.IntType) {
+        assert(typeof v === "bigint", `Expected bigint for ${typ.pp()} not ${ppValue(v)}`)
         return v;
     }
 
-    if (v instanceof Address) {
+    if (typ instanceof rtt.BoolType) {
+        assert(typeof v === "boolean", `Expected bool for ${typ.pp()} not ${ppValue(v)}`)
+        return v;
+    }
+
+    if (typ instanceof rtt.AddressType) {
+        assert(v instanceof Address, `Expected Address for ${typ.pp()} not ${ppValue(v)}`)
         return v.toString();
     }
 
-    if (v instanceof Array) {
-        return v.map((x) => valueToAbiValue(x, s, isLib));
-    }
-
-    if (v instanceof View) {
-        // Storage pointers are passed by address to libraries
-        if (isLib && v instanceof rtt.BaseStorageView) {
-            assert(v.endOffsetInWord === 32, `Unexpected non-aligned view {0}`, v);
-            return v.key;
-        }
-
-        assert(!(v instanceof rtt.BaseStorageView), "");
-        return valueToAbiValue(decodeView(v, s), s, isLib);
-    }
-
-    if (v instanceof Struct) {
-        return valueToAbiValue(
-            v.entries.map(([, entry]) => entry),
-            s,
-            isLib
-        );
-    }
-
-    if (v instanceof Map) {
-        assert(false, `Shouldn't encounter maps directly`);
-    }
-
     // External fun refs are stored as bytes24 - address then selector
-    if (v instanceof rtt.ExternalFunRef) {
+    if (typ instanceof rtt.FunctionType) {
+        assert(v instanceof rtt.ExternalFunRef, `Expected ExternalFunRef for ${typ.pp()} not ${ppValue(v)}`)
         return concatBytes(v.address.toBytes(), v.selector);
     }
 
-    nyi(`valueToAbiValue${ppValue(v)}`);
+    if (typ instanceof rtt.FixedBytesType) {
+        assert(v instanceof Uint8Array, `Expected Uint8Array for ${typ.pp()} not ${ppValue(v)}`)
+        return v;
+    }
+
+    // Pointer ref values (views)
+    if (typ instanceof rtt.PointerType) {
+        return valueToAbiValue(v, typ.toType, s);
+    }
+
+    if (typ instanceof rtt.BytesType) {
+        assert(v instanceof View && v.type instanceof rtt.BytesType, `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`)
+        return decodeView(v, s)
+    }
+
+    if (typ instanceof rtt.StringType) {
+        assert(v instanceof View && v.type instanceof rtt.StringType, `Expected string View for ${typ.pp()} not ${ppValue(v)}`)
+        return decodeView(v, s)
+    }
+
+    if (typ instanceof rtt.ArrayType) {
+        assert(isArrayLikeView(v), `Expected Array for ${typ.pp()} not ${ppValue(v)}`)
+        const len = length(v, s);
+        assert(typeof len === "bigint", `Failed decoding len`)
+
+        const res: any[] = [];
+        const elT = typ.elementT;
+
+        for (let i = 0n; i < len; i++) {
+            res.push(valueToAbiValue(indexView(v, i, s), elT, s))
+        }
+
+        return res;
+    }
+
+    if (typ instanceof rtt.TupleType) {
+        const res: any[] = [];
+
+        // Fixed arrays encoded as tuples
+        if (isArrayLikeView(v)) {
+            for (let i = 0; i < typ.elementTypes.length; i++) {
+                res.push(valueToAbiValue(indexView(v, BigInt(i), s), typ.elementTypes[i], s))
+            }
+
+            return res;
+        }
+
+        // Structs
+        if (isStructView(v)) {
+            const structT = (v as unknown as View).type as rtt.StructType;
+
+            for (let i = 0; i < typ.elementTypes.length; i++) {
+                const [name, fieldT] = structT.fields[i];
+
+                if (skipFieldDueToMap(fieldT)) {
+                    continue;
+                }
+
+                const fieldV = v.fieldView(name);
+                assert(!(fieldV instanceof rtt.DecodingFailure), ``);
+
+                res.push(valueToAbiValue(fieldV, typ.elementTypes[i], s))
+            }
+
+            return res;
+        }
+    }
+
+    /*
+    if (typ instanceof rtt.StructType) {
+        assert(isStructView(v), `Expected Array for ${typ.pp()} not ${v}`)
+        const res: any[] = [];
+
+        for (const [name, fieldT] of typ.fields) {
+            if (skipFieldDueToMap(fieldT)) {
+                continue;
+            }
+
+            const fieldV = v.fieldView(name);
+            assert(!(fieldV instanceof rtt.DecodingFailure), ``);
+
+            res.push(valueToAbiValue(fieldV, fieldT, s))
+        }
+
+        return res;
+    }
+    */
+
+    nyi(`valueToAbiValue(${ppValue(v)}, ${typ.pp()})`);
 }
 
 /**
  * Get the canonical name for the `TypeNode` `t`, to be used for encoding the
  * type.
  */
-export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType, isLib: boolean): string {
+export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType): string {
     if (
         t instanceof rtt.IntType ||
         t instanceof rtt.FixedBytesType ||
@@ -121,19 +227,18 @@ export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType, isLib: boolean): 
     }
 
     if (t instanceof rtt.ArrayType) {
-        return `${abiTypeToCanonicalName(t.elementT, isLib)}[${t.size ? t.size.toString(10) : ""}]`;
+        return `${abiTypeToCanonicalName(t.elementT)}[${t.size ? t.size.toString(10) : ""}]`;
     }
 
     if (t instanceof rtt.TupleType) {
         return `(${t.elementTypes
-            .map((elementT) => abiTypeToCanonicalName(elementT, isLib))
+            .map((elementT) => abiTypeToCanonicalName(elementT))
             .join(",")})`;
     }
 
     // Locations are skipped in signature canonical names
     if (t instanceof rtt.PointerType) {
-        assert(!(t.location === DataLocation.Storage), ``);
-        return abiTypeToCanonicalName(t.toType, isLib);
+        return abiTypeToCanonicalName(t.toType);
     }
 
     assert(false, "Unexpected ABI Type: {0}", t);
@@ -149,14 +254,13 @@ export function encode(
     state: State,
     isLibrary: boolean = false
 ): Uint8Array {
-    const abiTypes = ts.map((t) => toABIEncodedType(t));
-    const typeNames = abiTypes.map((t) => abiTypeToCanonicalName(t, isLibrary));
+    const abiTypes = ts.map((t) => toABIEncodedType(t)).filter((t) => !skipFieldDueToMap(t));
+    const typeNames = abiTypes.map((t) => abiTypeToCanonicalName(t));
 
-    const abiVals = vs.map((v) => valueToAbiValue(v, state, isLibrary));
+    const abiVals = vs.map((v, i) => valueToAbiValue(v, abiTypes[i], state));
 
     return hexToBytes(ethABI.encodeParameters(typeNames, abiVals) as `0x${string}`);
 }
-
 
 /**
  * Convert an abi value obtained from web3-eth-abi to a BaseValue.
@@ -178,6 +282,10 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         return hexToBytes(v);
     }
 
+    if (type instanceof rtt.AddressType) {
+        return createAddressFromString(v);
+    }
+
     if (type instanceof rtt.PointerType && type.toType instanceof rtt.StringType) {
         return v;
     }
@@ -186,7 +294,9 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         const elT = type.toType.elementT;
         const res: BaseValue[] = [];
 
-        for (let i = 0; i < v.__length__; i++) {
+        const len = v.length !== undefined ? v.length : v.__length__;
+
+        for (let i = 0; i < len; i++) {
             res.push(abiValueToBaseValue(v[i], elT));
         }
 
@@ -210,17 +320,6 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
         return res;
     }
 
-    if (type instanceof rtt.StructType) {
-        const fieldTs: rtt.BaseRuntimeType[] = type.fields.map(([, type]) => type);
-        const fieldVals = (v as any[]).map((el, i) => abiValueToBaseValue(el, fieldTs[i]));
-
-        return new Struct(type.fields.map(([name], i) => [name, fieldVals[i]]));
-    }
-
-    if (type instanceof rtt.AddressType) {
-        return createAddressFromString(v);
-    }
-
     nyi(`abiValueToBaseValue(${v}, ${type.pp()})`);
 }
 
@@ -230,25 +329,25 @@ function liftABIBaseValue(v: BaseValue, type: rtt.BaseRuntimeType): BaseValue {
     }
 
     if (type instanceof rtt.ArrayType) {
-        assert(v instanceof Array, ``)
+        assert(v instanceof Array, ``);
         return v.map((el) => liftABIBaseValue(el, type.elementT));
     }
 
     if (type instanceof rtt.TupleType) {
-        assert(v instanceof Array, ``)
+        assert(v instanceof Array, ``);
         return v.map((el, i) => liftABIBaseValue(el, type.elementTypes[i]));
     }
 
     if (type instanceof rtt.StructType) {
         assert(v instanceof Array && v.length === type.fields.length, ``);
-        const fields: [string, BaseValue][] = [];
+        const fields: Array<[string, BaseValue]> = [];
 
         for (let i = 0; i < v.length; i++) {
             const [name, fieldT] = type.fields[i];
-            fields.push([name, liftABIBaseValue(v[i], fieldT)])
+            fields.push([name, liftABIBaseValue(v[i], fieldT)]);
         }
 
-        return new Struct(fields)
+        return new Struct(fields);
     }
 
     return v;
@@ -272,9 +371,14 @@ function liftABIBaseValue(v: BaseValue, type: rtt.BaseRuntimeType): BaseValue {
  * @param encVersion
  * @returns
  */
-export function decode(data: Uint8Array, ts: BaseInterpType[], state: State): Value[] {
+export function decode(
+    data: Uint8Array,
+    ts: BaseInterpType[],
+    state: State,
+    base: bigint = 0n
+): Value[] {
     const abiTypes = ts.map((t) => toABIEncodedType(t));
-    const views = rtt.makeCalldataViews(abiTypes, 0n);
+    const views = rtt.makeCalldataViews(abiTypes, base);
 
     const res: Value[] = [];
     for (let i = 0; i < views.length; i++) {
@@ -315,4 +419,31 @@ export function decode(data: Uint8Array, ts: BaseInterpType[], state: State): Va
     }
 
     return res;
+}
+
+/**
+ * IF the given data:
+ *  - begins with the specified selector
+ *  - decodes to the given types `ts` without failures
+ *
+ * Then return the decoded values. Otherwise return undefined.
+ */
+export function decodesWithSelector(
+    selector: Uint8Array,
+    data: Uint8Array,
+    ts: BaseInterpType[],
+    state: State
+): Value[] | undefined {
+    if (!equalsBytes(data.slice(0, 4), selector)) {
+        return undefined;
+    }
+
+    const vals = decode(data, ts, state, 4n);
+    for (const v of vals) {
+        if (rtt.hasPoison(v)) {
+            return undefined;
+        }
+    }
+
+    return vals;
 }

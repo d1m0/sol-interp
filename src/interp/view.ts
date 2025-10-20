@@ -12,11 +12,14 @@ import {
     isArrayLikeStorageView,
     BaseRuntimeType,
     FixedBytesType,
-    PointerType
+    PointerType,
+    BaseCalldataView,
+    BytesType,
+    Memory
 } from "sol-dbg";
 import { BaseScope } from "./scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
-import { bytes1 } from "./utils";
+import { bytes1, bytesT } from "./utils";
 
 export abstract class BaseLocalView<
     V extends PrimitiveValue,
@@ -123,6 +126,16 @@ export class ArrayLikeLocalView
         }
 
         return new SingleByteLocalView(this.loc, Number(key));
+    }
+}
+
+export class MsgDataView extends BaseCalldataView<Uint8Array, BytesType> {
+    constructor() {
+        super(bytesT, 0n, 0n);
+    }
+
+    decode(state: Memory): Uint8Array<ArrayBufferLike> | DecodingFailure {
+        return state;
     }
 }
 

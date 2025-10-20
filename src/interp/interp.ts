@@ -36,16 +36,19 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { WorldInterface, State, SolMessage } from "./state";
-import { EvalStep, ExecStep, Trace } from "./step";
+import { WorldInterface, State, SolMessage, CallResult } from "./state";
 import {
     InternalError,
     InterpError,
     NoScope,
     NotDefined,
-    OOB,
-    Overflow,
-    RuntimeError
+    OOBError,
+    OverflowError,
+    RuntimeError,
+    PANIC_SELECTOR,
+    ERROR_SELECTOR,
+    PanicError,
+    CustomError
 } from "./exceptions";
 import { gte, lt } from "semver";
 import {
@@ -65,26 +68,42 @@ import {
     Value,
     ValueTypeConstructors
 } from "./value";
-import { Address, bigIntToBytes, bytesToHex, concatBytes, equalsBytes, hexToBytes } from "@ethereumjs/util";
+import {
+    Address,
+    bigIntToBytes,
+    bytesToHex,
+    concatBytes,
+    equalsBytes,
+    hexToBytes
+} from "@ethereumjs/util";
 import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
     changeLocTo,
     clampIntToType,
     decodeView,
     defT,
+    deref,
+    getCodeContractInfo,
     getContract,
     getContractInfo,
+    getGetterArgAndReturnTs,
+    getLibraryLinkedAddress,
     getModifiers,
     getMsg,
+    getMsgSender,
+    getStateStorage,
+    getThis,
+    isDirectlyAssignable,
     isMethod,
     isStructView,
     isValueType,
     makeZeroValue,
     memBytesT,
+    memStringT,
     printNode,
     removeLiteralTypes,
-    solcValueToValue,
-    typesEqualModuloLocation,
+    setStateStorage,
+    solcValueToValue
 } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
@@ -95,10 +114,21 @@ import {
     PointerLocalView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
-import { abi, abiEncodeBuiltin, assertBuiltin, popBuiltin, pushBuiltin } from "./builtins";
+import {
+    abi,
+    abiEncodeBuiltin,
+    assertBuiltin,
+    implicitFirstArgBuiltins,
+    makeMsgBuiltin,
+    popBuiltin,
+    pushBuiltin,
+    requireBuiltin,
+    revertBuiltin
+} from "./builtins";
 import { ArtifactManager } from "./artifactManager";
-import { decode, encode } from "./abi";
+import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { BaseInterpType } from "./types";
+import { InterpVisitor } from "./visitors";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -108,25 +138,6 @@ enum ControlFlow {
 }
 
 const scratchWord = new Uint8Array(32);
-
-/**
- * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
- */
-export function skipFieldDueToMap(t: rtt.BaseRuntimeType): boolean {
-    if (t instanceof rtt.MappingType) {
-        return true;
-    }
-
-    if (t instanceof rtt.PointerType) {
-        return skipFieldDueToMap(t.toType);
-    }
-
-    if (t instanceof rtt.ArrayType) {
-        return skipFieldDueToMap(t.elementT);
-    }
-
-    return false;
-}
 
 /**
  * Solidity Interpeter class. Includes the following entrypoints
@@ -146,7 +157,6 @@ export function skipFieldDueToMap(t: rtt.BaseRuntimeType): boolean {
  */
 export class Interpreter {
     nodes: Array<sol.ASTNode | BuiltinFunction>;
-    _trace: Trace;
 
     get compilerVersion(): string {
         return this.artifact.compilerVersion;
@@ -157,20 +167,16 @@ export class Interpreter {
     constructor(
         protected readonly world: WorldInterface,
         public readonly artifactManager: ArtifactManager,
-        public readonly artifact: ArtifactInfo
+        public readonly artifact: ArtifactInfo,
+        private readonly visitors: InterpVisitor[]
     ) {
         this.nodes = [];
-        this._trace = [];
         this._infer = new sol.InferType(this.compilerVersion);
     }
 
     get curNode(): sol.ASTNode | BuiltinFunction {
         sol.assert(this.nodes.length > 0, `No cur node`);
         return this.nodes[this.nodes.length - 1];
-    }
-
-    get trace(): Trace {
-        return this._trace;
     }
 
     /**
@@ -181,14 +187,22 @@ export class Interpreter {
         msg: string,
         ctx: sol.ASTNode | BuiltinFunction = this.curNode
     ): never {
-        throw new errorConstr(ctx, this._trace, msg);
+        throw new errorConstr(ctx, msg);
     }
 
     /**
      * A runtime error. This indicates an actual EVM exception at runtime
      */
-    runtimeError(errorConstr: new (...args: any[]) => RuntimeError, msg: string): never {
-        throw new errorConstr(this.curNode, this._trace, msg);
+    runtimeError(
+        errorConstr: new (...args: any[]) => RuntimeError,
+        state: State,
+        ...args: any[]
+    ): never {
+        const err = new errorConstr(this.curNode, ...args);
+        for (const v of this.visitors) {
+            v.exception(this, state, err);
+        }
+        throw err;
     }
 
     astToRuntimeType(t: sol.TypeNode, loc?: sol.DataLocation): BaseInterpType {
@@ -205,21 +219,137 @@ export class Interpreter {
         // Detect global ref type constants and treat them as stored in memory
         let loc: sol.DataLocation | undefined;
 
-        if ((e instanceof sol.Identifier || e instanceof sol.MemberAccess) && e.vReferencedDeclaration instanceof sol.VariableDeclaration && (e.vReferencedDeclaration.mutability === sol.Mutability.Constant)) {
+        if (
+            (e instanceof sol.Identifier || e instanceof sol.MemberAccess) &&
+            e.vReferencedDeclaration instanceof sol.VariableDeclaration &&
+            e.vReferencedDeclaration.mutability === sol.Mutability.Constant
+        ) {
             loc = sol.DataLocation.Memory;
         }
 
         try {
             this.astToRuntimeType(solT, loc);
         } catch {
-            console.error(`Type: ${solT.pp()} ${e.print()}`)
+            console.error(`Type: ${solT.pp()} ${e.print()}`);
         }
         return this.astToRuntimeType(solT, loc);
     }
 
     ///*********************EXTERNAL FUNCTION CALLS************************************
-    public create(msg: SolMessage, state: State): Address {
-        nyi(`create(${msg}, ${state})`);
+    /**
+     * Entry point to initialize a new contract. Note that the msg.data is the complete msg.data
+     * including the creation bytecode.
+     * @param msg
+     * @param state
+     */
+    public create(msg: SolMessage, state: State): Uint8Array | RuntimeError {
+        state.msg = msg;
+
+        for (const v of this.visitors) {
+            v.call(this, state, msg);
+        }
+
+        const mdc = getContractInfo(state);
+        this.expect(mdc.ast !== undefined, `Can't create a contract with no AST`);
+        const bases = mdc.ast.vLinearizedBaseContracts.toReversed();
+        // We assume that the caller has created and initialized state.account
+
+        // If there are arguments to be passed, then the target MDC must have a constructor
+        this.expect(
+            msg.data.length === mdc.bytecode.bytecode.length ||
+            (mdc.ast.vConstructor !== undefined &&
+                mdc.ast.vConstructor.vParameters.vParameters.length > 0)
+        );
+
+        try {
+            // As per:
+            // https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
+            // Contract initialization proceeds by:
+            if (mdc.artifact.codegen === "old") {
+                // For old codegen:
+                //
+                // 1. All state variables are zero-initialized at the beginning.
+                // 2. Initialize all state variables in the whole inheritance hierarchy from most base to most derived.
+                for (const base of bases) {
+                    for (const v of base.vStateVariables) {
+                        this.initializeStateVar(v, state);
+                    }
+                }
+
+                // 3. Evaluate base constructor arguments from most derived to most base contract.
+                const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
+
+                if (mdc.ast.vConstructor) {
+                    const calldataArgs: Value[] = buildMsgViews(
+                        mdc.ast.vConstructor,
+                        this._infer,
+                        BigInt(mdc.bytecode.bytecode.length)
+                    ).map((x) => x[1]);
+
+                    const interp = this;
+                    const argTs = mdc.ast.vConstructor.vParameters.vParameters.map((decl) =>
+                        interp.varDeclToRuntimeType(decl)
+                    );
+                    baseArgMap.set(mdc.ast.vConstructor, [calldataArgs, argTs]);
+                }
+
+                // 4. Run the constructor, if present, for all contracts in the linearized hierarchy from most base to most derived.
+                for (const base of bases) {
+                    if (!base.vConstructor) {
+                        continue;
+                    }
+
+                    this.nodes.push(base.vConstructor);
+                    const argDesc = baseArgMap.get(base.vConstructor);
+                    this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
+                    const [args, argTs] = argDesc;
+                    this._execCall(base.vConstructor, args, argTs, state);
+                    this.nodes.pop();
+                }
+            } else {
+                // For IR codegen:
+                //
+                // 1. All state variables are zero-initialized at the beginning.
+                // 2. Evaluate base constructor arguments from most derived to most base contract.
+                const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
+
+                // 3. For every contract in order from most base to most derived in the linearized hierarchy:
+                for (const base of bases) {
+                    // 1. Initialize state variables.
+                    for (const v of base.vStateVariables) {
+                        this.initializeStateVar(v, state);
+                    }
+
+                    // 2. Run the constructor (if present).
+                    if (!base.vConstructor) {
+                        continue;
+                    }
+
+                    this.nodes.push(base.vConstructor);
+                    const argDesc = baseArgMap.get(base.vConstructor);
+                    this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
+                    const [args, argTs] = argDesc;
+                    this._execCall(base.vConstructor, args, argTs, state);
+                    this.nodes.pop();
+                }
+            }
+        } catch (e) {
+            if (e instanceof RuntimeError) {
+                return e;
+            }
+
+            throw e;
+        }
+
+        for (const v of this.visitors) {
+            v.return(this, state, mdc.deployedBytecode.bytecode);
+        }
+
+        // If we succeed update the world on our new state
+        this.world.updateAccount(state.account);
+
+        // @todo implement immutables
+        return mdc.deployedBytecode.bytecode;
     }
 
     /**
@@ -230,51 +360,78 @@ export class Interpreter {
     public call(msg: SolMessage, state: State): Uint8Array | RuntimeError {
         state.msg = msg;
 
-        const contract = getContractInfo(state);
+        for (const v of this.visitors) {
+            v.call(this, state, msg);
+        }
+
+        const codeInfo = getCodeContractInfo(state);
+        this.expect(codeInfo !== undefined);
         // This handles dispatch including fallback and receive functions.
-        const entryPoint = this.artifactManager.findEntryPoint(msg.data, contract);
+        const entryPoint = this.artifactManager.findEntryPoint(msg.data, codeInfo);
 
         if (entryPoint === undefined) {
             nyi(`Couldn't find entry point for ${bytesToHex(msg.data)}`);
         }
 
         // Decode args
-        let calldataArgs: Value[] = buildMsgViews(entryPoint, this._infer).map((x) => x[1]);
+        let calldataViews: View<rtt.Memory>[] = buildMsgViews(entryPoint, this._infer).map((x) => x[1]);
 
         // Skip selector
         if (rtt.hasSelector(entryPoint)) {
-            calldataArgs = calldataArgs.slice(1);
+            calldataViews = calldataViews.slice(1);
         }
 
         let argTs: BaseInterpType[];
         if (entryPoint instanceof sol.FunctionDefinition) {
+            const isLib =
+                (codeInfo.ast as sol.ContractDefinition).kind === sol.ContractKind.Library;
+
             // The arg values here are calldata pointers, which may differ from
             // the actual arguments (i.e. they may be memory pointers).  The
             // `Intepreter.assign` in `makeScope()` will handle the copying from
             // calldata to memory.
-            argTs = entryPoint.vParameters.vParameters.map((argT) =>
-                rtt.specializeType(
-                    rtt.generalizeType(this.varDeclToRuntimeType(argT)),
-                    sol.DataLocation.CallData
-                )
-            );
+            argTs = entryPoint.vParameters.vParameters.map((argT, idx) => {
+                const declT = this.varDeclToRuntimeType(argT);
+
+                if (
+                    isLib &&
+                    declT instanceof rtt.PointerType &&
+                    declT.location === sol.DataLocation.Storage
+                ) {
+                    return declT
+                }
+
+                return rtt.specializeType(rtt.generalizeType(declT), sol.DataLocation.CallData);
+            });
+        } else if (entryPoint instanceof sol.VariableDeclaration) {
+            argTs = getGetterArgAndReturnTs(entryPoint, this._infer)[0];
         } else {
             nyi("public getters");
         }
 
-        calldataArgs = calldataArgs.map((arg, i) => {
-            if (isValueType(argTs[i])) {
-                return decodeView(arg as View, state) as PrimitiveValue;
+        const calldataArgs = calldataViews.map((view, i) => {
+            const argT = argTs[i];
+
+            if (argT instanceof rtt.PointerType && argT.location === sol.DataLocation.Storage) {
+                const v = decodeView(view, state);
+                sol.assert(typeof v === "bigint", ``)
+                return rtt.makeStorageView(argT.toType, [v, 32]);
             }
 
-            if (arg instanceof PointerCalldataView) {
-                const innerView = arg.toView(getMsg(state));
+            if (isValueType(argT)) {
+                return decodeView(view, state) as PrimitiveValue;
+            }
+
+            if (view instanceof PointerCalldataView) {
+                const innerView = view.toView(getMsg(state));
                 this.expect(innerView instanceof BaseCalldataView, ``);
                 return innerView;
             }
 
-            sol.assert(false, `Unexpected calldata arg ${ppValue(arg)}`);
+            sol.assert(false, `Unexpected calldata arg ${ppValue(view)}`);
         });
+
+        let resBytecode: Uint8Array;
 
         if (entryPoint instanceof sol.FunctionDefinition) {
             let res: Value[];
@@ -296,10 +453,35 @@ export class Interpreter {
 
             const isLib = getContract(state).kind === sol.ContractKind.Library;
 
-            return encode(res, resTs, state, isLib);
+            resBytecode = encode(res, resTs, state, isLib);
+        } else if (entryPoint instanceof sol.VariableDeclaration) {
+            let res: Value[];
+
+            try {
+                res = this.callGetter(entryPoint, calldataArgs, argTs, state);
+            } catch (e) {
+                if (e instanceof RuntimeError) {
+                    return e;
+                }
+
+                throw e;
+            }
+
+            // Encode returns
+            const resTs = getGetterArgAndReturnTs(entryPoint, this._infer)[1];
+            resBytecode = encode(res, resTs, state, false);
         } else {
             nyi(`public getter`);
         }
+
+        for (const v of this.visitors) {
+            v.return(this, state, resBytecode);
+        }
+
+        // If we succeed update the world on our new state
+        this.world.updateAccount(state.account);
+
+        return resBytecode;
     }
 
     private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
@@ -308,7 +490,8 @@ export class Interpreter {
             node instanceof sol.ModifierDefinition ||
             node instanceof sol.Block ||
             node instanceof sol.UncheckedBlock ||
-            node instanceof sol.VariableDeclarationStatement
+            node instanceof sol.VariableDeclarationStatement ||
+            node instanceof sol.TryCatchClause
         ) {
             const newScope = new LocalsScope(node, state, this.compilerVersion, state.scope);
 
@@ -331,7 +514,190 @@ export class Interpreter {
         state.scope = state.scope?._next;
     }
 
+    ///*********************Constructors **********************************************
+    /**
+     * Evaluate the inline initializer (if any) for the given state variable and assign it.
+     * @param v
+     */
+    private initializeStateVar(v: sol.VariableDeclaration, s: State): void {
+        this.expect(v.stateVariable && v.vScope instanceof sol.ContractDefinition);
+        this.nodes.push(v);
+        if (v.vValue === undefined) {
+            return;
+        }
+
+        const oldScope = s.scope;
+        s.scope = this.makeStaticScope(v.vScope, s);
+
+        const initalVal = this.eval(v.vValue, s);
+        const varLoc = s.scope.lookupLocation(v.name);
+        this.expect(varLoc !== undefined);
+        this.assign(varLoc, initalVal, s);
+        s.scope = oldScope;
+        this.nodes.pop();
+    }
+
+    /**
+     * Evaluate the base constructor args for all bases of `mdc` from most-derived to most base contract.
+     * Note that:
+     *  - Inheirtance speicifiers are evaluated in the containing source unit scope
+     *  - Constructor modifiers are evaluated in the conrtact scope
+     * @param mdc
+     * @param s
+     */
+    private evalBaseConstructorArgs(
+        mdc: sol.ContractDefinition,
+        s: State
+    ): Map<sol.FunctionDefinition, [Value[], BaseInterpType[]]> {
+        const res = new Map<sol.FunctionDefinition, [Value[], BaseInterpType[]]>();
+        const oldScope = s.scope;
+
+        for (const base of mdc.vLinearizedBaseContracts) {
+            const curBaseArgs = new Map<sol.FunctionDefinition, [Value[], BaseInterpType[]]>();
+
+            for (const inhSpec of base.vInheritanceSpecifiers) {
+                s.scope = this.makeStaticScope(base.vScope, s);
+                const baseContract = inhSpec.vBaseType.vReferencedDeclaration;
+                this.expect(baseContract instanceof sol.ContractDefinition);
+
+                if (baseContract.vConstructor === undefined) {
+                    continue;
+                }
+
+                // In solidity <0.5.0 you could specify arguments for the same base multiple times.
+                // Only the first one in the C3-linearization order counts.
+                if (res.has(baseContract.vConstructor)) {
+                    continue;
+                }
+
+                const args: Value[] = [];
+                const argTs: BaseInterpType[] = [];
+
+                for (let i = 0; i < inhSpec.vArguments.length; i++) {
+                    args.push(this.eval(inhSpec.vArguments[i], s));
+                    argTs.push(this.typeOf(inhSpec.vArguments[i]));
+                }
+
+                curBaseArgs.set(baseContract.vConstructor, [args, argTs]);
+            }
+
+            if (base.vConstructor) {
+                s.scope = this.makeStaticScope(base.vConstructor, s);
+
+                for (const mod of base.vConstructor.vModifiers) {
+                    if (
+                        !(
+                            mod.vModifier instanceof sol.ContractDefinition &&
+                            mod.vModifier.vConstructor !== undefined
+                        )
+                    ) {
+                        continue;
+                    }
+
+                    const constr = mod.vModifier.vConstructor;
+                    const args: Value[] = [];
+                    const argTs: BaseInterpType[] = [];
+
+                    // In solidity <0.5.0 you could specify arguments for the same base multiple times.
+                    // Only the first one in the C3-linearization order counts.
+                    if (res.has(constr)) {
+                        continue;
+                    }
+
+                    for (let i = 0; i < mod.vArguments.length; i++) {
+                        args.push(this.eval(mod.vArguments[i], s));
+                        argTs.push(this.typeOf(mod.vArguments[i]));
+                    }
+
+                    curBaseArgs.set(constr, [args, argTs]);
+                }
+            }
+
+            for (const [constr, rest] of curBaseArgs) {
+                res.set(constr, rest);
+            }
+        }
+
+        s.scope = oldScope;
+        return res;
+    }
+
     ///*********************MODIFIERS/INTERNAL FUNCTION CALLS**************************
+
+    public callGetter(
+        callee: sol.VariableDeclaration,
+        args: Value[],
+        argTs: BaseInterpType[],
+        state: State
+    ): Value[] {
+        this.nodes.push(callee);
+        const scope = this.makeStaticScope(callee, state);
+        const storage = getStateStorage(state);
+        let stateVarView:
+            | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
+            | DecodingFailure
+            | undefined = scope.lookupLocation(callee.name) as
+            | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
+            | undefined;
+        this.expect(stateVarView !== undefined, `No state var ${callee.name}`);
+
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+            if (
+                stateVarView instanceof PointerStorageView &&
+                stateVarView.innerView instanceof rtt.ArrayStorageView
+            ) {
+                this.expect(
+                    typeof arg === "bigint",
+                    `Wrong argument type ${typeof args[i]} for array`
+                );
+                stateVarView = stateVarView.innerView.indexView(arg, storage);
+                this.expect(!(stateVarView instanceof DecodingFailure), `Failed indexing`);
+            } else {
+                this.expect(
+                    stateVarView instanceof PointerStorageView &&
+                    stateVarView.innerView instanceof MapStorageView
+                );
+                stateVarView = stateVarView.innerView.indexView(arg);
+                this.expect(!(stateVarView instanceof DecodingFailure), `Failed indexing`);
+            }
+        }
+
+        let returnViews =
+            stateVarView instanceof PointerStorageView &&
+                stateVarView.innerView instanceof StructStorageView
+                ? stateVarView.innerView.fieldViews.map(([, fv]) => fv)
+                : [stateVarView];
+
+        // Skip toplevel arrays and maps in structs
+        returnViews = returnViews.filter(
+            (v) =>
+                !(
+                    v instanceof rtt.PointerStorageView &&
+                    (v.innerView instanceof rtt.ArrayStorageView ||
+                        v.innerView instanceof MapStorageView)
+                )
+        );
+
+        // Decode any primitive values
+        const returnVals: Value[] = returnViews.map((v) => {
+            if (isValueType(v.type)) {
+                const t = v.decode(storage);
+                this.expect(isPrimitiveValue(t), ``)
+                return t;
+            }
+
+            if (isPointerView(v)) {
+                return deref(v, state);
+            }
+
+            return v;
+        });
+
+        this.nodes.pop();
+        return returnVals;
+    }
+
     /**
      * Make an internal call to `callee` with arguments `args` in state `state`.
      * @param callee
@@ -376,28 +742,204 @@ export class Interpreter {
             res = this.execForStatement(stmt, state);
         } else if (stmt instanceof sol.PlaceholderStatement) {
             res = this.execPlaceholderStatement(stmt, state);
+        } else if (stmt instanceof sol.TryStatement) {
+            res = this.execTryStatement(stmt, state);
+        } else if (stmt instanceof sol.RevertStatement) {
+            res = this.execRevertStatement(stmt, state);
+        } else if (stmt instanceof sol.Throw) {
+            res = this.execThrow(stmt, state);
             /*
         } else if (stmt instanceof sol.EmitStatement) {
             res = this.execEmitStatement(stmt, state);
         } else if (stmt instanceof sol.InlineAssembly) {
             res = this.execInlineAssembly(stmt, state);
-        } else if (stmt instanceof sol.RevertStatement) {
-            res = this.execRevertStatement(stmt, state);
-        } else if (stmt instanceof sol.Throw) {
-            res = this.execThrow(stmt, state);
-        } else if (stmt instanceof sol.TryCatchClause) {
-            res = this.execTryCatchClause(stmt, state);
-        } else if (stmt instanceof sol.TryStatement) {
-            res = this.execTryStatement(stmt, state);
             */
         } else {
             nyi(`Stmt ${stmt.constructor.name}`);
         }
 
-        this._trace.push(new ExecStep(stmt));
+        for (const v of this.visitors) {
+            v.exec(this, state, stmt);
+        }
+
         this.nodes.pop();
 
         return res;
+    }
+
+    private execRevertStatement(stmt: sol.RevertStatement, state: State): ControlFlow {
+        const errorDef = stmt.errorCall.vReferencedDeclaration;
+        this.expect(errorDef instanceof sol.ErrorDefinition);
+
+        const self = this;
+        const selector = hexToBytes(`0x${this._infer.signatureHash(errorDef)}`);
+        const argTs = errorDef.vParameters.vParameters.map((d) =>
+            changeLocTo(self.varDeclToRuntimeType(d), sol.DataLocation.Memory)
+        );
+        const argVs = stmt.errorCall.vArguments.map((arg) => this.eval(arg, state));
+        const [dataView] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
+        this.expect(
+            dataView instanceof BytesMemView,
+            `Expected encoded data not ${ppValue(dataView)}`
+        );
+        const argData = dataView.decode(state.memory);
+        this.expect(argData instanceof Uint8Array);
+        const data = concatBytes(selector, argData);
+        const msg = `${errorDef.name}(${argVs.map(ppValue).join(", ")})`;
+        this.runtimeError(CustomError, state, msg, data);
+    }
+
+    private execThrow(stmt: sol.Throw, state: State): ControlFlow {
+        this._execCall(revertBuiltin, [], [], state);
+        this.expect(false); // Never reached
+    }
+
+    private matchTryClause(
+        data: Uint8Array,
+        clause: sol.TryCatchClause,
+        state: State
+    ): Value[] | undefined {
+        if (clause.errorName === "Panic") {
+            return decodesWithSelector(PANIC_SELECTOR, data, [rtt.uint256], state);
+        }
+
+        if (clause.errorName === "Error") {
+            return decodesWithSelector(ERROR_SELECTOR, data, [memStringT], state);
+        }
+
+        if (clause.errorName === "") {
+            let argTs: BaseInterpType[];
+
+            if (clause.vParameters !== undefined) {
+                this.expect(clause.vParameters.vParameters.length <= 1);
+                const self = this;
+                argTs = clause.vParameters.vParameters.map((d) => self.varDeclToRuntimeType(d));
+                this.expect(argTs.length === 0 || argTs[0].pp() === "bytes memory");
+            } else {
+                argTs = [];
+            }
+
+            if (argTs.length === 0) {
+                return [];
+            }
+
+            const memBytesView = rtt.PointerMemView.allocMemFor(
+                data,
+                memBytesT,
+                state.memAllocator
+            );
+            memBytesView.encode(data, state.memory, state.memAllocator);
+
+            return [memBytesView];
+        }
+
+        nyi(`Error clause ${clause.errorName}`);
+    }
+
+    private execTryStatement(stmt: sol.TryStatement, state: State): ControlFlow {
+        // First decode the target along with gas, value and salt
+        const [callee, gas, value, salt] = this.decodeExternalOptions(
+            stmt.vExternalCall.vExpression,
+            state
+        );
+
+        // Next make the external call/contract creation
+        let res: CallResult;
+
+        if (callee instanceof sol.NewExpression) {
+            const astT = this._infer.typeNameToSpecializedTypeNode(
+                callee.vTypeName,
+                sol.DataLocation.Memory
+            );
+
+            this.expect(
+                astT instanceof sol.UserDefinedType &&
+                astT.definition instanceof sol.ContractDefinition
+            );
+
+            res = this._evalContractCreationImpl(
+                stmt.vExternalCall,
+                astT.definition,
+                gas,
+                value,
+                salt,
+                state
+            );
+        } else {
+            res = this._evalExternalCallImpl(stmt.vExternalCall, callee, gas, value, salt, state);
+        }
+
+        this.expect(stmt.vClauses.length >= 2);
+
+        // Success case. Parse out the return values
+        this.expect(
+            callee instanceof sol.MemberAccess || callee instanceof sol.NewExpression,
+            `Unexpected callee ${callee.print()}`
+        );
+
+        if (!res.reverted) {
+            let vals: Value[];
+
+            if (callee instanceof sol.MemberAccess) {
+                const target = callee.vReferencedDeclaration;
+                this.expect(
+                    target instanceof sol.FunctionDefinition ||
+                    target instanceof sol.VariableDeclaration,
+                    `NYI external call target`
+                );
+                vals = this.getValuesFromReturnedCalldata(res.data, target, state);
+            } else {
+                this.expect(res.newContract !== undefined);
+                vals = [res.newContract];
+            }
+
+            return this.execTryCatchClause(stmt.vClauses[0], vals, state);
+        }
+
+        // First try any Panic/Error clauses
+        const namedClauses = stmt.vClauses.filter((c) => c.errorName !== "");
+        for (const clause of namedClauses) {
+            const vals = this.matchTryClause(res.data, clause, state);
+
+            if (vals !== undefined) {
+                return this.execTryCatchClause(clause, vals, state);
+            }
+        }
+
+        const lowLevelClauses = stmt.vClauses.slice(1).filter((c) => c.errorName === "");
+        this.expect(lowLevelClauses.length <= 1);
+
+        if (lowLevelClauses.length == 1) {
+            const vals = this.matchTryClause(res.data, lowLevelClauses[0], state);
+            this.expect(vals !== undefined);
+            return this.execTryCatchClause(lowLevelClauses[0], vals, state);
+        }
+
+        this.runtimeError(RuntimeError, state, res.data);
+    }
+
+    private execTryCatchClause(
+        clause: sol.TryCatchClause,
+        args: Value[],
+        state: State
+    ): ControlFlow {
+        if (clause.vParameters) {
+            this.pushScope(
+                clause,
+                rtt.zip(
+                    clause.vParameters.vParameters.map((d) => d.name),
+                    args
+                ),
+                state
+            );
+        } else {
+            this.pushScope(clause, [], state);
+        }
+
+        const flow = this.exec(clause.vBlock, state);
+
+        this.popScope(state);
+        return flow;
     }
 
     private execVariableDeclarationStatement(
@@ -725,7 +1267,10 @@ export class Interpreter {
         }
 
         // console.error(`eval(${printNode(expr)})->${ppValue(res)}`)
-        this._trace.push(new EvalStep(expr, res));
+        for (const v of this.visitors) {
+            v.eval(this, state, expr, res);
+        }
+
         this.nodes.pop();
 
         return res;
@@ -842,7 +1387,7 @@ export class Interpreter {
                 } else if (isArrayLikeCalldataView(baseLV)) {
                     idxView = baseLV.indexView(indexVal, getMsg(state));
                 } else if (isArrayLikeStorageView(baseLV)) {
-                    idxView = baseLV.indexView(indexVal, state.account.storage);
+                    idxView = baseLV.indexView(indexVal, getStateStorage(state));
                 } else if (baseLV instanceof ArrayLikeLocalView) {
                     idxView = baseLV.indexView(indexVal);
                 } else {
@@ -859,7 +1404,7 @@ export class Interpreter {
             }
 
             if (idxView instanceof DecodingFailure) {
-                this.runtimeError(OOB, `Failed decoding index LValue`);
+                this.runtimeError(OOBError, state);
             }
 
             res = idxView;
@@ -889,7 +1434,10 @@ export class Interpreter {
             nyi(`evalLV(${expr.print()})`);
         }
 
-        this._trace.push(new EvalStep(expr, res));
+        for (const v of this.visitors) {
+            v.eval(this, state, expr, res);
+        }
+
         this.nodes.pop();
 
         return res;
@@ -920,6 +1468,7 @@ export class Interpreter {
             isPrimitiveValue(rvalue),
             `Unexpected rvalue ${ppValue(rvalue)} in assignment to ${ppLValue(lvalue)}`
         );
+
         // The following ref-type assignments result in a copy of the underlying complex value
         // - storage-to-storage
         // - memory-to-storage
@@ -938,7 +1487,7 @@ export class Interpreter {
         ) {
             // Types should be equal modulo location
             this.expect(
-                typesEqualModuloLocation(lvalue.type.toType, rvalue.type),
+                isDirectlyAssignable(lvalue.type, rvalue.type),
                 `Mismatching types in copying ref assignment (modulo location): ${lvalue.type.pp()} and ${rvalue.type.pp()} `
             );
 
@@ -947,7 +1496,7 @@ export class Interpreter {
             if (lvalue instanceof BaseMemoryView) {
                 lvalue.encode(complexRVal, state.memory, state.memAllocator);
             } else if (lvalue instanceof BaseStorageView) {
-                state.account.storage = lvalue.encode(complexRVal, state.account.storage);
+                setStateStorage(state, lvalue.encode(complexRVal, getStateStorage(state)));
             } else {
                 const memView = PointerMemView.allocMemFor(
                     complexRVal,
@@ -961,12 +1510,16 @@ export class Interpreter {
             return;
         }
 
+        if (typeof rvalue === "bigint" && lvalue.type instanceof rtt.FixedBytesType) {
+            rvalue = bigIntToBytes(rvalue);
+        }
+
         // In all other cases we are either:
         // 1. assigning a primitive value,
         // 2. assigning memory-to-memory (which aliases),
         // 3. assigning to a local pointer a reference of the same type (which aliases)
         if (lvalue instanceof BaseStorageView) {
-            state.account.storage = lvalue.encode(rvalue, state.account.storage);
+            setStateStorage(state, lvalue.encode(rvalue, getStateStorage(state)));
         } else if (lvalue instanceof BaseMemoryView) {
             lvalue.encode(rvalue, state.memory, state.memAllocator);
         } else if (lvalue instanceof BaseLocalView) {
@@ -997,7 +1550,15 @@ export class Interpreter {
             const lType = this.typeOf(expr.vLeftHandSide);
             // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
 
-            rvalue = this.computeBinary(lVal, op, rvalue, lType, undefined, this.isUnchecked(expr));
+            rvalue = this.computeBinary(
+                lVal,
+                op,
+                rvalue,
+                lType,
+                undefined,
+                this.isUnchecked(expr),
+                state
+            );
             this.assign(lv, rvalue, state);
         } else {
             this.assign(lv, rvalue, state);
@@ -1007,12 +1568,17 @@ export class Interpreter {
         return rvalue;
     }
 
-    private clamp(val: bigint, type: rtt.BaseRuntimeType, unchecked: boolean): bigint {
+    private clamp(
+        val: bigint,
+        type: rtt.BaseRuntimeType,
+        unchecked: boolean,
+        state: State
+    ): bigint {
         const clampedVal = type instanceof rtt.IntType ? clampIntToType(val, type) : val;
         const overflow = clampedVal !== val;
 
         if (overflow && !unchecked) {
-            this.runtimeError(Overflow, ``);
+            this.runtimeError(OverflowError, state);
         }
 
         return clampedVal;
@@ -1042,7 +1608,8 @@ export class Interpreter {
         right: Value,
         type: BaseInterpType,
         userFunction: sol.FunctionDefinition | undefined,
-        unchecked: boolean
+        unchecked: boolean,
+        state: State
     ): NonPoisonValue {
         // @todo - need to detect
         if (userFunction) {
@@ -1107,19 +1674,19 @@ export class Interpreter {
             );
 
             if (operator === "<") {
-                return left < right;
+                return sleft < sright;
             }
 
             if (operator === "<=") {
-                return left <= right;
+                return sleft <= sright;
             }
 
             if (operator === ">") {
-                return left > right;
+                return sleft > sright;
             }
 
             if (operator === ">=") {
-                return left >= right;
+                return sleft >= sright;
             }
 
             nyi(`Unknown comparison operator ${operator}`);
@@ -1128,6 +1695,10 @@ export class Interpreter {
         if (sol.BINARY_OPERATOR_GROUPS.Arithmetic.includes(operator)) {
             this.expect(typeof left === "bigint" && typeof right === "bigint");
             let res: bigint;
+
+            if ((operator === "/" || operator === "%") && right === 0n) {
+                this.runtimeError(PanicError, state, 0x12n);
+            }
 
             if (operator === "+") {
                 res = left + right;
@@ -1145,7 +1716,7 @@ export class Interpreter {
                 nyi(`Unknown arithmetic operator ${operator}`);
             }
 
-            return this.clamp(res, type, unchecked);
+            return this.clamp(res, type, unchecked, state);
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
@@ -1200,7 +1771,8 @@ export class Interpreter {
             rVal,
             this.typeOf(expr),
             expr.vUserFunction,
-            this.isUnchecked(expr)
+            this.isUnchecked(expr),
+            state
         );
     }
 
@@ -1318,7 +1890,11 @@ export class Interpreter {
         }
 
         // string literals -> fixed bytes
-        if (fromT instanceof rtt.PointerType && fromT.toType instanceof rtt.StringType && toT instanceof rtt.FixedBytesType) {
+        if (
+            fromT instanceof rtt.PointerType &&
+            fromT.toType instanceof rtt.StringType &&
+            toT instanceof rtt.FixedBytesType
+        ) {
             this.expect(
                 fromV instanceof View && fromV.type instanceof rtt.StringType,
                 `Expected string pointer not ${ppValue(fromV)}`
@@ -1344,12 +1920,22 @@ export class Interpreter {
         }
 
         if (fromT instanceof rtt.IntType && toT instanceof rtt.IntType) {
-            this.expect(typeof fromV === "bigint")
+            this.expect(typeof fromV === "bigint");
             return clampIntToType(fromV, toT);
         }
 
         if (fromT.pp() === toT.pp()) {
             return fromV;
+        }
+
+        if (
+            fromT instanceof rtt.TypeType &&
+            fromT.rawT instanceof sol.UserDefinedType &&
+            fromT.rawT.definition instanceof sol.ContractDefinition &&
+            fromT.rawT.definition.kind === sol.ContractKind.Library &&
+            toT instanceof rtt.AddressType
+        ) {
+            return getLibraryLinkedAddress(fromT.rawT.definition, state);
         }
 
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
@@ -1446,8 +2032,27 @@ export class Interpreter {
         return structView;
     }
 
-    evalBuiltinCall(expr: sol.FunctionCall, state: State): Value {
-        const callee = this.evalNP(expr.vExpression, state);
+    evalBuiltinCall(
+        expr: sol.FunctionCall,
+        calleeE: sol.Expression,
+        gas: bigint | undefined,
+        value: bigint | undefined,
+        salt: Uint8Array | undefined,
+        state: State
+    ): Value {
+        let callee: Value;
+        let implFirstArg: Value | undefined = undefined;
+
+        if (
+            calleeE instanceof sol.MemberAccess &&
+            implicitFirstArgBuiltins.has(calleeE.memberName)
+        ) {
+            implFirstArg = this.evalNP(calleeE.vExpression, state);
+            callee = implicitFirstArgBuiltins.get(calleeE.memberName) as BuiltinFunction;
+        } else {
+            callee = this.evalNP(calleeE, state);
+        }
+
         this.expect(callee instanceof BuiltinFunction);
 
         let args: Value[];
@@ -1456,32 +2061,29 @@ export class Interpreter {
         // Handle those separately
         if (callee.name === "decode") {
             const bytes = this.evalNP(expr.vArguments[0], state);
-            const types = this.evalTypeExpression(expr.vArguments[1], state, sol.DataLocation.Memory)
-
-            args = [bytes, types];
-            argTs = [memBytesT, typeValueToType(types)]
-        } else if (callee.name === "type") {
-            args = [this.evalTypeExpression(expr.vArguments[0], state)];
-            argTs = [defT]
-        } else {
-            args = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
-            argTs = expr.vArguments.map((argExpr) => this.typeOf(argExpr))
-        }
-
-        if (callee.implicitFirstArg) {
-            this.expect(
-                expr.vExpression instanceof sol.MemberAccess,
-                `Expected member access in builtin callee ${printNode(expr)}`
+            const types = this.evalTypeExpression(
+                expr.vArguments[1],
+                state,
+                sol.DataLocation.Memory
             );
 
-            const savedTrace = this._trace;
-            // Small hack - we don't want to add to the trace the re-evaluation of the base
-            this._trace = [];
-            const firstArg = this.eval(expr.vExpression.vExpression, state);
-            this._trace = savedTrace;
+            args = [bytes, types];
+            argTs = [memBytesT, typeValueToType(types)];
+        } else if (callee.name === "type") {
+            args = [this.evalTypeExpression(expr.vArguments[0], state)];
+            argTs = [defT];
+        } else {
+            args = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
+            argTs = expr.vArguments.map((argExpr) => this.typeOf(argExpr));
+        }
 
-            args.unshift(firstArg);
-            argTs.unshift(this.typeOf(expr.vExpression.vExpression));
+        if (implFirstArg !== undefined) {
+            args.unshift(implFirstArg);
+            argTs.unshift(this.typeOf((calleeE as sol.MemberAccess).vExpression));
+        }
+
+        if (["call", "delegatecall", "staticcall", "callcode"].includes(callee.name)) {
+            nyi(`Passing implicit args value, gas, salt to callcode family ${[value, gas, salt]}`);
         }
 
         const results = this._execCall(callee, args, argTs, state);
@@ -1497,34 +2099,36 @@ export class Interpreter {
         return results;
     }
 
-    evalExternalCall(expr: sol.FunctionCall, state: State): Value {
-        let gas: Value | undefined;
-        let value: Value | undefined;
-        let salt: Value | undefined;
+    private decodeExternalOptions(
+        callee: sol.Expression,
+        state: State
+    ): [sol.Expression, bigint | undefined, bigint | undefined, Uint8Array | undefined] {
+        let gas: bigint | undefined;
+        let value: bigint | undefined;
+        let salt: Uint8Array | undefined;
 
         // First decode the target along with gas, value and salt
-        let callee = expr.vExpression;
         while (true) {
             if (
                 callee instanceof sol.FunctionCall &&
                 callee.vExpression instanceof sol.MemberAccess &&
-                ["gas", "value"].includes(callee.vExpression.memberName)
+                ["gas", "value", "salt"].includes(callee.vExpression.memberName)
             ) {
                 if (callee.vExpression.memberName === "gas") {
-                    gas = this.eval(callee.vArguments[0], state);
+                    gas = this.evalT(callee.vArguments[0], BigInt, state);
                 } else {
-                    value = this.eval(callee.vArguments[0], state);
+                    value = this.evalT(callee.vArguments[0], BigInt, state);
                 }
 
                 callee = callee.vExpression.vExpression;
             } else if (callee instanceof sol.FunctionCallOptions) {
                 for (const [option, rawValue] of callee.vOptionsMap) {
                     if (option === "gas") {
-                        gas = this.eval(rawValue, state);
+                        gas = this.evalT(rawValue, BigInt, state);
                     } else if (option === "value") {
-                        value = this.eval(rawValue, state);
+                        value = this.evalT(rawValue, BigInt, state);
                     } else if (option === "salt") {
-                        salt = this.eval(rawValue, state);
+                        salt = this.evalT(rawValue, Uint8Array, state);
                     } else {
                         sol.assert(false, `Unknown function call option: ${option}`, callee);
                     }
@@ -1536,28 +2140,76 @@ export class Interpreter {
             }
         }
 
+        return [callee, gas, value, salt];
+    }
+
+    private makeMsgCall(msg: SolMessage, state: State, isDelegate: boolean): CallResult {
+        const address = getThis(state);
+        // Pesist our state changes before calling out
+        this.world.updateAccount(state.account);
+
+        // Call out
+        let res: CallResult;
+
+        if (msg.to.equals(rtt.ZERO_ADDRESS)) {
+            this.expect(!isDelegate, `Contract deployments are never delegate calls`);
+            res = this.world.create(msg);
+        } else if (!isDelegate) {
+            res = this.world.call(msg);
+        } else {
+            res = this.world.delegatecall(msg);
+        }
+
+        // Refresh our account from the world in case our state has changed
+        const acc = this.world.getAccount(address);
+        this.expect(acc !== undefined, `We shouldn't have been destroyed`);
+        state.account = acc;
+
+        return res;
+    }
+
+    private _evalExternalCallImpl(
+        expr: sol.FunctionCall,
+        callee: sol.Expression,
+        gas: bigint | undefined,
+        value: bigint | undefined,
+        salt: Uint8Array | undefined,
+        state: State
+    ): CallResult {
         this.expect(callee instanceof sol.MemberAccess, `Unexpected callee ${callee.print()}`);
         const astTarget = callee.vReferencedDeclaration;
-        const argTs: rtt.BaseRuntimeType[] = [];
-        const retTs: rtt.BaseRuntimeType[] = [];
+        let argTs: rtt.BaseRuntimeType[];
         let selector: Uint8Array;
 
         if (astTarget instanceof sol.FunctionDefinition) {
-            selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`)
+            selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`);
 
-            for (const argT of astTarget.vParameters.vParameters) {
-                argTs.push(changeLocTo(this.varDeclToRuntimeType(argT), sol.DataLocation.Memory));
-            }
+            argTs = astTarget.vParameters.vParameters.map((argT) => this.varDeclToRuntimeType(argT))
+        } else if (astTarget instanceof sol.VariableDeclaration) {
+            selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`);
 
-            for (const retT of astTarget.vReturnParameters.vParameters) {
-                retTs.push(changeLocTo(this.varDeclToRuntimeType(retT), sol.DataLocation.Memory));
-            }
+            this.expect(astTarget.stateVariable);
+            [argTs] = getGetterArgAndReturnTs(astTarget, this._infer);
         } else {
-            nyi(`External call target ${astTarget}`);
+            nyi(`External call target ${astTarget?.print()}`);
         }
 
-        const to = this.eval(callee.vExpression, state);
-        this.expect(to instanceof Address, ``);
+        const target = this.eval(callee.vExpression, state);
+        let to: Address;
+
+        if (target instanceof Address) {
+            to = target;
+        } else {
+            this.expect(
+                target instanceof DefValue &&
+                target.def instanceof sol.ContractDefinition &&
+                target.def.kind === sol.ContractKind.Library,
+                `Unexpected target ${ppValue(target)}`
+            );
+
+            to = getLibraryLinkedAddress(target.def, state);
+        }
+
         this.expect(gas === undefined || typeof gas === "bigint", ``);
         this.expect(value === undefined || typeof value === "bigint", ``);
         this.expect(salt === undefined || salt instanceof Uint8Array, ``);
@@ -1565,34 +2217,76 @@ export class Interpreter {
         // Next compute the msg data
         const argVs = expr.vArguments.map((arg) => this.eval(arg, state));
         const [dataView] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
-        this.expect(dataView instanceof BytesMemView, `Expected encoded data not ${ppValue(dataView)}`)
+        this.expect(
+            dataView instanceof BytesMemView,
+            `Expected encoded data not ${ppValue(dataView)}`
+        );
         const argData = dataView.decode(state.memory);
-        this.expect(argData instanceof Uint8Array)
-        const data = concatBytes(selector, argData)
+        this.expect(argData instanceof Uint8Array);
+        const data = concatBytes(selector, argData);
+
+        // If this is a delegate call we preserve msg.sender
+        const toContract = astTarget.vScope;
+        this.expect(toContract instanceof sol.ContractDefinition);
+        const isLibCall = toContract.kind === sol.ContractKind.Library;
+        const thisAddr = getThis(state);
 
         const msg: SolMessage = {
+            from: isLibCall ? getMsgSender(state) : thisAddr,
             to,
+            delegatingContract: isLibCall ? thisAddr : undefined,
             data,
             gas: gas === undefined ? 0n : gas,
             value: value === undefined ? 0n : value,
             salt: salt
         };
 
-        const address = state.account.address;
-        // Pesist our state changes before calling out
-        this.world.setAccount(address, state.account);
+        return this.makeMsgCall(msg, state, isLibCall);
+    }
 
-        // Call out
-        const res = this.world.call(msg);
-        this.expect(!res.reverted, "NYI reverts");
+    private getValuesFromReturnedCalldata(
+        data: Uint8Array,
+        target: sol.FunctionDefinition | sol.VariableDeclaration,
+        state: State
+    ): Value[] {
+        const retTs: rtt.BaseRuntimeType[] = [];
 
-        // Refresh our account from the world in case our state has changed
-        const acc = this.world.getAccount(address);
-        this.expect(acc !== undefined, `We shouldn't have been destroyed`);
-        state.account = acc;
+        if (target instanceof sol.FunctionDefinition) {
+            for (const retT of target.vReturnParameters.vParameters) {
+                retTs.push(changeLocTo(this.varDeclToRuntimeType(retT), sol.DataLocation.Memory));
+            }
+        } else if (target instanceof sol.VariableDeclaration) {
+            this.expect(target.stateVariable);
+            const [, getterRetT] = getGetterArgAndReturnTs(target, this._infer);
+            retTs.push(...getterRetT);
+        }
 
-        const rets = decode(res.data, retTs, state);
+        return decode(data, retTs, state);
+    }
 
+    evalExternalCall(
+        expr: sol.FunctionCall,
+        callee: sol.Expression,
+        gas: bigint | undefined,
+        value: bigint | undefined,
+        salt: Uint8Array | undefined,
+        state: State
+    ): Value {
+        const res = this._evalExternalCallImpl(expr, callee, gas, value, salt, state);
+
+        if (res.reverted) {
+            this.runtimeError(RuntimeError, state, `External call failed`, res.data);
+        }
+
+        this.expect(callee instanceof sol.MemberAccess, `Unexpected callee ${callee.print()}`);
+        const astTarget = callee.vReferencedDeclaration;
+        this.expect(
+            astTarget instanceof sol.FunctionDefinition ||
+            astTarget instanceof sol.VariableDeclaration,
+            `NYI External call target`
+        );
+
+        const rets: Value[] = this.getValuesFromReturnedCalldata(res.data, astTarget, state);
         return rets.length === 0 ? none : rets.length === 1 ? rets[0] : rets;
     }
 
@@ -1663,13 +2357,8 @@ export class Interpreter {
                 const argTs = mod.vArguments.map((argE) => this.typeOf(argE));
                 this._execCall(mod, argVals, argTs, state);
             } else {
-                const resolvedTarget = this.resolveCallee(target, state);
-                this.expect(
-                    resolvedTarget instanceof sol.FunctionDefinition &&
-                    resolvedTarget.vBody !== undefined,
-                    `Can't call ${resolvedTarget.name} with no body.`
-                );
-                this.exec(resolvedTarget.vBody, state);
+                this.expect(target.vBody !== undefined, `Can't call ${target.name} with no body.`);
+                this.exec(target.vBody, state);
             }
 
             res = target.vReturnParameters.vParameters.map((ret, i) => {
@@ -1746,22 +2435,91 @@ export class Interpreter {
         return results;
     }
 
-    evalNewCall(expr: sol.FunctionCall, state: State): Value {
-        const calleeAST = this.getCallee(expr.vExpression) as sol.NewExpression;
+    private _evalContractCreationImpl(
+        expr: sol.FunctionCall,
+        contract: sol.ContractDefinition,
+        gas: bigint | undefined,
+        value: bigint | undefined,
+        salt: Uint8Array | undefined,
+        state: State
+    ): CallResult {
+        const args = expr.vArguments.map((arg) => this.eval(arg, state));
+
+        let argTs: BaseInterpType[] = [];
+
+        if (contract.vConstructor) {
+            const interp = this;
+            argTs = contract.vConstructor.vParameters.vParameters.map((decl) =>
+                interp.varDeclToRuntimeType(decl)
+            );
+        }
+
+        const [dataView] = this._execCall(abiEncodeBuiltin, args, argTs, state);
+        this.expect(
+            dataView instanceof BytesMemView,
+            `Expected encoded data not ${ppValue(dataView)}`
+        );
+        const argData = dataView.decode(state.memory);
+        this.expect(argData instanceof Uint8Array, ``);
+
+        const newContractInfo = this.artifactManager.getContractInfo(contract);
+        this.expect(newContractInfo !== undefined);
+
+        const creationBytecode = newContractInfo.bytecode.bytecode;
+        const data = concatBytes(creationBytecode, argData);
+
+        return this.makeMsgCall(
+            {
+                from: getThis(state),
+                to: rtt.ZERO_ADDRESS,
+                delegatingContract: undefined,
+                data,
+                gas: gas !== undefined ? gas : 0n,
+                value: value !== undefined ? value : 0n,
+                salt
+            },
+            state,
+            false
+        );
+    }
+
+    evalNewCall(
+        expr: sol.FunctionCall,
+        callee: sol.NewExpression,
+        gas: bigint | undefined,
+        value: bigint | undefined,
+        salt: Uint8Array | undefined,
+        state: State
+    ): Value {
         const astT = this._infer.typeNameToSpecializedTypeNode(
-            calleeAST.vTypeName,
+            callee.vTypeName,
             sol.DataLocation.Memory
         );
 
-        const args = expr.vArguments.map((arg) => this.eval(arg, state));
-
+        // Contract Creation
         if (
             astT instanceof sol.UserDefinedType &&
             astT.definition instanceof sol.ContractDefinition
         ) {
-            // new contract
-            nyi(`Creating a new contract`);
+            const res = this._evalContractCreationImpl(
+                expr,
+                astT.definition,
+                gas,
+                value,
+                salt,
+                state
+            );
+
+            if (res.reverted) {
+                this.runtimeError(RuntimeError, state, res.data);
+            }
+
+            this.expect(res.newContract !== undefined);
+            return res.newContract;
         }
+
+        // Memory allocation
+        const args = expr.vArguments.map((arg) => this.eval(arg, state));
 
         let newT = this.astToRuntimeType(astT, sol.DataLocation.Memory);
         this.expect(newT instanceof rtt.PointerType, ``);
@@ -1821,26 +2579,27 @@ export class Interpreter {
             return this.evalStructConstructorCall(expr, state);
         }
 
-        if (expr.vFunctionCallType === sol.ExternalReferenceType.Builtin) {
-            const calleeAst = this.getCallee(expr.vExpression);
+        // First decode the target along with gas, value and salt
+        const [callee, gas, value, salt] = this.decodeExternalOptions(expr.vExpression, state);
 
-            if (calleeAst instanceof sol.NewExpression) {
-                return this.evalNewCall(expr, state);
+        if (expr.vFunctionCallType === sol.ExternalReferenceType.Builtin) {
+            if (callee instanceof sol.NewExpression) {
+                return this.evalNewCall(expr, callee, gas, value, salt, state);
             }
 
-            return this.evalBuiltinCall(expr, state);
+            return this.evalBuiltinCall(expr, callee, gas, value, salt, state);
         }
 
         if (this._infer.isFunctionCallExternal(expr)) {
-            return this.evalExternalCall(expr, state);
+            return this.evalExternalCall(expr, callee, gas, value, salt, state);
         }
 
         return this.evalInternalCall(expr, state);
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
-        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === 'this') {
-            return state.account.address;
+        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "this") {
+            return getThis(state);
         }
 
         // contract name
@@ -1890,13 +2649,13 @@ export class Interpreter {
             } else if (isArrayLikeCalldataView(baseVal)) {
                 res = baseVal.indexView(indexVal, getMsg(state));
             } else if (isArrayLikeStorageView(baseVal)) {
-                res = baseVal.indexView(indexVal, state.account.storage);
+                res = baseVal.indexView(indexVal, getStateStorage(state));
             } else {
                 nyi(`Array like view ${baseVal.constructor.name}`);
             }
 
             if (res instanceof Poison) {
-                this.runtimeError(OOB, ``);
+                this.runtimeError(OOBError, state);
             }
 
             res = this.lvToValue(res, state);
@@ -1908,7 +2667,7 @@ export class Interpreter {
             );
 
             if (indexVal < 0n || indexVal >= baseT.numBytes) {
-                this.runtimeError(OOB, ``);
+                this.runtimeError(OOBError, state);
             }
 
             res = BigInt(baseVal[Number(indexVal)]);
@@ -1924,7 +2683,7 @@ export class Interpreter {
         }
 
         if (res instanceof DecodingFailure) {
-            this.runtimeError(OOB, ``);
+            this.runtimeError(OOBError, state);
         }
 
         // @todo add test for order of operations
@@ -1960,6 +2719,13 @@ export class Interpreter {
 
     evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
         let baseVal = this.evalNP(expr.vExpression, state);
+
+        if (baseVal instanceof Address) {
+            if (expr.memberName === "balance") {
+                const account = this.world.getAccount(baseVal);
+                return account === undefined ? 0n : account.balance;
+            }
+        }
 
         if (isPointerView(baseVal)) {
             baseVal = this.deref(baseVal, state);
@@ -2087,7 +2853,7 @@ export class Interpreter {
     public getSize(lv: ArrayLikeView<any, View>, state: State): bigint {
         let res: bigint | DecodingFailure;
         if (isArrayLikeStorageView(lv)) {
-            res = lv.size(state.account.storage);
+            res = lv.size(getStateStorage(state));
         } else if (isArrayLikeMemView(lv)) {
             res = lv.size(state.memory);
         } else if (isArrayLikeCalldataView(lv)) {
@@ -2162,7 +2928,8 @@ export class Interpreter {
             const newVal = this.clamp(
                 expr.operator === "++" ? subVal + 1n : subVal - 1n,
                 t,
-                unchecked
+                unchecked,
+                state
             );
             this.assign(subExprLoc, newVal, state);
             res = expr.prefix ? newVal : subVal;
@@ -2181,11 +2948,12 @@ export class Interpreter {
             nyi(`Unary operator ${expr.operator}`);
         }
 
-        return this.clamp(res, t, unchecked);
+        return this.clamp(res, t, unchecked, state);
     }
 
     makeBuiltinScope(state: State): BuiltinsScope {
-        const builtins = [assertBuiltin, abi];
+        const builtins = [assertBuiltin, abi, revertBuiltin, requireBuiltin, makeMsgBuiltin(state)];
+
         return new BuiltinsScope(
             builtins.map((b) => [b.name, b.type, b]),
             state,
@@ -2209,8 +2977,20 @@ export class Interpreter {
         }
 
         while (nd !== undefined) {
-            if (nd instanceof sol.SourceUnit || nd instanceof sol.ContractDefinition) {
+            if (nd instanceof sol.SourceUnit) {
                 scopeNodes.push(nd);
+            }
+
+            if (nd instanceof sol.ContractDefinition) {
+                if (nd.kind === sol.ContractKind.Library) {
+                    // Library internal functions execute in the scope of the library
+                    scopeNodes.push(nd);
+                } else {
+                    // Normal methods execute in the scope of the *most derived contract*, not their defining contract.
+                    // The reason here is to get the correct layout locations for base contract state variables in the MDC's layout
+
+                    scopeNodes.push(getContract(state));
+                }
             }
 
             nd = nd.parent;

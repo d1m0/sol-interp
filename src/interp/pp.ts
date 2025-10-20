@@ -1,4 +1,12 @@
-import { ExternalFunRef, InternalFunRef, Poison, Slice, toHexString, View } from "sol-dbg";
+import {
+    ExternalFunRef,
+    InternalFunRef,
+    Poison,
+    ppStorage,
+    Slice,
+    toHexString,
+    View
+} from "sol-dbg";
 import {
     BuiltinFunction,
     BuiltinStruct,
@@ -9,8 +17,10 @@ import {
     ValueTypeConstructors
 } from "./value";
 import { Address, bytesToHex } from "@ethereumjs/util";
-import { EvalStep, ExecStep, Trace } from "./step";
+import { EvalStep, ExceptionStep, ExecStep, ExtCallStep, ExtReturnStep, Trace } from "./step";
 import { printNode } from "./utils";
+import { ArtifactManager } from "./artifactManager";
+import { AccountInfo } from "./chain";
 
 export function ppLValue(v: LValue): string {
     if (v instanceof View) {
@@ -70,18 +80,33 @@ export function ppMem(m: Uint8Array): string {
     return lines.join("\n");
 }
 
-export function ppTrace(t: Trace): string {
+export function ppTrace(t: Trace, artifactManager: ArtifactManager): string {
+    let indent = "";
     const lines = t.map((step) => {
         if (step instanceof ExecStep) {
-            return `finished exec ${printNode(step.stmt)}`;
+            const [line, col] = artifactManager.getStartLoc(step.stmt);
+            return `[${line}:${col}]${indent}exec ${printNode(step.stmt)}`;
         } else if (step instanceof EvalStep) {
-            return `    eval ${printNode(step.expr)} -> ${ppLVorRV(step.val)}`;
+            const [line, col] = artifactManager.getStartLoc(step.expr);
+            return `[${line}:${col}]${indent}  eval ${printNode(step.expr)} -> ${ppLVorRV(step.val)}`;
+        } else if (step instanceof ExtCallStep) {
+            const s = `[----:--]${indent}call ${step.msg.from.toString()} -> ${step.msg.to.toString()}`;
+            indent += "  ";
+            return s;
+        } else if (step instanceof ExtReturnStep) {
+            const s = `[----:--]${indent}return ${bytesToHex(step.res.data)}`;
+            indent = indent.slice(0, -2);
+            return s;
+        } else if (step instanceof ExceptionStep) {
+            const s = `[----:--]${indent}error ${bytesToHex(step.exception.payload)}`;
+            indent = indent.slice(0, -2);
+            return s;
         } else {
             return `nyi(${step.constructor.name})`;
         }
     });
 
-    return lines.join(`\n-----------------------------\n`);
+    return lines.join(`\n`);
 }
 
 export function ppValueTypeConstructor(typeConstructor: ValueTypeConstructors): string {
@@ -98,4 +123,12 @@ export function ppValueTypeConstructor(typeConstructor: ValueTypeConstructors): 
     }
 
     return typeConstructor.constructor.name;
+}
+
+export function ppAccount(a: AccountInfo): string {
+    return `{
+        balance: ${a.balance},
+        nonce: ${a.nonce},
+        storage: ${ppStorage(a.storage)}
+    }`;
 }

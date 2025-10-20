@@ -1,16 +1,16 @@
-import { bytesToHex } from "@ethereumjs/util";
+import { concatBytes, hexToBytes } from "@ethereumjs/util";
 import * as sol from "solc-typed-ast";
 import { BaseScope } from "./scope";
-import { Trace } from "./step";
 import { printNode } from "./utils";
 import { BuiltinFunction } from "./value";
+import { makeMemoryView, uint256 } from "sol-dbg";
+import * as ethABI from "web3-eth-abi";
 
 type FailLoc = sol.ASTNode | BuiltinFunction;
 // Internal Errors
 export class InterpError extends Error {
     constructor(
         public readonly node: FailLoc,
-        public readonly trace: Trace,
         msg: string
     ) {
         const loc = node instanceof BuiltinFunction ? node.pp() : printNode(node);
@@ -18,68 +18,145 @@ export class InterpError extends Error {
     }
 }
 
+/**
+ * Base class for all exceptions that are internal. I.e. - they are due to an
+ * issue with the interpreter, not the interpreted code.
+ */
 export class InternalError extends InterpError {}
 
 export class NoScope extends InternalError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, `Trying to look-up identifiers with no scope`);
+    constructor(node: FailLoc) {
+        super(node, `Trying to look-up identifiers with no scope`);
     }
 }
 
 export class NotDefined extends InternalError {
-    constructor(node: FailLoc, trace: Trace, name: string) {
-        super(node, trace, `Unknown identifier ${name}`);
+    constructor(node: FailLoc, name: string) {
+        super(node, `Unknown identifier ${name}`);
     }
 }
 
 export class AlreadyDefined extends InternalError {
-    constructor(node: FailLoc, trace: Trace, name: string, scope: BaseScope) {
-        super(node, trace, `Identifier ${name} is already defined at scope ${scope.name}`);
+    constructor(node: FailLoc, name: string, scope: BaseScope) {
+        super(node, `Identifier ${name} is already defined at scope ${scope.name}`);
     }
 }
 
 // Runtime Errors
 
-export abstract class RuntimeError extends InterpError {}
-
-export class Revert extends RuntimeError {
+/**
+ * Base class for all normal EVM runtime exceptions. These come from the interpreted code.
+ */
+export class RuntimeError extends InterpError {
     constructor(
-        node: FailLoc,
-        trace: Trace,
-        public readonly bytes: Uint8Array
+        public readonly node: FailLoc,
+        public readonly msg: string,
+        public readonly payload: Uint8Array
     ) {
-        super(node, trace, `Revert with bytes ${bytesToHex(bytes)}`);
+        super(node, msg);
     }
 }
 
-export class OOB extends RuntimeError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, `Out-of-bounds access`);
-    }
-}
+export class CustomError extends RuntimeError {}
 
-export class Overflow extends RuntimeError {
-    constructor(node: FailLoc, trace: Trace) {
-        super(node, trace, `Overflow`);
-    }
-}
+export const PANIC_SELECTOR = hexToBytes("0x4e487b71");
+const PANIC_SCRATCH = concatBytes(PANIC_SELECTOR, new Uint8Array(32));
+// Using memory instead of calldata view here since it allows encoding and for uint256 its the same.
+const PANIC_VIEW = makeMemoryView(uint256, 4n);
 
-export class Assert extends RuntimeError {
+export class PanicError extends RuntimeError {
     constructor(
         node: FailLoc,
-        trace: Trace,
+        public readonly code: bigint
+    ) {
+        PANIC_VIEW.encode(code, PANIC_SCRATCH, null as unknown as any);
+        super(node, `Panic(${code})`, new Uint8Array(PANIC_SCRATCH));
+    }
+}
+
+// Panic(uint256) errors
+export class AssertError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x01n);
+    }
+}
+
+export class OverflowError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x11n);
+    }
+}
+
+export class DivBy0Error extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x12n);
+    }
+}
+
+export class EnumCastError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x21n);
+    }
+}
+
+export class StorageByteArrayEncodingError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x22n);
+    }
+}
+
+export class EmptyArrayPopError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x31n);
+    }
+}
+
+export class OOBError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x32n);
+    }
+}
+
+export class TooMuchMemError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x41n);
+    }
+}
+
+export class UninitializedFunPtrError extends PanicError {
+    constructor(node: FailLoc) {
+        super(node, 0x51n);
+    }
+}
+
+export const ERROR_SELECTOR = hexToBytes("0x08c379a0");
+/**
+ * Error(string) errors.
+ */
+export class ErrorError extends RuntimeError {
+    constructor(
+        node: FailLoc,
         public readonly msg: string
     ) {
-        super(node, trace, `Assert fauilure`);
+        const payload = concatBytes(
+            ERROR_SELECTOR,
+            hexToBytes(ethABI.encodeParameters(["string"], [msg]) as `0x${string}`)
+        );
+        super(node, `Error(${msg})`, payload);
     }
 }
 
-export class EmptyArrayPop extends RuntimeError {
-    constructor(
-        node: FailLoc,
-        trace: Trace,
-        public readonly msg: string
-    ) {
-        super(node, trace, `Pop from an empty array`);
+/**
+ * An error with no payload. (e.g. require(bool), revert())
+ */
+export class NoPayloadError extends RuntimeError {
+    constructor(node: FailLoc) {
+        super(node, ``, new Uint8Array());
+    }
+}
+
+export class InsufficientBalance extends NoPayloadError {
+    constructor(node: FailLoc) {
+        super(node);
     }
 }

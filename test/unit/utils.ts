@@ -11,9 +11,8 @@ import * as fse from "fs-extra";
 import { BaseScope, LocalsScope } from "../../src/interp/scope";
 import { makeStateWithConstants, State } from "../../src/interp/state";
 import { Value as InterpValue } from "../../src/interp/value";
-import { isValueType } from "../../src/interp/utils";
-import { gt } from "semver";
-import { ArtifactManager } from "../../src/interp/artifactManager";
+import { getStateStorage, isValueType, setStateStorage } from "../../src/interp/utils";
+import { addSources, ArtifactManager } from "../../src/interp/artifactManager";
 import { Interpreter } from "../../src";
 
 export function makeState(
@@ -56,7 +55,7 @@ export function makeState(
         if (view instanceof BaseMemoryView) {
             view.encode(val, res.memory, res.memAllocator);
         } else if (view instanceof BaseStorageView) {
-            res.account.storage = view.encode(val, res.account.storage);
+            setStateStorage(res, view.encode(val, getStateStorage(res)));
         } else {
             nyi(`Encode ${val} in ${view}`);
         }
@@ -99,27 +98,47 @@ export interface SampleInfo {
 
 export type SampleMap = Map<string, SampleInfo>;
 
-export async function loadSamples(names: string[]): Promise<[ArtifactManager, SampleMap]> {
+export async function loadSamples(
+    samples: Array<string | [string, any]>,
+    basePath = `test/samples`
+): Promise<[ArtifactManager, SampleMap]> {
     const res: SampleMap = new Map();
     const compileResults: Array<[PartialSolcOutput, string]> = [];
-    for (const fileName of names) {
-        const file = fse.readFileSync(`test/samples/${fileName}`, {
+    const names: string[] = [];
+
+    for (const sample of samples) {
+        let fileName;
+        let settings;
+
+        if (sample instanceof Array) {
+            [fileName, settings] = sample;
+        } else {
+            fileName = sample;
+            settings = undefined;
+        }
+
+        const file = fse.readFileSync(`${basePath}/${fileName}`, {
             encoding: "utf-8"
         });
         const version = getVersion(file);
+
+        names.push(fileName);
+
         const compileResult = await sol.compileSol(
-            `test/samples/${fileName}`,
+            `${basePath}/${fileName}`,
             version,
             undefined,
-            undefined,
-            gt(version, "0.8.0") ? { viaIR: true } : undefined
+            [sol.CompilationOutput.ALL],
+            settings
         );
-        compileResults.push([compileResult.data, version]);
+        compileResults.push([addSources(compileResult.data, compileResult.files), version]);
     }
 
     const artifactManager = new ArtifactManager(compileResults);
+    const artifacts = artifactManager.artifacts();
+
     for (let i = 0; i < names.length; i++) {
-        const artifact = artifactManager.artifacts()[i];
+        const artifact = artifacts[i];
         res.set(names[i], { version: artifact.compilerVersion, units: artifact.units });
     }
 

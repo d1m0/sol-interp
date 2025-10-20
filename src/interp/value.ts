@@ -35,6 +35,10 @@ export class BuiltinFunction extends BaseInterpValue {
         super();
     }
 
+    alias(newName: string): BuiltinFunction {
+        return new BuiltinFunction(newName, this.type, this._call, this.implicitFirstArg);
+    }
+
     pp(): string {
         return `<builtin fun ${this.type.pp()}>`;
     }

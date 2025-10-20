@@ -160,7 +160,7 @@ export function gatherConstants(
 
     const [constNodes, depGraph] = buildConstantDepGraph(artifact.units);
     const sortedNodes = topoSort(constNodes, depGraph);
-    const interp = new Interpreter(worldFailMock, artifactManager, artifact);
+    const interp = new Interpreter(worldFailMock, artifactManager, artifact, []);
 
     // Pre-init constantMap with NoneViews to appease Scope constructors
     for (const nd of sortedNodes) {
@@ -176,6 +176,8 @@ export function gatherConstants(
             infer,
             sol.DataLocation.Memory
         );
+
+        state.account.contract = artifactManager.getContractInfo(nd);
 
         const scope = interp.makeStaticScope(nd, state);
         sol.assert(scope instanceof GlobalScope || scope instanceof ContractScope, ``);

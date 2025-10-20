@@ -129,7 +129,8 @@ describe("Eval unit tests", () => {
             const interp = new Interpreter(
                 worldFailMock,
                 artifactManager,
-                artifactManager.getArtifact(contract)
+                artifactManager.getArtifact(contract),
+                []
             );
             const expr = new sol.XPath(contract).query(path)[0] as sol.Expression;
             const state = makeState(expr, interp, ...defs);

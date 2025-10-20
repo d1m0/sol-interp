@@ -3,7 +3,7 @@ import * as rtt from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { concretize, substitute, TOptional, TRest, TUnion, TVar, unify } from "../../src";
 
-const uint160 = new rtt.IntType(160, false)
+const uint160 = new rtt.IntType(160, false);
 
 const s1 = new rtt.StructType("s1", [
     ["a", rtt.uint256],
@@ -177,7 +177,9 @@ const substSamples: Array<[rtt.BaseRuntimeType, rtt.BaseRuntimeType, rtt.BaseRun
     ]
 ];
 
-const concretizeTests: Array<[rtt.BaseRuntimeType[], rtt.BaseRuntimeType[], rtt.BaseRuntimeType[] | undefined]> = [
+const concretizeTests: Array<
+    [rtt.BaseRuntimeType[], rtt.BaseRuntimeType[], rtt.BaseRuntimeType[] | undefined]
+> = [
     [
         [uint256, uint8],
         [sol.types.address, sol.types.bool],
