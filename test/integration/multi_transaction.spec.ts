@@ -92,6 +92,29 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 }
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/address_fields.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 11n
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "code",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: [new Uint8Array()]
+                }
+            }
+        ]
     ]
 ];
 

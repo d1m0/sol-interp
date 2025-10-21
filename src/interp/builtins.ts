@@ -22,6 +22,7 @@ import {
     View
 } from "sol-dbg";
 import {
+    addressT,
     bytes1,
     bytes32,
     bytesT,
@@ -34,9 +35,10 @@ import {
     memStringT,
     setStateStorage
 } from "./utils";
-import { concatBytes } from "@ethereumjs/util";
+import { Address, concatBytes } from "@ethereumjs/util";
 import { decode, encode } from "./abi";
 import { MsgDataView } from "./view";
+import { keccak256 } from "ethereum-cryptography/keccak.js";
 
 export const assertBuiltin = new BuiltinFunction(
     "assert",
@@ -306,6 +308,9 @@ export function makeMsgBuiltin(state: State): BuiltinStruct {
 }
 
 const transferT = new rtt.FunctionType([uint256], true, sol.FunctionStateMutability.Payable, []);
+const sendT = new rtt.FunctionType([uint256], true, sol.FunctionStateMutability.Payable, [
+    rtt.bool
+]);
 const callT = new rtt.FunctionType([memBytesT], true, sol.FunctionStateMutability.Payable, [
     rtt.bool,
     memBytesT
@@ -314,18 +319,152 @@ const callT = new rtt.FunctionType([memBytesT], true, sol.FunctionStateMutabilit
 const addressStructType = new rtt.StructType("address", [
     ["balance", uint256],
     ["code", memBytesT],
-    ["codhash", bytes32],
+    ["codehash", bytes32],
     ["transfer", transferT],
+    ["send", sendT],
     ["call", callT],
     ["delegatecall", callT],
     ["staticcall", callT]
 ]);
 
-export function makeAddressBuiltin(state: State): BuiltinStruct {
-    return new BuiltinStruct("address", addressStructType, [
-        ["balance", [[state.account.balance, ">=0.4.13"]]],
-        ["code", [[getMsgSender(state), ">=0.4.13"]]],
-        ["sig", [[getSig(state), ">=0.4.13"]]],
-        ["sig", [[state.msg.value, ">=0.4.13"]]]
-    ]);
-}
+export const addressBalanceBuiltin = new BuiltinFunction(
+    "balance",
+    new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [uint256]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const addr = self.getArgs(1, state)[0];
+        interp.expect(addr instanceof Address);
+
+        const account = interp.world.getAccount(addr);
+        return account === undefined ? [0n] : [account.balance];
+    },
+    [],
+    [],
+    true,
+    true
+);
+
+export const addressCodeBuiltin = new BuiltinFunction(
+    "code",
+    new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [memBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const addr = self.getArgs(1, state)[0];
+        interp.expect(addr instanceof Address);
+
+        const account = interp.world.getAccount(addr);
+        const code = account === undefined ? new Uint8Array() : account.deployedBytecode;
+
+        const codeView = PointerMemView.allocMemFor(code, memBytesT, state.memAllocator);
+        codeView.encode(code, state.memory, state.memAllocator);
+
+        //@todo implement code === 0x0 during contract initialization
+        return [codeView];
+    },
+    [],
+    [],
+    true,
+    true
+);
+
+export const addressCodehashBuiltin = new BuiltinFunction(
+    "codehash",
+    new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [bytes32]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const addr = self.getArgs(1, state)[0];
+        interp.expect(addr instanceof Address);
+
+        const account = interp.world.getAccount(addr);
+        const code = account === undefined ? new Uint8Array() : account.deployedBytecode;
+
+        //@todo implement code === 0x0 during contract initialization
+        return [keccak256(code)];
+    },
+    [],
+    [],
+    true,
+    true
+);
+
+export const addressTransfer = new BuiltinFunction(
+    "transfer",
+    new rtt.FunctionType([addressT, uint256], false, sol.FunctionStateMutability.Pure, []),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [addr, amount] = self.getArgs(2, state);
+        interp.expect(addr instanceof Address);
+        interp.expect(typeof amount === "bigint");
+
+        const account = interp.world.getAccount(addr);
+        rtt.nyi(`transfer(${account}, ${amount})`);
+    },
+    [],
+    [],
+    true,
+    true
+);
+
+export const addressSend = new BuiltinFunction(
+    "send",
+    new rtt.FunctionType([addressT, uint256], false, sol.FunctionStateMutability.Pure, [rtt.bool]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [addr, amount] = self.getArgs(2, state);
+        interp.expect(addr instanceof Address);
+        interp.expect(typeof amount === "bigint");
+
+        const account = interp.world.getAccount(addr);
+        rtt.nyi(`send(${account}, ${amount})`);
+    },
+    [],
+    [],
+    true,
+    true
+);
+
+export const addressCall = new BuiltinFunction(
+    "call",
+    new rtt.FunctionType([addressT, memBytesT], false, sol.FunctionStateMutability.Pure, [
+        rtt.bool,
+        memBytesT
+    ]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [addr, msg] = self.getArgs(2, state);
+        interp.expect(addr instanceof Address);
+
+        const account = interp.world.getAccount(addr);
+        rtt.nyi(`call(${account}, ${msg})`);
+    },
+    [],
+    [],
+    true,
+    true
+);
+
+export const addressDelegatecall = new BuiltinFunction(
+    "delegatecall",
+    new rtt.FunctionType([addressT, memBytesT], false, sol.FunctionStateMutability.Pure, [
+        rtt.bool,
+        memBytesT
+    ]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [addr, msg] = self.getArgs(2, state);
+        interp.expect(addr instanceof Address);
+
+        const account = interp.world.getAccount(addr);
+        rtt.nyi(`delegatecall(${account}, ${msg})`);
+    },
+    [],
+    [],
+    true,
+    true
+);
+
+export const addressStaticcall = addressCall.alias("staticcall");
+
+export const addressBuiltinStruct = new BuiltinStruct("address", addressStructType, [
+    ["balance", [[addressBalanceBuiltin, ">=0.4.13"]]],
+    ["code", [[addressCodeBuiltin, ">=0.4.13"]]],
+    ["codehash", [[addressCodeBuiltin, ">=0.4.13"]]],
+    ["transfer", [[addressTransfer, ">=0.4.13"]]],
+    ["send", [[addressSend, ">=0.4.13"]]],
+    ["call", [[addressCall, ">=0.4.13"]]],
+    ["delegatecall", [[addressDelegatecall, ">=0.4.13"]]],
+    ["staticcall", [[addressStaticcall, ">=0.4.13"]]]
+]);

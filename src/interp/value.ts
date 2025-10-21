@@ -30,9 +30,14 @@ export class BuiltinFunction extends BaseInterpValue {
             state: State,
             self: BuiltinFunction
         ) => Value[],
+        // Any curried arguments. E.g. `arr` in `arr.push(...)`
         public readonly curriedArgs: Value[] = [],
+        // The types of any curried arguments. E.g. type of `arr` in `arr.push(...)`
         protected readonly curriedArgTs: rtt.BaseRuntimeType[] = [],
-        public readonly implicitFirstArg = false
+        // Flag specifying if this builtin expects an implicit first argument. E.g. `arr` in `arr.push(...)`
+        public readonly implicitFirstArg = false,
+        // Flag specifying if this builtin corresponds to a non-function field. E.g. `(address).balance`
+        public readonly isField = false
     ) {
         super();
     }
@@ -44,7 +49,8 @@ export class BuiltinFunction extends BaseInterpValue {
             this._call,
             this.curriedArgs,
             this.curriedArgTs,
-            this.implicitFirstArg
+            this.implicitFirstArg,
+            this.isField
         );
     }
 
@@ -72,7 +78,8 @@ export class BuiltinFunction extends BaseInterpValue {
             this._call,
             this.curriedArgs,
             this.curriedArgTs,
-            this.implicitFirstArg
+            this.implicitFirstArg,
+            this.isField
         );
     }
 
@@ -83,7 +90,8 @@ export class BuiltinFunction extends BaseInterpValue {
             this._call,
             [...this.curriedArgs, ...args],
             [...this.curriedArgTs, ...argTs],
-            this.implicitFirstArg
+            this.implicitFirstArg,
+            this.isField
         );
     }
 

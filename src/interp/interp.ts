@@ -115,6 +115,7 @@ import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
     abi,
     abiEncodeBuiltin,
+    addressBuiltinStruct,
     assertBuiltin,
     makeMsgBuiltin,
     popBuiltin,
@@ -162,7 +163,7 @@ export class Interpreter {
     _infer: sol.InferType;
 
     constructor(
-        protected readonly world: WorldInterface,
+        public readonly world: WorldInterface,
         public readonly artifactManager: ArtifactManager,
         public readonly artifact: ArtifactInfo,
         private readonly visitors: InterpVisitor[]
@@ -2674,14 +2675,37 @@ export class Interpreter {
         return view;
     }
 
+    evalBuiltinMemberAccess(
+        expr: sol.MemberAccess,
+        val: Value,
+        baseVal: Value,
+        state: State
+    ): Value {
+        if (val instanceof BuiltinFunction && val.implicitFirstArg) {
+            val = val.curry([baseVal], [this.typeOf(expr.vExpression)]);
+        }
+
+        if (val instanceof BuiltinFunction && val.isField) {
+            const res = this._execCall(val, [], [], state);
+            this.expect(res.length === 1);
+
+            return res[0];
+        }
+
+        return val;
+    }
+
     evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
         let baseVal = this.evalNP(expr.vExpression, state);
 
         if (baseVal instanceof Address) {
-            if (expr.memberName === "balance") {
-                const account = this.world.getAccount(baseVal);
-                return account === undefined ? 0n : account.balance;
-            }
+            const res = addressBuiltinStruct.getFieldForVersion(
+                expr.memberName,
+                this.artifact.compilerVersion
+            );
+            this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
+
+            return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
         }
 
         if (isPointerView(baseVal)) {
@@ -2704,7 +2728,7 @@ export class Interpreter {
         if (baseVal instanceof BuiltinStruct) {
             const res = baseVal.getFieldForVersion(expr.memberName, this.artifact.compilerVersion);
             this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
-            return res;
+            return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
         }
 
         if (isArrayLikeView(baseVal) && expr.memberName === "length") {
@@ -2739,11 +2763,8 @@ export class Interpreter {
             (isArrayLikeStorageView(baseVal) && expr.memberName === "push") ||
             expr.memberName === "pop"
         ) {
-            const baseValT = this.typeOf(expr.vExpression);
-            return (expr.memberName === "push" ? pushBuiltin : popBuiltin).curry(
-                [baseVal],
-                [baseValT]
-            );
+            const res = expr.memberName === "push" ? pushBuiltin : popBuiltin;
+            return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
         }
 
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
