@@ -25,7 +25,6 @@ import {
     bytes1,
     bytesT,
     decodeView,
-    getContract,
     getMsgSender,
     getSig,
     getStateStorage,
@@ -200,9 +199,7 @@ export const abiEncodeBuiltin = new BuiltinFunction(
             encBytes = new Uint8Array();
         } else {
             const args = getArgs(paramTs.length, state);
-            const contract = getContract(state);
-
-            encBytes = encode(args, paramTs, state, contract.kind === sol.ContractKind.Library);
+            encBytes = encode(args, paramTs, state);
         }
 
         const res = PointerMemView.allocMemFor(
