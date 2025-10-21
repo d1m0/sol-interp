@@ -8,9 +8,7 @@ import {
     PointerCalldataView,
     PointerMemView,
     PointerStorageView,
-    PointerView,
     Poison,
-    StateArea,
     View,
     Value as BaseValue,
     StructMemView,
@@ -27,7 +25,6 @@ import {
     StringStorageView,
     BytesStorageView,
     MAX_ARR_DECODE_LIMIT,
-    ArrayLikeView,
     BytesCalldataView,
     stackTop,
     ArtifactInfo,
@@ -97,6 +94,7 @@ import {
     isMethod,
     isStructView,
     isValueType,
+    length,
     makeZeroValue,
     memBytesT,
     memStringT,
@@ -257,8 +255,8 @@ export class Interpreter {
         // If there are arguments to be passed, then the target MDC must have a constructor
         this.expect(
             msg.data.length === mdc.bytecode.bytecode.length ||
-            (mdc.ast.vConstructor !== undefined &&
-                mdc.ast.vConstructor.vParameters.vParameters.length > 0)
+                (mdc.ast.vConstructor !== undefined &&
+                    mdc.ast.vConstructor.vParameters.vParameters.length > 0)
         );
 
         try {
@@ -374,7 +372,9 @@ export class Interpreter {
         }
 
         // Decode args
-        let calldataViews: View<rtt.Memory>[] = buildMsgViews(entryPoint, this._infer).map((x) => x[1]);
+        let calldataViews: Array<View<rtt.Memory>> = buildMsgViews(entryPoint, this._infer).map(
+            (x) => x[1]
+        );
 
         // Skip selector
         if (rtt.hasSelector(entryPoint)) {
@@ -390,7 +390,7 @@ export class Interpreter {
             // the actual arguments (i.e. they may be memory pointers).  The
             // `Intepreter.assign` in `makeScope()` will handle the copying from
             // calldata to memory.
-            argTs = entryPoint.vParameters.vParameters.map((argT, idx) => {
+            argTs = entryPoint.vParameters.vParameters.map((argT) => {
                 const declT = this.varDeclToRuntimeType(argT);
 
                 if (
@@ -398,7 +398,7 @@ export class Interpreter {
                     declT instanceof rtt.PointerType &&
                     declT.location === sol.DataLocation.Storage
                 ) {
-                    return declT
+                    return declT;
                 }
 
                 return rtt.specializeType(rtt.generalizeType(declT), sol.DataLocation.CallData);
@@ -414,7 +414,7 @@ export class Interpreter {
 
             if (argT instanceof rtt.PointerType && argT.location === sol.DataLocation.Storage) {
                 const v = decodeView(view, state);
-                sol.assert(typeof v === "bigint", ``)
+                sol.assert(typeof v === "bigint", ``);
                 return rtt.makeStorageView(argT.toType, [v, 32]);
             }
 
@@ -451,9 +451,7 @@ export class Interpreter {
                 this.varDeclToRuntimeType(retT)
             );
 
-            const isLib = getContract(state).kind === sol.ContractKind.Library;
-
-            resBytecode = encode(res, resTs, state, isLib);
+            resBytecode = encode(res, resTs, state);
         } else if (entryPoint instanceof sol.VariableDeclaration) {
             let res: Value[];
 
@@ -469,7 +467,7 @@ export class Interpreter {
 
             // Encode returns
             const resTs = getGetterArgAndReturnTs(entryPoint, this._infer)[1];
-            resBytecode = encode(res, resTs, state, false);
+            resBytecode = encode(res, resTs, state);
         } else {
             nyi(`public getter`);
         }
@@ -656,7 +654,7 @@ export class Interpreter {
             } else {
                 this.expect(
                     stateVarView instanceof PointerStorageView &&
-                    stateVarView.innerView instanceof MapStorageView
+                        stateVarView.innerView instanceof MapStorageView
                 );
                 stateVarView = stateVarView.innerView.indexView(arg);
                 this.expect(!(stateVarView instanceof DecodingFailure), `Failed indexing`);
@@ -665,7 +663,7 @@ export class Interpreter {
 
         let returnViews =
             stateVarView instanceof PointerStorageView &&
-                stateVarView.innerView instanceof StructStorageView
+            stateVarView.innerView instanceof StructStorageView
                 ? stateVarView.innerView.fieldViews.map(([, fv]) => fv)
                 : [stateVarView];
 
@@ -683,7 +681,7 @@ export class Interpreter {
         const returnVals: Value[] = returnViews.map((v) => {
             if (isValueType(v.type)) {
                 const t = v.decode(storage);
-                this.expect(isPrimitiveValue(t), ``)
+                this.expect(isPrimitiveValue(t), ``);
                 return t;
             }
 
@@ -854,7 +852,7 @@ export class Interpreter {
 
             this.expect(
                 astT instanceof sol.UserDefinedType &&
-                astT.definition instanceof sol.ContractDefinition
+                    astT.definition instanceof sol.ContractDefinition
             );
 
             res = this._evalContractCreationImpl(
@@ -884,7 +882,7 @@ export class Interpreter {
                 const target = callee.vReferencedDeclaration;
                 this.expect(
                     target instanceof sol.FunctionDefinition ||
-                    target instanceof sol.VariableDeclaration,
+                        target instanceof sol.VariableDeclaration,
                     `NYI external call target`
                 );
                 vals = this.getValuesFromReturnedCalldata(res.data, target, state);
@@ -1055,8 +1053,8 @@ export class Interpreter {
 
         sol.assert(
             fun !== undefined &&
-            (retVals.length === fun.vReturnParameters.vParameters.length ||
-                retVals.length === 0),
+                (retVals.length === fun.vReturnParameters.vParameters.length ||
+                    retVals.length === 0),
             `Mismatch in number of ret vals and formal returns`
         );
 
@@ -1309,31 +1307,6 @@ export class Interpreter {
         return res;
     }
 
-    deref<T extends StateArea>(
-        v: PointerView<T, View>,
-        state: State
-    ): View<any, BaseValue, any, rtt.BaseRuntimeType> {
-        let res: View<any, BaseValue, any, rtt.BaseRuntimeType> | DecodingFailure;
-
-        if (v instanceof PointerMemView) {
-            res = v.toView(state.memory);
-        } else if (v instanceof PointerCalldataView) {
-            res = v.toView(getMsg(state));
-        } else if (v instanceof PointerStorageView) {
-            res = v.toView();
-        } else if (v instanceof PointerLocalView) {
-            res = v.toView();
-        } else {
-            nyi(`Pointer view ${v.constructor.name}`);
-        }
-
-        if (res instanceof DecodingFailure) {
-            this.fail(InternalError, `Couldn't deref pointer view ${v}`);
-        }
-
-        return res;
-    }
-
     evalLV(expr: sol.Expression, state: State): LValue {
         this.nodes.push(expr);
         let res: LValue;
@@ -1374,7 +1347,7 @@ export class Interpreter {
             );
 
             if (isPointerView(baseLV)) {
-                baseLV = this.deref(baseLV, state);
+                baseLV = deref(baseLV, state);
             }
 
             let idxView: LValue | DecodingFailure;
@@ -1416,7 +1389,7 @@ export class Interpreter {
             );
 
             if (isPointerView(baseLV)) {
-                baseLV = this.deref(baseLV, state);
+                baseLV = deref(baseLV, state);
             }
 
             if (isStructView(baseLV)) {
@@ -1525,8 +1498,8 @@ export class Interpreter {
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
                 !(lvalue.type instanceof sol.PointerType) ||
-                isPoison(rvalue) ||
-                (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp()),
+                    isPoison(rvalue) ||
+                    (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp()),
                 `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
             );
             lvalue.encode(rvalue);
@@ -1670,7 +1643,7 @@ export class Interpreter {
 
             this.expect(
                 (typeof sleft === "bigint" && typeof sright === "bigint") ||
-                (typeof sleft === "string" && typeof sright === "string")
+                    (typeof sleft === "string" && typeof sright === "string")
             );
 
             if (operator === "<") {
@@ -1986,8 +1959,8 @@ export class Interpreter {
 
         this.expect(
             calleeT instanceof sol.TypeNameType &&
-            calleeT.type instanceof sol.UserDefinedType &&
-            calleeT.type.definition instanceof sol.StructDefinition,
+                calleeT.type instanceof sol.UserDefinedType &&
+                calleeT.type.definition instanceof sol.StructDefinition,
             `Expected UserDefinedTypeName not ${calleeT.pp()}`
         );
 
@@ -2184,7 +2157,9 @@ export class Interpreter {
         if (astTarget instanceof sol.FunctionDefinition) {
             selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`);
 
-            argTs = astTarget.vParameters.vParameters.map((argT) => this.varDeclToRuntimeType(argT))
+            argTs = astTarget.vParameters.vParameters.map((argT) =>
+                this.varDeclToRuntimeType(argT)
+            );
         } else if (astTarget instanceof sol.VariableDeclaration) {
             selector = hexToBytes(`0x${this._infer.signatureHash(astTarget)}`);
 
@@ -2202,8 +2177,8 @@ export class Interpreter {
         } else {
             this.expect(
                 target instanceof DefValue &&
-                target.def instanceof sol.ContractDefinition &&
-                target.def.kind === sol.ContractKind.Library,
+                    target.def instanceof sol.ContractDefinition &&
+                    target.def.kind === sol.ContractKind.Library,
                 `Unexpected target ${ppValue(target)}`
             );
 
@@ -2282,7 +2257,7 @@ export class Interpreter {
         const astTarget = callee.vReferencedDeclaration;
         this.expect(
             astTarget instanceof sol.FunctionDefinition ||
-            astTarget instanceof sol.VariableDeclaration,
+                astTarget instanceof sol.VariableDeclaration,
             `NYI External call target`
         );
 
@@ -2528,8 +2503,8 @@ export class Interpreter {
             (newT instanceof rtt.ArrayType ||
                 newT instanceof rtt.BytesType ||
                 newT instanceof rtt.StringType) &&
-            args.length === 1 &&
-            typeof args[0] === "bigint",
+                args.length === 1 &&
+                typeof args[0] === "bigint",
             `Expected an array type with a single length argument not ${newT.pp()} with ${args}`
         );
 
@@ -2639,7 +2614,7 @@ export class Interpreter {
         let res: Value;
 
         if (isPointerView(baseVal)) {
-            baseVal = this.deref(baseVal, state);
+            baseVal = deref(baseVal, state);
         }
 
         if (isArrayLikeView(baseVal)) {
@@ -2708,8 +2683,8 @@ export class Interpreter {
 
         this.expect(
             expr.kind === sol.LiteralKind.String ||
-            expr.kind === sol.LiteralKind.HexString ||
-            expr.kind === sol.LiteralKind.UnicodeString
+                expr.kind === sol.LiteralKind.HexString ||
+                expr.kind === sol.LiteralKind.UnicodeString
         );
 
         const view = state.constantsMap.get(expr.id);
@@ -2728,7 +2703,7 @@ export class Interpreter {
         }
 
         if (isPointerView(baseVal)) {
-            baseVal = this.deref(baseVal, state);
+            baseVal = deref(baseVal, state);
         }
 
         if (
@@ -2751,7 +2726,7 @@ export class Interpreter {
         }
 
         if (isArrayLikeView(baseVal) && expr.memberName === "length") {
-            return this.getSize(baseVal, state);
+            return length(baseVal, state);
         }
 
         if (baseVal instanceof DefValue) {
@@ -2799,8 +2774,8 @@ export class Interpreter {
             const arrPtrT = this.typeOf(expr);
             this.expect(
                 arrPtrT instanceof rtt.PointerType &&
-                arrPtrT.toType instanceof rtt.ArrayType &&
-                arrPtrT.toType.size !== undefined,
+                    arrPtrT.toType instanceof rtt.ArrayType &&
+                    arrPtrT.toType.size !== undefined,
                 `Expected a fixed size array in memory not ${arrPtrT.pp()}`
             );
 
@@ -2848,27 +2823,6 @@ export class Interpreter {
     }
 
     /**
-     * Given an array-like view get its size
-     */
-    public getSize(lv: ArrayLikeView<any, View>, state: State): bigint {
-        let res: bigint | DecodingFailure;
-        if (isArrayLikeStorageView(lv)) {
-            res = lv.size(getStateStorage(state));
-        } else if (isArrayLikeMemView(lv)) {
-            res = lv.size(state.memory);
-        } else if (isArrayLikeCalldataView(lv)) {
-            res = lv.size(getMsg(state));
-        } else if (lv instanceof ArrayLikeLocalView) {
-            res = lv.size();
-        } else {
-            nyi(`getSize(${lv})`);
-        }
-
-        this.expect(typeof res === "bigint", `Error getting the size of ${lv}`);
-        return res;
-    }
-
-    /**
      * Convert an LValue to an RValue.
      */
     public lvToValue(lv: LValue | Poison, state: State): Value {
@@ -2882,7 +2836,7 @@ export class Interpreter {
             }
 
             if (isPointerView(lv)) {
-                return this.deref(lv, state);
+                return deref(lv, state);
             }
 
             nyi(`Unexpected LValue view ${lv.pp()}`);

@@ -224,8 +224,8 @@
 207    - test with Panic clause first, then Error with an Error exception
 208    - test with Error clause first, then Panic with a Panic exception
 209    - kill gen
+210    - implement library calls as delegate calls
 
-    - implement library calls as delegate calls
     - add code_in_constructor.sol test
     - implement address.call/address.staticcall
     - implement address.delegatecall/address.callcode

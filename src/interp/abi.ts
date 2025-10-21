@@ -1,4 +1,4 @@
-import { assert, repeat, DataLocation, } from "solc-typed-ast";
+import { assert, repeat, DataLocation } from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { Value } from "./value";
 import * as ethABI from "web3-eth-abi";
@@ -84,7 +84,12 @@ export function toABIEncodedType(type: BaseInterpType): BaseInterpType {
  */
 function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     // Storage pointers are encoded as ints in library calls
-    if (typ instanceof rtt.IntType && (v instanceof rtt.ArrayStorageView || v instanceof rtt.StructStorageView || v instanceof rtt.PackedArrayStorageView)) {
+    if (
+        typ instanceof rtt.IntType &&
+        (v instanceof rtt.ArrayStorageView ||
+            v instanceof rtt.StructStorageView ||
+            v instanceof rtt.PackedArrayStorageView)
+    ) {
         assert(v.endOffsetInWord === 32, `Unexpected non-aligned view {0}`, v);
         return v.key;
     }
@@ -99,28 +104,31 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.IntType) {
-        assert(typeof v === "bigint", `Expected bigint for ${typ.pp()} not ${ppValue(v)}`)
+        assert(typeof v === "bigint", `Expected bigint for ${typ.pp()} not ${ppValue(v)}`);
         return v;
     }
 
     if (typ instanceof rtt.BoolType) {
-        assert(typeof v === "boolean", `Expected bool for ${typ.pp()} not ${ppValue(v)}`)
+        assert(typeof v === "boolean", `Expected bool for ${typ.pp()} not ${ppValue(v)}`);
         return v;
     }
 
     if (typ instanceof rtt.AddressType) {
-        assert(v instanceof Address, `Expected Address for ${typ.pp()} not ${ppValue(v)}`)
+        assert(v instanceof Address, `Expected Address for ${typ.pp()} not ${ppValue(v)}`);
         return v.toString();
     }
 
     // External fun refs are stored as bytes24 - address then selector
     if (typ instanceof rtt.FunctionType) {
-        assert(v instanceof rtt.ExternalFunRef, `Expected ExternalFunRef for ${typ.pp()} not ${ppValue(v)}`)
+        assert(
+            v instanceof rtt.ExternalFunRef,
+            `Expected ExternalFunRef for ${typ.pp()} not ${ppValue(v)}`
+        );
         return concatBytes(v.address.toBytes(), v.selector);
     }
 
     if (typ instanceof rtt.FixedBytesType) {
-        assert(v instanceof Uint8Array, `Expected Uint8Array for ${typ.pp()} not ${ppValue(v)}`)
+        assert(v instanceof Uint8Array, `Expected Uint8Array for ${typ.pp()} not ${ppValue(v)}`);
         return v;
     }
 
@@ -130,25 +138,31 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.BytesType) {
-        assert(v instanceof View && v.type instanceof rtt.BytesType, `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`)
-        return decodeView(v, s)
+        assert(
+            v instanceof View && v.type instanceof rtt.BytesType,
+            `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`
+        );
+        return decodeView(v, s);
     }
 
     if (typ instanceof rtt.StringType) {
-        assert(v instanceof View && v.type instanceof rtt.StringType, `Expected string View for ${typ.pp()} not ${ppValue(v)}`)
-        return decodeView(v, s)
+        assert(
+            v instanceof View && v.type instanceof rtt.StringType,
+            `Expected string View for ${typ.pp()} not ${ppValue(v)}`
+        );
+        return decodeView(v, s);
     }
 
     if (typ instanceof rtt.ArrayType) {
-        assert(isArrayLikeView(v), `Expected Array for ${typ.pp()} not ${ppValue(v)}`)
+        assert(isArrayLikeView(v), `Expected Array for ${typ.pp()} not ${ppValue(v)}`);
         const len = length(v, s);
-        assert(typeof len === "bigint", `Failed decoding len`)
+        assert(typeof len === "bigint", `Failed decoding len`);
 
         const res: any[] = [];
         const elT = typ.elementT;
 
         for (let i = 0n; i < len; i++) {
-            res.push(valueToAbiValue(indexView(v, i, s), elT, s))
+            res.push(valueToAbiValue(indexView(v, i, s), elT, s));
         }
 
         return res;
@@ -160,7 +174,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
         // Fixed arrays encoded as tuples
         if (isArrayLikeView(v)) {
             for (let i = 0; i < typ.elementTypes.length; i++) {
-                res.push(valueToAbiValue(indexView(v, BigInt(i), s), typ.elementTypes[i], s))
+                res.push(valueToAbiValue(indexView(v, BigInt(i), s), typ.elementTypes[i], s));
             }
 
             return res;
@@ -180,7 +194,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
                 const fieldV = v.fieldView(name);
                 assert(!(fieldV instanceof rtt.DecodingFailure), ``);
 
-                res.push(valueToAbiValue(fieldV, typ.elementTypes[i], s))
+                res.push(valueToAbiValue(fieldV, typ.elementTypes[i], s));
             }
 
             return res;
@@ -231,9 +245,7 @@ export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType): string {
     }
 
     if (t instanceof rtt.TupleType) {
-        return `(${t.elementTypes
-            .map((elementT) => abiTypeToCanonicalName(elementT))
-            .join(",")})`;
+        return `(${t.elementTypes.map((elementT) => abiTypeToCanonicalName(elementT)).join(",")})`;
     }
 
     // Locations are skipped in signature canonical names
@@ -248,12 +260,7 @@ export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType): string {
  * Encode the given interpeter values `vs` with types `ts` in the state `state` and return the resulting bytes.
  * Note that the given type names are assumed to be *generalized*.
  */
-export function encode(
-    vs: Value[],
-    ts: BaseInterpType[],
-    state: State,
-    isLibrary: boolean = false
-): Uint8Array {
+export function encode(vs: Value[], ts: BaseInterpType[], state: State): Uint8Array {
     const abiTypes = ts.map((t) => toABIEncodedType(t)).filter((t) => !skipFieldDueToMap(t));
     const typeNames = abiTypes.map((t) => abiTypeToCanonicalName(t));
 

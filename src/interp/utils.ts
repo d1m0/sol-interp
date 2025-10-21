@@ -21,7 +21,7 @@ import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
-import { BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
+import { ArrayLikeLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, DefType, TypeType } from "./types";
 import { Address } from "@ethereumjs/util";
@@ -143,7 +143,7 @@ export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
  * Given a library `ContractDefinition` and the current `State` get the linked address
  * for that library.
  */
-export function getLibraryLinkedAddress(lib: sol.ContractDefinition, state: State) {
+export function getLibraryLinkedAddress(lib: sol.ContractDefinition, state: State): Address {
     sol.assert(lib.kind === sol.ContractKind.Library, ``);
     const libId = `${lib.vScope.sourceEntryKey}:${lib.name}`;
     const [bytecodeInfo, bytecode] = getBytecodeInfo(state);
@@ -252,7 +252,7 @@ export function deref<T extends rtt.StateArea>(
         nyi(`Pointer view ${v.constructor.name}`);
     }
 
-    sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`)
+    sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`);
     return res;
 }
 
@@ -262,17 +262,19 @@ export function length<T extends rtt.StateArea>(
 ): bigint {
     let res: bigint | rtt.DecodingFailure;
 
-    if (v instanceof rtt.ArrayMemView || v instanceof rtt.BytesMemView) {
-        res = v.size(state.memory);
-    } else if (v instanceof rtt.ArrayCalldataView || v instanceof rtt.BytesCalldataView) {
-        res = v.size(getMsg(state));
-    } else if (v instanceof rtt.ArrayStorageView || v instanceof rtt.BytesStorageView) {
+    if (rtt.isArrayLikeStorageView(v)) {
         res = v.size(getStateStorage(state));
+    } else if (rtt.isArrayLikeMemView(v)) {
+        res = v.size(state.memory);
+    } else if (rtt.isArrayLikeCalldataView(v)) {
+        res = v.size(getMsg(state));
+    } else if (v instanceof ArrayLikeLocalView) {
+        res = v.size();
     } else {
-        nyi(`Array view ${v.constructor.name}`);
+        nyi(`getSize(${v})`);
     }
 
-    sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`)
+    sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`);
     return res;
 }
 
@@ -299,10 +301,9 @@ export function indexView<T extends rtt.StateArea>(
         }
     }
 
-    sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`)
+    sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`);
     return res;
 }
-
 
 // @todo move to solc-typed-ast
 // @todo dimo: Is it sufficient here to say !(type instancesof sol.PointerType) ?
