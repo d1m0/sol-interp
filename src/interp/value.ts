@@ -30,13 +30,22 @@ export class BuiltinFunction extends BaseInterpValue {
             state: State,
             self: BuiltinFunction
         ) => Value[],
+        public readonly curriedArgs: Value[] = [],
+        protected readonly curriedArgTs: rtt.BaseRuntimeType[] = [],
         public readonly implicitFirstArg = false
     ) {
         super();
     }
 
     alias(newName: string): BuiltinFunction {
-        return new BuiltinFunction(newName, this.type, this._call, this.implicitFirstArg);
+        return new BuiltinFunction(
+            newName,
+            this.type,
+            this._call,
+            this.curriedArgs,
+            this.curriedArgTs,
+            this.implicitFirstArg
+        );
     }
 
     pp(): string {
@@ -44,7 +53,10 @@ export class BuiltinFunction extends BaseInterpValue {
     }
 
     concretize(argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
-        const [concreteFormalArgs, subst] = concretize(this.type.argTs, argTs);
+        const [concreteFormalArgs, subst] = concretize(this.type.argTs, [
+            ...this.curriedArgTs,
+            ...argTs
+        ]);
         const concreteFormalRets = this.type.retTs.map((retT) => substitute(retT, subst));
 
         const concreteT = new rtt.FunctionType(
@@ -54,11 +66,42 @@ export class BuiltinFunction extends BaseInterpValue {
             concreteFormalRets
         );
 
-        return new BuiltinFunction(this.name, concreteT, this._call, this.implicitFirstArg);
+        return new BuiltinFunction(
+            this.name,
+            concreteT,
+            this._call,
+            this.curriedArgs,
+            this.curriedArgTs,
+            this.implicitFirstArg
+        );
+    }
+
+    curry(args: Value[], argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
+        return new BuiltinFunction(
+            this.name,
+            this.type,
+            this._call,
+            [...this.curriedArgs, ...args],
+            [...this.curriedArgTs, ...argTs],
+            this.implicitFirstArg
+        );
     }
 
     call(interp: Interpreter, state: State, concretizedBuiltin: BuiltinFunction): Value[] {
         return this._call(interp, state, concretizedBuiltin);
+    }
+
+    getArgs(numArgs: number, state: State): Value[] {
+        const res: Value[] = [];
+
+        sol.assert(state.scope !== undefined, ``);
+        for (let i = 0; i < numArgs; i++) {
+            const argV = state.scope.lookup(`arg_${i}`);
+            sol.assert(argV !== undefined, ``);
+            res.push(argV);
+        }
+
+        return res;
     }
 }
 

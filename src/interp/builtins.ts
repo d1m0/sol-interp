@@ -23,6 +23,7 @@ import {
 } from "sol-dbg";
 import {
     bytes1,
+    bytes32,
     bytesT,
     decodeView,
     getMsgSender,
@@ -37,23 +38,11 @@ import { concatBytes } from "@ethereumjs/util";
 import { decode, encode } from "./abi";
 import { MsgDataView } from "./view";
 
-function getArgs(numArgs: number, state: State): Value[] {
-    const res: Value[] = [];
-    sol.assert(state.scope !== undefined, ``);
-    for (let i = 0; i < numArgs; i++) {
-        const argV = state.scope.lookup(`arg_${i}`);
-        sol.assert(argV !== undefined, ``);
-        res.push(argV);
-    }
-
-    return res;
-}
-
 export const assertBuiltin = new BuiltinFunction(
     "assert",
     new rtt.FunctionType([rtt.bool], false, sol.FunctionStateMutability.NonPayable, []),
-    (interp: Interpreter, state: State): Value[] => {
-        const [flag] = getArgs(1, state);
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [flag] = self.getArgs(1, state);
 
         if (!flag) {
             interp.runtimeError(AssertError, state);
@@ -85,7 +74,7 @@ export const pushBuiltin = new BuiltinFunction(
         []
     ),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const args = getArgs(self.type.argTs.length, state);
+        const args = self.getArgs(self.type.argTs.length, state);
         const arr = args[0] as ArrayStorageView | BytesStorageView;
         let el: Value;
 
@@ -132,6 +121,8 @@ export const pushBuiltin = new BuiltinFunction(
 
         return [];
     },
+    [],
+    [],
     true
 );
 
@@ -148,8 +139,8 @@ export const popBuiltin = new BuiltinFunction(
         sol.FunctionStateMutability.NonPayable,
         []
     ),
-    (interp: Interpreter, state: State): Value[] => {
-        const args = getArgs(1, state);
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const args = self.getArgs(1, state);
         const arr = args[0] as ArrayStorageView | BytesStorageView;
 
         if (arr instanceof ArrayStorageView) {
@@ -185,6 +176,8 @@ export const popBuiltin = new BuiltinFunction(
 
         return [];
     },
+    [],
+    [],
     true
 );
 
@@ -198,7 +191,7 @@ export const abiEncodeBuiltin = new BuiltinFunction(
         if (paramTs.length === 0) {
             encBytes = new Uint8Array();
         } else {
-            const args = getArgs(paramTs.length, state);
+            const args = self.getArgs(paramTs.length, state);
             encBytes = encode(args, paramTs, state);
         }
 
@@ -210,8 +203,7 @@ export const abiEncodeBuiltin = new BuiltinFunction(
         res.encode(encBytes, state.memory);
 
         return [res];
-    },
-    false
+    }
 );
 
 export const abiDecodeBuitin = new BuiltinFunction(
@@ -222,8 +214,8 @@ export const abiDecodeBuitin = new BuiltinFunction(
         sol.FunctionStateMutability.Pure,
         [new TRest()]
     ),
-    (interp: Interpreter, state: State): Value[] => {
-        const args = getArgs(2, state);
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const args = self.getArgs(2, state);
 
         interp.expect(args[0] instanceof View, ``);
         const bytes = decodeView(args[0], state);
@@ -237,15 +229,14 @@ export const abiDecodeBuitin = new BuiltinFunction(
             typesTuple.elementTypes.map((t) => rtt.specializeType(t, sol.DataLocation.Memory)),
             state
         );
-    },
-    false
+    }
 );
 
 export const revertBuiltin = new BuiltinFunction(
     "revert",
     new rtt.FunctionType([new TOptional(memStringT)], false, sol.FunctionStateMutability.Pure, []),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const args = getArgs(self.type.argTs.length, state);
+        const args = self.getArgs(self.type.argTs.length, state);
 
         if (args.length === 0) {
             throw new NoPayloadError(interp.curNode);
@@ -256,8 +247,7 @@ export const revertBuiltin = new BuiltinFunction(
         const msg = msgArg.decode(state.memory);
         interp.expect(typeof msg === "string");
         throw new ErrorError(interp.curNode, msg);
-    },
-    false
+    }
 );
 
 export const requireBuiltin = new BuiltinFunction(
@@ -269,7 +259,7 @@ export const requireBuiltin = new BuiltinFunction(
         []
     ),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const args = getArgs(self.type.argTs.length, state);
+        const args = self.getArgs(self.type.argTs.length, state);
 
         const cond = args[0];
         interp.expect(typeof cond === "boolean");
@@ -286,8 +276,7 @@ export const requireBuiltin = new BuiltinFunction(
         const msg = msgArg.decode(state.memory);
         interp.expect(typeof msg === "string");
         throw new ErrorError(interp.curNode, msg);
-    },
-    false
+    }
 );
 
 const abiType = new rtt.StructType("abi", [
@@ -298,11 +287,6 @@ const abiType = new rtt.StructType("abi", [
 export const abi = new BuiltinStruct("abi", abiType, [
     ["encode", [[abiEncodeBuiltin, ">=0.4.22"]]],
     ["decode", [[abiDecodeBuitin, ">=0.4.22"]]]
-]);
-
-export const implicitFirstArgBuiltins = new Map<string, BuiltinFunction>([
-    ["push", pushBuiltin],
-    ["pop", popBuiltin]
 ]);
 
 const msgType = new rtt.StructType("msg", [
@@ -316,6 +300,31 @@ export function makeMsgBuiltin(state: State): BuiltinStruct {
     return new BuiltinStruct("msg", msgType, [
         ["data", [[new MsgDataView(), ">=0.4.13"]]],
         ["sender", [[getMsgSender(state), ">=0.4.13"]]],
+        ["sig", [[getSig(state), ">=0.4.13"]]],
+        ["value", [[state.msg.value, ">=0.4.13"]]]
+    ]);
+}
+
+const transferT = new rtt.FunctionType([uint256], true, sol.FunctionStateMutability.Payable, []);
+const callT = new rtt.FunctionType([memBytesT], true, sol.FunctionStateMutability.Payable, [
+    rtt.bool,
+    memBytesT
+]);
+
+const addressStructType = new rtt.StructType("address", [
+    ["balance", uint256],
+    ["code", memBytesT],
+    ["codhash", bytes32],
+    ["transfer", transferT],
+    ["call", callT],
+    ["delegatecall", callT],
+    ["staticcall", callT]
+]);
+
+export function makeAddressBuiltin(state: State): BuiltinStruct {
+    return new BuiltinStruct("address", addressStructType, [
+        ["balance", [[state.account.balance, ">=0.4.13"]]],
+        ["code", [[getMsgSender(state), ">=0.4.13"]]],
         ["sig", [[getSig(state), ">=0.4.13"]]],
         ["sig", [[state.msg.value, ">=0.4.13"]]]
     ]);

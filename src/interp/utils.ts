@@ -638,6 +638,7 @@ export function getGetterArgAndReturnTs(
 
 export const int256 = new rtt.IntType(256, true);
 export const bytes24 = new rtt.FixedBytesType(24);
+export const bytes32 = new rtt.FixedBytesType(32);
 export const stringT = new rtt.StringType();
 export const memStringT = new rtt.PointerType(stringT, sol.DataLocation.Memory);
 export const bytesT = new rtt.BytesType();

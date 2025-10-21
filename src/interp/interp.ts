@@ -116,7 +116,6 @@ import {
     abi,
     abiEncodeBuiltin,
     assertBuiltin,
-    implicitFirstArgBuiltins,
     makeMsgBuiltin,
     popBuiltin,
     pushBuiltin,
@@ -2013,19 +2012,7 @@ export class Interpreter {
         salt: Uint8Array | undefined,
         state: State
     ): Value {
-        let callee: Value;
-        let implFirstArg: Value | undefined = undefined;
-
-        if (
-            calleeE instanceof sol.MemberAccess &&
-            implicitFirstArgBuiltins.has(calleeE.memberName)
-        ) {
-            implFirstArg = this.evalNP(calleeE.vExpression, state);
-            callee = implicitFirstArgBuiltins.get(calleeE.memberName) as BuiltinFunction;
-        } else {
-            callee = this.evalNP(calleeE, state);
-        }
-
+        const callee = this.evalNP(calleeE, state);
         this.expect(callee instanceof BuiltinFunction);
 
         let args: Value[];
@@ -2048,11 +2035,6 @@ export class Interpreter {
         } else {
             args = expr.vArguments.map((argExpr) => this.evalNP(argExpr, state));
             argTs = expr.vArguments.map((argExpr) => this.typeOf(argExpr));
-        }
-
-        if (implFirstArg !== undefined) {
-            args.unshift(implFirstArg);
-            argTs.unshift(this.typeOf((calleeE as sol.MemberAccess).vExpression));
         }
 
         if (["call", "delegatecall", "staticcall", "callcode"].includes(callee.name)) {
@@ -2757,7 +2739,11 @@ export class Interpreter {
             (isArrayLikeStorageView(baseVal) && expr.memberName === "push") ||
             expr.memberName === "pop"
         ) {
-            return expr.memberName === "push" ? pushBuiltin : popBuiltin;
+            const baseValT = this.typeOf(expr.vExpression);
+            return (expr.memberName === "push" ? pushBuiltin : popBuiltin).curry(
+                [baseVal],
+                [baseValT]
+            );
         }
 
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
@@ -2980,16 +2966,15 @@ export class Interpreter {
     ): BaseScope {
         const staticScope = this.makeStaticScope(nd, state);
         let localNames: string[];
-        const localVals = [...args];
+        let localVals: Value[];
 
         if (nd instanceof BuiltinFunction) {
             nd = nd.concretize(argTs);
-        }
-
-        if (nd instanceof BuiltinFunction) {
             localNames = nd.type.argTs.map((_, i) => `arg_${i}`);
+            localVals = [...nd.curriedArgs, ...args];
         } else {
             localNames = nd.vParameters.vParameters.map((d) => d.name);
+            localVals = [...args];
         }
 
         // We keep the returns in the function scope as well
