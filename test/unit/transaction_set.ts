@@ -301,7 +301,6 @@ export class TransactionSet {
                     );
                     return false;
                 }
-                return true;
             } else if (step.result.tag === "create_success") {
                 if (res.reverted) {
                     console.error(`${this.ppStep(step)}: Unexpected revert`);

@@ -127,6 +127,7 @@ import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { BaseInterpType } from "./types";
 import { InterpVisitor } from "./visitors";
+import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -250,8 +251,14 @@ export class Interpreter {
         const mdc = getContractInfo(state);
         this.expect(mdc.ast !== undefined, `Can't create a contract with no AST`);
         const bases = mdc.ast.vLinearizedBaseContracts.toReversed();
-        // We assume that the caller has created and initialized state.account
 
+        // Compute the link map from the artifact's bytecode and the actual msg.data
+        const linkMap = decodeLinkMap(mdc.bytecode, state.msg.data);
+
+        // Compute the linked bytecode and deployed bytecode
+        state.partialDeployedBytecode = this.artifactManager.link(mdc.deployedBytecode, linkMap);
+
+        // We assume that the caller has created and initialized state.account
         // If there are arguments to be passed, then the target MDC must have a constructor
         this.expect(
             msg.data.length === mdc.bytecode.bytecode.length ||
@@ -339,15 +346,19 @@ export class Interpreter {
             throw e;
         }
 
+        const deployedBytecode = state.partialDeployedBytecode;
+
         for (const v of this.visitors) {
-            v.return(this, state, mdc.deployedBytecode.bytecode);
+            v.return(this, state, deployedBytecode);
         }
+
+        state.account.deployedBytecode = deployedBytecode;
 
         // If we succeed update the world on our new state
         this.world.updateAccount(state.account);
 
         // @todo implement immutables
-        return mdc.deployedBytecode.bytecode;
+        return deployedBytecode;
     }
 
     /**

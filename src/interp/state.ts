@@ -57,6 +57,8 @@ export interface State {
     account: AccountInfo;
     //Account of actual code executing. May be different from `account`s code for delegate calls
     codeAccount: AccountInfo | undefined;
+    //Scratch space for the deployed bytecode being created inside the constructor
+    partialDeployedBytecode: Uint8Array | undefined;
     memory: Memory;
     memAllocator: Allocator;
     msg: SolMessage;
@@ -81,6 +83,7 @@ export function makeNoContractState(): State {
             nonce: 0n
         },
         codeAccount: undefined,
+        partialDeployedBytecode: undefined,
         memory: memAllocator.memory,
         memAllocator,
         msg: {
@@ -119,6 +122,7 @@ export function makeStateForAccount(
     return {
         account,
         codeAccount,
+        partialDeployedBytecode: undefined,
         memory: memAllocator.memory,
         memAllocator,
         msg: {
