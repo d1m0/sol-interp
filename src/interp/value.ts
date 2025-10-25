@@ -189,7 +189,7 @@ export class NoneValue extends Poison {
     }
 }
 
-export abstract class BaseTypeValue extends BaseInterpValue {}
+export abstract class BaseTypeValue extends BaseInterpValue { }
 
 export class TypeValue extends BaseTypeValue {
     constructor(public readonly type: rtt.BaseRuntimeType) {
@@ -221,6 +221,38 @@ export function typeValueToType(t: BaseTypeValue): rtt.BaseRuntimeType {
     nyi(`typeValueToType(${t.constructor.name})`);
 }
 
+/**
+ * Primtiive value used to denote the result of a `new T` expression.
+ * (Note that this is different from `new T(...)`)
+ */
+export class NewCall {
+    constructor(
+        public readonly type: sol.TypeNode
+    ) {
+    }
+}
+
+/**
+ * Primtiive value used to annotate an external call target with additional call parameters such as gas, value and salt.
+ */
+export class ExternalCallDescription {
+    constructor(
+        /**
+         * Target is on of:
+         *  - Address for (address).*call
+         *  - ContractDefinition for (new Contract)
+         *  - ExternalFunRef for var.method()
+         */
+        public readonly target: Address | NewCall | ExternalFunRef,
+        public gas: bigint | undefined = undefined,
+        public value: bigint | undefined = undefined,
+        public salt: Uint8Array | undefined = undefined,
+        public callKind: "call" | "staticcall" | "delegatecall" | "create"
+    ) {
+
+    }
+}
+
 export const none = new NoneValue();
 
 export type Value =
@@ -230,6 +262,8 @@ export type Value =
     | DefValue
     | TypeValue
     | TypeTuple
+    | ExternalCallDescription
+    | NewCall
     | Value[];
 
 // @todo migrate to sol-dbg
@@ -242,7 +276,9 @@ type NonPoisonPrimitiveValue =
     | Slice // array slices
     | View<any, BaseValue, any, rtt.BaseRuntimeType> // Pointer Values
     | TypeValue // Type Values and TypeTuples are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
-    | TypeTuple;
+    | TypeTuple
+    | NewCall
+    | ExternalCallDescription;
 
 export type NonPoisonValue =
     | NonPoisonPrimitiveValue
@@ -297,30 +333,30 @@ export type ValueTypeConstructors =
 
 export type TypeConstructorToValueType<V extends ValueTypeConstructors> =
     V extends BigIntConstructor
-        ? bigint
-        : V extends BooleanConstructor
-          ? boolean
-          : V extends Uint8ArrayConstructor
-            ? Uint8Array
-            : V extends AddressConstructor
-              ? Address
-              : V extends ExternalFunRefConstructor
-                ? ExternalFunRef
-                : V extends InternalFunRefConstructor
-                  ? InternalFunRef
-                  : V extends SliceConstructor
-                    ? Slice
-                    : V extends ViewConstructor
-                      ? View
-                      : V extends PoisonConstructor
-                        ? Poison
-                        : V extends BuiltinFunctionConstructor
-                          ? BuiltinFunction
-                          : V extends BuiltinStructConstructor
-                            ? BuiltinStruct
-                            : V extends ArrayConstructor
-                              ? Value[]
-                              : never;
+    ? bigint
+    : V extends BooleanConstructor
+    ? boolean
+    : V extends Uint8ArrayConstructor
+    ? Uint8Array
+    : V extends AddressConstructor
+    ? Address
+    : V extends ExternalFunRefConstructor
+    ? ExternalFunRef
+    : V extends InternalFunRefConstructor
+    ? InternalFunRef
+    : V extends SliceConstructor
+    ? Slice
+    : V extends ViewConstructor
+    ? View
+    : V extends PoisonConstructor
+    ? Poison
+    : V extends BuiltinFunctionConstructor
+    ? BuiltinFunction
+    : V extends BuiltinStructConstructor
+    ? BuiltinStruct
+    : V extends ArrayConstructor
+    ? Value[]
+    : never;
 
 export function match<T extends ValueTypeConstructors>(
     v: Value,

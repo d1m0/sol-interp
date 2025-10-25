@@ -279,8 +279,8 @@ export function length<T extends rtt.StateArea>(
 }
 
 export function indexView<T extends rtt.StateArea>(
-    v: rtt.IndexableView<Value, T, View>,
-    key: Value,
+    v: rtt.IndexableView<BaseValue, T, View>,
+    key: BaseValue,
     state: State
 ): View<any, BaseValue, any, rtt.BaseRuntimeType> {
     let res: View<any, BaseValue, any, rtt.BaseRuntimeType> | rtt.DecodingFailure;
