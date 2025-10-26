@@ -398,6 +398,7 @@ export const addressTransfer = new BuiltinFunction(
     [],
     [],
     true,
+    false,
     true
 );
 
@@ -415,6 +416,7 @@ export const addressSend = new BuiltinFunction(
     [],
     [],
     true,
+    false,
     true
 );
 
@@ -434,6 +436,7 @@ export const addressCall = new BuiltinFunction(
     [],
     [],
     true,
+    false,
     true
 );
 
@@ -453,6 +456,7 @@ export const addressDelegatecall = new BuiltinFunction(
     [],
     [],
     true,
+    false,
     true
 );
 

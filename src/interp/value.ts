@@ -37,7 +37,9 @@ export class BuiltinFunction extends BaseInterpValue {
         // Flag specifying if this builtin expects an implicit first argument. E.g. `arr` in `arr.push(...)`
         public readonly implicitFirstArg = false,
         // Flag specifying if this builtin corresponds to a non-function field. E.g. `(address).balance`
-        public readonly isField = false
+        public readonly isField = false,
+        // Flag specifying if this builtin performs an external call (i.e. *call, send, transfer)
+        public readonly isExternalCall = false
     ) {
         super();
     }
@@ -189,7 +191,7 @@ export class NoneValue extends Poison {
     }
 }
 
-export abstract class BaseTypeValue extends BaseInterpValue { }
+export abstract class BaseTypeValue extends BaseInterpValue {}
 
 export class TypeValue extends BaseTypeValue {
     constructor(public readonly type: rtt.BaseRuntimeType) {
@@ -226,10 +228,7 @@ export function typeValueToType(t: BaseTypeValue): rtt.BaseRuntimeType {
  * (Note that this is different from `new T(...)`)
  */
 export class NewCall {
-    constructor(
-        public readonly type: sol.TypeNode
-    ) {
-    }
+    constructor(public readonly type: sol.TypeNode) {}
 }
 
 /**
@@ -243,14 +242,12 @@ export class ExternalCallDescription {
          *  - ContractDefinition for (new Contract)
          *  - ExternalFunRef for var.method()
          */
-        public readonly target: Address | NewCall | ExternalFunRef,
-        public gas: bigint | undefined = undefined,
+        public readonly target: BuiltinFunction | NewCall | ExternalFunRef,
         public value: bigint | undefined = undefined,
+        public gas: bigint | undefined = undefined,
         public salt: Uint8Array | undefined = undefined,
-        public callKind: "call" | "staticcall" | "delegatecall" | "create"
-    ) {
-
-    }
+        public callKind: "call" | "staticcall" | "delegatecall" | "create" | undefined
+    ) {}
 }
 
 export const none = new NoneValue();
@@ -333,30 +330,30 @@ export type ValueTypeConstructors =
 
 export type TypeConstructorToValueType<V extends ValueTypeConstructors> =
     V extends BigIntConstructor
-    ? bigint
-    : V extends BooleanConstructor
-    ? boolean
-    : V extends Uint8ArrayConstructor
-    ? Uint8Array
-    : V extends AddressConstructor
-    ? Address
-    : V extends ExternalFunRefConstructor
-    ? ExternalFunRef
-    : V extends InternalFunRefConstructor
-    ? InternalFunRef
-    : V extends SliceConstructor
-    ? Slice
-    : V extends ViewConstructor
-    ? View
-    : V extends PoisonConstructor
-    ? Poison
-    : V extends BuiltinFunctionConstructor
-    ? BuiltinFunction
-    : V extends BuiltinStructConstructor
-    ? BuiltinStruct
-    : V extends ArrayConstructor
-    ? Value[]
-    : never;
+        ? bigint
+        : V extends BooleanConstructor
+          ? boolean
+          : V extends Uint8ArrayConstructor
+            ? Uint8Array
+            : V extends AddressConstructor
+              ? Address
+              : V extends ExternalFunRefConstructor
+                ? ExternalFunRef
+                : V extends InternalFunRefConstructor
+                  ? InternalFunRef
+                  : V extends SliceConstructor
+                    ? Slice
+                    : V extends ViewConstructor
+                      ? View
+                      : V extends PoisonConstructor
+                        ? Poison
+                        : V extends BuiltinFunctionConstructor
+                          ? BuiltinFunction
+                          : V extends BuiltinStructConstructor
+                            ? BuiltinStruct
+                            : V extends ArrayConstructor
+                              ? Value[]
+                              : never;
 
 export function match<T extends ValueTypeConstructors>(
     v: Value,

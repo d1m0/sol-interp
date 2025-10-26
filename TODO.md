@@ -226,6 +226,15 @@
 209    - kill gen
 210    - implement library calls as delegate calls
 
+    - evalExpression(FunctionCallOptions)
+    - test multiple function call options and combinations of .gas and call options on same callee
+    - eval function calls .gas, .value, .salt
+
+Issue: ContractScope seems wrong
+    - defs not included from base contracts
+    - functions should be internalFunRefs
+    - we have 2 views to a contract scope - internal and external. Internal - when accessing a field from code inside a contract or its inheriting contract and external when accessing ContractName.Field. To fix this, I don't think I should use scopes when resolving member accesses of ContractName.field
+
     - add code_in_constructor.sol test
     - implement address.call/address.staticcall
     - implement address.delegatecall/address.callcode

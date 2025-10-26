@@ -19,7 +19,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { none, Value } from "./value";
+import { ExternalCallDescription, none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { ArrayLikeLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
@@ -636,6 +636,19 @@ export function getGetterArgAndReturnTs(
     return [argTs, retT instanceof rtt.TupleType ? retT.elementTypes : [retT]];
 }
 
+/**
+ * Return the value, gas, salt of a value of its an ExternalCallDescription and undefineds otherwise
+ */
+export function getExternalCallComponents(
+    arg: Value
+): [bigint | undefined, bigint | undefined, Uint8Array | undefined] {
+    if (arg instanceof ExternalCallDescription) {
+        return [arg.value, arg.gas, arg.salt];
+    }
+
+    return [undefined, undefined, undefined];
+}
+
 export const int256 = new rtt.IntType(256, true);
 export const bytes24 = new rtt.FixedBytesType(24);
 export const bytes32 = new rtt.FixedBytesType(32);
@@ -647,3 +660,19 @@ export const memBytesT = new rtt.PointerType(bytesT, sol.DataLocation.Memory);
 export const bytes1 = new rtt.FixedBytesType(1);
 export const defT = new DefType();
 export const typeT = new TypeType();
+
+/**
+ * Return true IFF baseContract is a base (or the same contract) of childContract
+ */
+export function isBaseOf(
+    baseContract: sol.ContractDefinition,
+    childContract: sol.ContractDefinition
+): boolean {
+    for (const base of childContract.vLinearizedBaseContracts) {
+        if (base === baseContract) {
+            return true;
+        }
+    }
+
+    return false;
+}
