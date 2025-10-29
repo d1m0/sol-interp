@@ -19,13 +19,14 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { ExternalCallDescription, none, Value } from "./value";
+import { ExternalCallDescription, NewCall, none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { ArrayLikeLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, DefType, TypeType } from "./types";
 import { Address } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
+import { ppValue } from "./pp";
 
 /**
  * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
@@ -641,12 +642,42 @@ export function getGetterArgAndReturnTs(
  */
 export function getExternalCallComponents(
     arg: Value
-): [bigint | undefined, bigint | undefined, Uint8Array | undefined] {
+): [
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
+    let value: bigint | undefined;
+    let gas: bigint | undefined;
+    let salt: Uint8Array | undefined;
+    let target: Value;
+    let selector: Uint8Array | undefined;
+
     if (arg instanceof ExternalCallDescription) {
-        return [arg.value, arg.gas, arg.salt];
+        target = arg.target;
+        value = arg.value;
+        gas = arg.gas;
+        salt = arg.salt;
+    } else {
+        target = arg;
     }
 
-    return [undefined, undefined, undefined];
+    let to: Address;
+
+    if (target instanceof Address) {
+        to = target;
+    } else if (target instanceof NewCall) {
+        to = ZERO_ADDRESS;
+    } else if (target instanceof rtt.ExternalFunRef) {
+        to = target.address;
+        selector = target.selector;
+    } else {
+        nyi(`External call target: ${ppValue(target)}`);
+    }
+
+    return [to, selector, value, gas, salt];
 }
 
 export const int256 = new rtt.IntType(256, true);
@@ -675,4 +706,21 @@ export function isBaseOf(
     }
 
     return false;
+}
+
+export function liftExtCalRef(
+    arg: rtt.ExternalFunRef | Address | NewCall | ExternalCallDescription
+): ExternalCallDescription {
+    if (arg instanceof ExternalCallDescription) {
+        return arg;
+    }
+
+    const callKind =
+        arg instanceof rtt.ExternalFunRef
+            ? "solidity_call"
+            : arg instanceof NewCall
+              ? "contract_deployment"
+              : "call";
+
+    return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }

@@ -242,11 +242,18 @@ export class ExternalCallDescription {
          *  - ContractDefinition for (new Contract)
          *  - ExternalFunRef for var.method()
          */
-        public readonly target: BuiltinFunction | NewCall | ExternalFunRef,
+        public readonly target: Address | NewCall | ExternalFunRef,
         public value: bigint | undefined = undefined,
         public gas: bigint | undefined = undefined,
         public salt: Uint8Array | undefined = undefined,
-        public callKind: "call" | "staticcall" | "delegatecall" | "create" | undefined
+        public callKind:
+            | "call"
+            | "staticcall"
+            | "delegatecall"
+            | "send"
+            | "transfer"
+            | "solidity_call"
+            | "contract_deployment"
     ) {}
 }
 
@@ -301,7 +308,9 @@ export function isPrimitiveValue(v: any): v is PrimitiveValue {
         v instanceof Slice ||
         v instanceof View ||
         v instanceof Poison ||
-        v instanceof BaseTypeValue
+        v instanceof BaseTypeValue ||
+        v instanceof ExternalCallDescription ||
+        v instanceof NewCall
     );
 }
 

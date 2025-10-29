@@ -1,3 +1,5 @@
+pragma solidity 0.8.29;
+
 contract ConstructorCode {
     address public thisInConstructor;
     bytes public codeInConstructor;

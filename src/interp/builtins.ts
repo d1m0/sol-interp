@@ -1,6 +1,15 @@
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { BuiltinFunction, BuiltinStruct, none, TypeTuple, typeValueToType, Value } from "./value";
+import {
+    BuiltinFunction,
+    BuiltinStruct,
+    ExternalCallDescription,
+    NewCall,
+    none,
+    TypeTuple,
+    typeValueToType,
+    Value
+} from "./value";
 import { State } from "./state";
 import {
     AssertError,
@@ -30,15 +39,17 @@ import {
     getMsgSender,
     getSig,
     getStateStorage,
+    liftExtCalRef,
     makeZeroValue,
     memBytesT,
     memStringT,
     setStateStorage
 } from "./utils";
 import { Address, concatBytes } from "@ethereumjs/util";
-import { decode, encode } from "./abi";
+import { decode, encode, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
+import { ppValue } from "./pp";
 
 export const assertBuiltin = new BuiltinFunction(
     "assert",
@@ -183,28 +194,92 @@ export const popBuiltin = new BuiltinFunction(
     true
 );
 
+function encodeImpl(
+    self: BuiltinFunction,
+    paramTs: rtt.BaseRuntimeType[],
+    args: Value[],
+    state: State,
+    selector?: Uint8Array
+): Value {
+    let encBytes: Uint8Array;
+
+    if (paramTs.length === 0) {
+        encBytes = new Uint8Array();
+    } else {
+        encBytes = encode(args, paramTs, state);
+    }
+
+    if (selector) {
+        encBytes = concatBytes(selector, encBytes);
+    }
+
+    const res = PointerMemView.allocMemFor(encBytes, bytesT, state.memAllocator) as BytesMemView;
+    res.encode(encBytes, state.memory);
+
+    return res;
+}
+
 export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
     new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = self.type.argTs;
-        let encBytes: Uint8Array;
+        const args = self.getArgs(paramTs.length, state);
+        return [encodeImpl(self, paramTs, args, state)];
+    }
+);
 
-        if (paramTs.length === 0) {
-            encBytes = new Uint8Array();
-        } else {
-            const args = self.getArgs(paramTs.length, state);
-            encBytes = encode(args, paramTs, state);
-        }
+export const abiEncodePackedBuiltin = new BuiltinFunction(
+    "encodePacked",
+    new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const paramTs = self.type.argTs;
+        rtt.nyi(`encodePacked(${paramTs.map((t) => t.pp()).join(", ")})`);
+    }
+);
 
-        const res = PointerMemView.allocMemFor(
-            encBytes,
-            bytesT,
-            state.memAllocator
-        ) as BytesMemView;
-        res.encode(encBytes, state.memory);
+export const abiEncodeWithSelectorBuiltin = new BuiltinFunction(
+    "encodeWithSelector",
+    new rtt.FunctionType([rtt.bytes4, new TRest()], false, sol.FunctionStateMutability.Pure, [
+        memBytesT
+    ]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const paramTs = self.type.argTs;
+        const args = self.getArgs(paramTs.length, state);
 
-        return [res];
+        interp.expect(args.length >= 1 && args[0] instanceof Uint8Array);
+        return [encodeImpl(self, paramTs.slice(1), args.slice(1), state, args[0])];
+    }
+);
+
+export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
+    "encodeWithSignature",
+    new rtt.FunctionType([memStringT, new TRest()], false, sol.FunctionStateMutability.Pure, [
+        memBytesT
+    ]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const paramTs = self.type.argTs;
+        const args = self.getArgs(paramTs.length, state);
+
+        interp.expect(args.length >= 1 && args[0] instanceof View);
+        const sigStr = decodeView(args[0], state);
+        interp.expect(typeof sigStr === "string");
+
+        return [
+            encodeImpl(self, paramTs.slice(1), args.slice(1), state, signatureToSelector(sigStr))
+        ];
+    }
+);
+
+export const abiEncodeCallBuiltin = new BuiltinFunction(
+    "encodeCall",
+    new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const paramTs = self.type.argTs;
+        const args = self.getArgs(paramTs.length, state);
+
+        interp.expect(args.length >= 1 && args[0] instanceof rtt.ExternalFunRef);
+        return [encodeImpl(self, paramTs.slice(1), args.slice(1), state, args[0].selector)];
     }
 );
 
@@ -219,7 +294,7 @@ export const abiDecodeBuitin = new BuiltinFunction(
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const args = self.getArgs(2, state);
 
-        interp.expect(args[0] instanceof View, ``);
+        interp.expect(args[0] instanceof View, `Decode expects byte view not ${ppValue(args[0])}`);
         const bytes = decodeView(args[0], state);
         interp.expect(bytes instanceof Uint8Array, ``);
         interp.expect(args[1] instanceof TypeTuple);
@@ -283,12 +358,20 @@ export const requireBuiltin = new BuiltinFunction(
 
 const abiType = new rtt.StructType("abi", [
     ["encode", abiEncodeBuiltin.type],
+    ["encodePacked", abiEncodePackedBuiltin.type],
+    ["encodeWithSelector", abiEncodeWithSelectorBuiltin.type],
+    ["encodeWithSignature", abiEncodeWithSignatureBuiltin.type],
+    ["encodeCall", abiEncodeCallBuiltin.type],
     ["decode", abiDecodeBuitin.type]
 ]);
 
 export const abi = new BuiltinStruct("abi", abiType, [
     ["encode", [[abiEncodeBuiltin, ">=0.4.22"]]],
-    ["decode", [[abiDecodeBuitin, ">=0.4.22"]]]
+    ["decode", [[abiDecodeBuitin, ">=0.4.22"]]],
+    ["encodePacked", [[abiEncodePackedBuiltin, ">=0.4.13"]]],
+    ["encodeWithSelector", [[abiEncodeWithSelectorBuiltin, ">=0.4.13"]]],
+    ["encodeWithSignature", [[abiEncodeWithSignatureBuiltin, ">=0.4.13"]]],
+    ["encodeCall", [[abiEncodeCallBuiltin, ">=0.4.13"]]]
 ]);
 
 const msgType = new rtt.StructType("msg", [
@@ -353,7 +436,7 @@ export const addressCodeBuiltin = new BuiltinFunction(
         const account = interp.world.getAccount(addr);
         const code = account === undefined ? new Uint8Array() : account.deployedBytecode;
 
-        const codeView = PointerMemView.allocMemFor(code, memBytesT, state.memAllocator);
+        const codeView = PointerMemView.allocMemFor(code, bytesT, state.memAllocator);
         codeView.encode(code, state.memory, state.memAllocator);
 
         //@todo implement code === 0x0 during contract initialization
@@ -386,77 +469,84 @@ export const addressCodehashBuiltin = new BuiltinFunction(
 
 export const addressTransfer = new BuiltinFunction(
     "transfer",
-    new rtt.FunctionType([addressT, uint256], false, sol.FunctionStateMutability.Pure, []),
+    new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, []),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const [addr, amount] = self.getArgs(2, state);
+        const [addr] = self.getArgs(1, state);
         interp.expect(addr instanceof Address);
-        interp.expect(typeof amount === "bigint");
+        const res = new ExternalCallDescription(addr, undefined, undefined, undefined, "transfer");
 
-        const account = interp.world.getAccount(addr);
-        rtt.nyi(`transfer(${account}, ${amount})`);
+        return [res];
     },
     [],
     [],
     true,
-    false,
+    true,
     true
 );
 
 export const addressSend = new BuiltinFunction(
     "send",
-    new rtt.FunctionType([addressT, uint256], false, sol.FunctionStateMutability.Pure, [rtt.bool]),
+    new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [rtt.bool]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const [addr, amount] = self.getArgs(2, state);
+        const [addr] = self.getArgs(1, state);
         interp.expect(addr instanceof Address);
-        interp.expect(typeof amount === "bigint");
 
-        const account = interp.world.getAccount(addr);
-        rtt.nyi(`send(${account}, ${amount})`);
+        const res = new ExternalCallDescription(addr, undefined, undefined, undefined, "send");
+
+        return [res];
     },
     [],
     [],
     true,
-    false,
+    true,
     true
 );
 
 export const addressCall = new BuiltinFunction(
     "call",
-    new rtt.FunctionType([addressT, memBytesT], false, sol.FunctionStateMutability.Pure, [
+    new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [
         rtt.bool,
         memBytesT
     ]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const [addr, msg] = self.getArgs(2, state);
+        const [addr] = self.getArgs(1, state);
         interp.expect(addr instanceof Address);
 
-        const account = interp.world.getAccount(addr);
-        rtt.nyi(`call(${account}, ${msg})`);
+        const res = new ExternalCallDescription(addr, undefined, undefined, undefined, "call");
+
+        return [res];
     },
     [],
     [],
     true,
-    false,
+    true,
     true
 );
 
 export const addressDelegatecall = new BuiltinFunction(
     "delegatecall",
-    new rtt.FunctionType([addressT, memBytesT], false, sol.FunctionStateMutability.Pure, [
+    new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [
         rtt.bool,
         memBytesT
     ]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const [addr, msg] = self.getArgs(2, state);
+        const [addr] = self.getArgs(1, state);
         interp.expect(addr instanceof Address);
 
-        const account = interp.world.getAccount(addr);
-        rtt.nyi(`delegatecall(${account}, ${msg})`);
+        const res = new ExternalCallDescription(
+            addr,
+            undefined,
+            undefined,
+            undefined,
+            "delegatecall"
+        );
+
+        return [res];
     },
     [],
     [],
     true,
-    false,
+    true,
     true
 );
 
@@ -472,3 +562,99 @@ export const addressBuiltinStruct = new BuiltinStruct("address", addressStructTy
     ["delegatecall", [[addressDelegatecall, ">=0.4.13"]]],
     ["staticcall", [[addressStaticcall, ">=0.4.13"]]]
 ]);
+
+const valueT = new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [
+    new TRest()
+]);
+const gasT = valueT;
+const saltT = new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [
+    new TRest()
+]);
+
+const externalCallableBuiltinStructType = new rtt.StructType("<externally-callable>", [
+    ["value", valueT],
+    ["gas", gasT],
+    ["salt", saltT]
+]);
+
+export const valueBuiltin = new BuiltinFunction(
+    "value",
+    valueT,
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [callable, value] = self.getArgs(2, state);
+        interp.expect(
+            callable instanceof rtt.ExternalFunRef ||
+                callable instanceof ExternalCallDescription ||
+                callable instanceof NewCall
+        );
+        interp.expect(typeof value === "bigint");
+
+        const res: ExternalCallDescription = liftExtCalRef(callable);
+        res.value = value;
+
+        return [res];
+    },
+    [],
+    [],
+    true,
+    false,
+    false
+);
+
+export const gasBuiltin = new BuiltinFunction(
+    "gas",
+    gasT,
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [callable, gas] = self.getArgs(2, state);
+        interp.expect(
+            callable instanceof rtt.ExternalFunRef ||
+                callable instanceof ExternalCallDescription ||
+                callable instanceof NewCall
+        );
+        interp.expect(typeof gas === "bigint");
+
+        const res = liftExtCalRef(callable);
+        res.gas = gas;
+
+        return [res];
+    },
+    [],
+    [],
+    true,
+    false,
+    false
+);
+
+export const saltBuiltin = new BuiltinFunction(
+    "salt",
+    saltT,
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [callable, salt] = self.getArgs(2, state);
+        interp.expect(
+            callable instanceof rtt.ExternalFunRef ||
+                callable instanceof ExternalCallDescription ||
+                callable instanceof NewCall
+        );
+        interp.expect(salt instanceof Uint8Array);
+
+        const res = liftExtCalRef(callable);
+        res.salt = salt;
+
+        return [res];
+    },
+    [],
+    [],
+    true,
+    false,
+    false
+);
+
+export const externalCallableBuiltinStruct = new BuiltinStruct(
+    "<externally-callable>",
+    externalCallableBuiltinStructType,
+    [
+        ["value", [[valueBuiltin, "<=0.7.0"]]],
+        ["gas", [[gasBuiltin, "<=0.7.0"]]],
+        ["salt", [[saltBuiltin, "<=0.7.0"]]]
+    ]
+);

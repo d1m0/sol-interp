@@ -249,6 +249,10 @@ export function encode(vs: Value[], ts: BaseInterpType[], state: State): Uint8Ar
     return hexToBytes(ethABI.encodeParameters(typeNames, abiVals) as `0x${string}`);
 }
 
+export function signatureToSelector(sig: string): Uint8Array {
+    return hexToBytes(`0x${ethABI.encodeFunctionSignature(sig)}`);
+}
+
 /**
  * Convert an abi value obtained from web3-eth-abi to a BaseValue.
  * I.e. this may produce complex values such as `Struct`s and arrays.

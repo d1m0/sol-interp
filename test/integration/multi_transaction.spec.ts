@@ -186,6 +186,75 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 }
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/mixed_function_call_options.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 11n
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                }
+            }
+        ]
+    ],
+    [
+        "test/samples/multi_transaction/code_in_constructor.sol",
+        [
+            {
+                type: "deploy",
+                contract: "ConstructorCode",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 11n
+            },
+            {
+                type: "call",
+                contract: "ConstructorCode",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                }
+            }
+        ]
+    ],
+    [
+        "test/samples/multi_transaction/address_call.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" },
+                value: 11n
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                }
+            }
+        ]
     ]
 ];
 
