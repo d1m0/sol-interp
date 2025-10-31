@@ -458,7 +458,6 @@ export const addressCodehashBuiltin = new BuiltinFunction(
         const account = interp.world.getAccount(addr);
         const code = account === undefined ? new Uint8Array() : account.deployedBytecode;
 
-        //@todo implement code === 0x0 during contract initialization
         return [keccak256(code)];
     },
     [],

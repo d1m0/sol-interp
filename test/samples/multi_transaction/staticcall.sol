@@ -1,22 +1,25 @@
 pragma solidity 0.8.29;
 
 contract Child {
-    constructor() public payable {
-        assert(address(this).balance == 3);
-    }
-
-    function addAndGetMoney(uint x, uint y) public payable returns (uint) {
+    function add(uint x, uint y) public view returns (uint) {
         return x + y;
     }
 
-    function fail() public {
+    function fail() public view returns (uint) {
         revert("msg");
     }
 }
 
+contract Child1 {
+    uint z;
+
+    function add(uint x, uint y) public returns (uint) {
+        z = x + y;
+        return z;
+    }
+}
+
 contract Foo {
-    constructor() public payable {}
-    
     function bytesEq(bytes memory b1, bytes memory b2) internal returns (bool) {
         if (b1.length != b2.length) {
             return false;
@@ -31,21 +34,24 @@ contract Foo {
         return true;
     }
 
-	function main() public {
-        Child c = new Child{value:3}();
+	function main() public returns (bytes memory) {
+        Child c = new Child();
+        Child1 c1 = new Child1();
 
-        assert(address(c).balance == 3);
-
-        bytes memory data = abi.encodeCall(c.addAndGetMoney, (3, 4));
-        (bool res, bytes memory retData) = address(c).call{value: 1}(data);
+        bytes memory data = abi.encodeCall(c.add, (3, 4));
+        (bool res, bytes memory retData) = address(c).staticcall(data);
         assert(res);
         uint z = abi.decode(retData, (uint256));
 
         assert(z == 7);
-        assert(address(c).balance == 4);
+
+        // Staticcall a method that modifies state
+        (res, retData) = address(c1).staticcall(data);
+        assert(!res && retData.length == 0);
+        
 
         data = abi.encodeCall(c.fail , ());
-        (res, retData) = address(c).call(data);
+        (res, retData) = address(c).staticcall(data);
         assert(!res);
         assert(bytesEq(retData, hex"08c379a0000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000036d73670000000000000000000000000000000000000000000000000000000000"));
 	}

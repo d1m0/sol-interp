@@ -255,6 +255,98 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 }
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/transfer.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                },
+                value: 111n
+            }
+        ]
+    ],
+    [
+        "test/samples/multi_transaction/send.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                },
+                value: 111n
+            }
+        ]
+    ],
+    [
+        "test/samples/multi_transaction/delegatecall.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                },
+                value: 111n
+            }
+        ]
+    ],
+    [
+        "test/samples/multi_transaction/staticcall.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                },
+                value: 111n
+            }
+        ]
     ]
 ];
 
