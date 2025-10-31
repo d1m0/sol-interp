@@ -91,7 +91,6 @@
 87 - add evalNew for arrays
 88 - emit
 89 - start modifiers
-
 90 - add a "constant" store in the state. Make it a memory to allow for bytes/string constants. Maybe move literals there as well!
 91 - build constant evaluation graph
 92    - for each cosntant vardecl
@@ -225,15 +224,32 @@
 208    - test with Error clause first, then Panic with a Panic exception
 209    - kill gen
 210    - implement library calls as delegate calls
+211    - evalExpression(FunctionCallOptions)
+212    - eval function calls .gas, .value, .salt
+213    - test multiple function call options and combinations of .gas and call options on same callee
+214    - finish evalExternalCall.
+215    - add balance handling
+216    - add test with balance
+217    - add code_in_constructor.sol test
+218     - add abi.decode family
 
-    - add code_in_constructor.sol test
-    - implement address.call/address.staticcall
+- add abi.encode family
+
+    - implement and test address.call/address.staticcall
+- implement abi.encodePacked 
+
+
+Issue: ContractScope seems wrong
+    - defs not included from base contracts
+    - functions should be internalFunRefs
+    - we have 2 views to a contract scope - internal and external. Internal - when accessing a field from code inside a contract or its inheriting contract and external when accessing ContractName.Field. To fix this, I don't think I should use scopes when resolving member accesses of ContractName.field
+
     - implement address.delegatecall/address.callcode
     - finish throw test
     - test builtins
     - implement emit
     - implement storage for immutable state vars
-    - can I implement computing the corrrect final deployed bytecode??
+    - implement computing the correct final deployed bytecode in the face of immutables
     - test contract creation from delegate context creates the same address as from the source contract
     - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
 
@@ -241,13 +257,7 @@ Constructors:
     - add a test with an abstract constructor taking storage pointers
     - add test with difference in initializing order depending on old codegen or new codegen
 
-
-- finish evalExternalCall.
-    - add balance handling
 - clean test run
-- (address).call builtin
-
-- implement delegate call
 - consider if I want to add a static call flag as well? How would we check that?
 - try and add a test where we call a contract function during constant initialization (maybe library routine?)
 - test with delegate call with matching layout
@@ -257,12 +267,9 @@ Constructors:
 - test with nested delegate call where the nested call fails
 
 - add test with order of operations for old and new style gas/value/salt passing
-- add test with balance
 - add test with external calls
 - add test with external calls where an inner one fails (should propagate up)
 - test with non-constant expression for size in abi.decode array type
-- add abi.encode family
-- add abi.decode family
 - gatherDefs across ContractScope and UnitScope can be unified. Unneccessary code duplication. Maybe a base DefScope? With an interface that both implement?
 
     - plan staticcall()

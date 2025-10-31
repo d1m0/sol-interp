@@ -5,7 +5,6 @@ import { ArtifactManager } from "./artifactManager";
 import { Address, createContractAddress } from "@ethereumjs/util";
 import { InterpVisitor } from "./visitors";
 import { ppAccount } from "./pp";
-import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 
 export interface AccountInfo {
     address: Address;
@@ -145,17 +144,11 @@ export class Chain implements WorldInterface {
         const contract = this.artifactManager.getContractFromCreationBytecode(msg.data);
         this.expect(contract !== undefined);
 
-        const linkMap = decodeLinkMap(contract.bytecode, msg.data);
-        const linkedDeployedBytecode = this.artifactManager.link(
-            contract.deployedBytecode,
-            linkMap
-        );
-
         const res = {
             address,
             contract,
             bytecode: msg.data,
-            deployedBytecode: linkedDeployedBytecode,
+            deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]) as Storage,
             balance: 0n,
             nonce: 0n,
@@ -210,7 +203,8 @@ export class Chain implements WorldInterface {
         const interpState = makeStateForAccount(
             this.artifactManager,
             delegatingAccount ? delegatingAccount : toAccount,
-            delegatingAccount ? toAccount : undefined
+            delegatingAccount ? toAccount : undefined,
+            msg.isStaticCall
         );
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);

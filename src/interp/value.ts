@@ -30,13 +30,30 @@ export class BuiltinFunction extends BaseInterpValue {
             state: State,
             self: BuiltinFunction
         ) => Value[],
-        public readonly implicitFirstArg = false
+        // Any curried arguments. E.g. `arr` in `arr.push(...)`
+        public readonly curriedArgs: Value[] = [],
+        // The types of any curried arguments. E.g. type of `arr` in `arr.push(...)`
+        protected readonly curriedArgTs: rtt.BaseRuntimeType[] = [],
+        // Flag specifying if this builtin expects an implicit first argument. E.g. `arr` in `arr.push(...)`
+        public readonly implicitFirstArg = false,
+        // Flag specifying if this builtin corresponds to a non-function field. E.g. `(address).balance`
+        public readonly isField = false,
+        // Flag specifying if this builtin performs an external call (i.e. *call, send, transfer)
+        public readonly isExternalCall = false
     ) {
         super();
     }
 
     alias(newName: string): BuiltinFunction {
-        return new BuiltinFunction(newName, this.type, this._call, this.implicitFirstArg);
+        return new BuiltinFunction(
+            newName,
+            this.type,
+            this._call,
+            this.curriedArgs,
+            this.curriedArgTs,
+            this.implicitFirstArg,
+            this.isField
+        );
     }
 
     pp(): string {
@@ -44,7 +61,10 @@ export class BuiltinFunction extends BaseInterpValue {
     }
 
     concretize(argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
-        const [concreteFormalArgs, subst] = concretize(this.type.argTs, argTs);
+        const [concreteFormalArgs, subst] = concretize(this.type.argTs, [
+            ...this.curriedArgTs,
+            ...argTs
+        ]);
         const concreteFormalRets = this.type.retTs.map((retT) => substitute(retT, subst));
 
         const concreteT = new rtt.FunctionType(
@@ -54,11 +74,44 @@ export class BuiltinFunction extends BaseInterpValue {
             concreteFormalRets
         );
 
-        return new BuiltinFunction(this.name, concreteT, this._call, this.implicitFirstArg);
+        return new BuiltinFunction(
+            this.name,
+            concreteT,
+            this._call,
+            this.curriedArgs,
+            this.curriedArgTs,
+            this.implicitFirstArg,
+            this.isField
+        );
+    }
+
+    curry(args: Value[], argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
+        return new BuiltinFunction(
+            this.name,
+            this.type,
+            this._call,
+            [...this.curriedArgs, ...args],
+            [...this.curriedArgTs, ...argTs],
+            this.implicitFirstArg,
+            this.isField
+        );
     }
 
     call(interp: Interpreter, state: State, concretizedBuiltin: BuiltinFunction): Value[] {
         return this._call(interp, state, concretizedBuiltin);
+    }
+
+    getArgs(numArgs: number, state: State): Value[] {
+        const res: Value[] = [];
+
+        sol.assert(state.scope !== undefined, ``);
+        for (let i = 0; i < numArgs; i++) {
+            const argV = state.scope.lookup(`arg_${i}`);
+            sol.assert(argV !== undefined, ``);
+            res.push(argV);
+        }
+
+        return res;
     }
 }
 
@@ -170,6 +223,40 @@ export function typeValueToType(t: BaseTypeValue): rtt.BaseRuntimeType {
     nyi(`typeValueToType(${t.constructor.name})`);
 }
 
+/**
+ * Primtiive value used to denote the result of a `new T` expression.
+ * (Note that this is different from `new T(...)`)
+ */
+export class NewCall {
+    constructor(public readonly type: sol.TypeNode) {}
+}
+
+/**
+ * Primtiive value used to annotate an external call target with additional call parameters such as gas, value and salt.
+ */
+export class ExternalCallDescription {
+    constructor(
+        /**
+         * Target is on of:
+         *  - Address for (address).*call
+         *  - ContractDefinition for (new Contract)
+         *  - ExternalFunRef for var.method()
+         */
+        public readonly target: Address | NewCall | ExternalFunRef,
+        public value: bigint | undefined = undefined,
+        public gas: bigint | undefined = undefined,
+        public salt: Uint8Array | undefined = undefined,
+        public callKind:
+            | "call"
+            | "staticcall"
+            | "delegatecall"
+            | "send"
+            | "transfer"
+            | "solidity_call"
+            | "contract_deployment"
+    ) {}
+}
+
 export const none = new NoneValue();
 
 export type Value =
@@ -179,6 +266,8 @@ export type Value =
     | DefValue
     | TypeValue
     | TypeTuple
+    | ExternalCallDescription
+    | NewCall
     | Value[];
 
 // @todo migrate to sol-dbg
@@ -191,7 +280,9 @@ type NonPoisonPrimitiveValue =
     | Slice // array slices
     | View<any, BaseValue, any, rtt.BaseRuntimeType> // Pointer Values
     | TypeValue // Type Values and TypeTuples are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
-    | TypeTuple;
+    | TypeTuple
+    | NewCall
+    | ExternalCallDescription;
 
 export type NonPoisonValue =
     | NonPoisonPrimitiveValue
@@ -217,7 +308,9 @@ export function isPrimitiveValue(v: any): v is PrimitiveValue {
         v instanceof Slice ||
         v instanceof View ||
         v instanceof Poison ||
-        v instanceof BaseTypeValue
+        v instanceof BaseTypeValue ||
+        v instanceof ExternalCallDescription ||
+        v instanceof NewCall
     );
 }
 

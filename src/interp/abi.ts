@@ -1,6 +1,6 @@
 import { assert, repeat, DataLocation } from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { Value } from "./value";
+import { isPrimitiveValue, Value } from "./value";
 import * as ethABI from "web3-eth-abi";
 import { nyi, View, Value as BaseValue, Struct, PointerMemView, bigIntToNum } from "sol-dbg";
 import { ppValue } from "./pp";
@@ -201,26 +201,6 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
         }
     }
 
-    /*
-    if (typ instanceof rtt.StructType) {
-        assert(isStructView(v), `Expected Array for ${typ.pp()} not ${v}`)
-        const res: any[] = [];
-
-        for (const [name, fieldT] of typ.fields) {
-            if (skipFieldDueToMap(fieldT)) {
-                continue;
-            }
-
-            const fieldV = v.fieldView(name);
-            assert(!(fieldV instanceof rtt.DecodingFailure), ``);
-
-            res.push(valueToAbiValue(fieldV, fieldT, s))
-        }
-
-        return res;
-    }
-    */
-
     nyi(`valueToAbiValue(${ppValue(v)}, ${typ.pp()})`);
 }
 
@@ -267,6 +247,10 @@ export function encode(vs: Value[], ts: BaseInterpType[], state: State): Uint8Ar
     const abiVals = vs.map((v, i) => valueToAbiValue(v, abiTypes[i], state));
 
     return hexToBytes(ethABI.encodeParameters(typeNames, abiVals) as `0x${string}`);
+}
+
+export function signatureToSelector(sig: string): Uint8Array {
+    return hexToBytes(`0x${ethABI.encodeFunctionSignature(sig)}`);
 }
 
 /**
@@ -383,22 +367,23 @@ export function decode(
     ts: BaseInterpType[],
     state: State,
     base: bigint = 0n
-): Value[] {
+): rtt.PrimitiveValue[] {
     const abiTypes = ts.map((t) => toABIEncodedType(t));
     const views = rtt.makeCalldataViews(abiTypes, base);
 
-    const res: Value[] = [];
+    const res: rtt.PrimitiveValue[] = [];
     for (let i = 0; i < views.length; i++) {
         const typ = ts[i];
         const abiType = abiTypes[i];
         const view = views[i];
 
         const baseValue: BaseValue = liftABIBaseValue(view.decode(data), typ);
-        let val: Value;
+        let val: rtt.PrimitiveValue;
 
         if (isValueType(typ)) {
             // Primitive value - just return it
-            val = baseValue as Value;
+            assert(isPrimitiveValue(baseValue), ``);
+            val = baseValue;
         } else if (typ instanceof rtt.PointerType && typ.location === DataLocation.Storage) {
             assert(
                 abiType instanceof rtt.IntType && typeof baseValue === "bigint",

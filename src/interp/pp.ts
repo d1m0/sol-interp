@@ -11,7 +11,9 @@ import {
     BuiltinFunction,
     BuiltinStruct,
     DefValue,
+    ExternalCallDescription,
     LValue,
+    NewCall,
     TypeValue,
     Value,
     ValueTypeConstructors
@@ -55,6 +57,10 @@ export function ppValue(v: Value): string {
         return `<slice [${v.start}:${v.end}]>`;
     } else if (v instanceof DefValue || v instanceof TypeValue) {
         return v.pp();
+    } else if (v instanceof ExternalCallDescription) {
+        return `<external call to ${ppValue(v.target)} with gas ${v.gas} value ${v.value} salt ${v.salt} of kind ${v.callKind}`;
+    } else if (v instanceof NewCall) {
+        return `<new call to ${v.type.pp()}>`;
     } else {
         return `${v}`;
     }

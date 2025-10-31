@@ -7,7 +7,7 @@ import {
     DefaultAllocator,
     ZERO_ADDRESS
 } from "sol-dbg";
-import { BaseScope, LocalsScope } from "./scope";
+import { BaseScope, BuiltinsScope, LocalsScope } from "./scope";
 import {
     assert,
     FunctionDefinition,
@@ -16,9 +16,10 @@ import {
 } from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
-import { BuiltinFunction } from "./value";
+import { BuiltinFunction, BuiltinStruct } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { AccountInfo } from "./chain";
+import { assertBuiltin, revertBuiltin, requireBuiltin, makeMsgBuiltin, abi } from "./builtins";
 
 export interface CallResult {
     reverted: boolean;
@@ -44,6 +45,7 @@ export interface SolMessage {
     gas: bigint;
     value: bigint;
     salt: Uint8Array | undefined;
+    isStaticCall: boolean;
 }
 
 export interface InternalCallFrame {
@@ -57,12 +59,15 @@ export interface State {
     account: AccountInfo;
     //Account of actual code executing. May be different from `account`s code for delegate calls
     codeAccount: AccountInfo | undefined;
+    //Scratch space for the deployed bytecode being created inside the constructor
+    partialDeployedBytecode: Uint8Array | undefined;
     memory: Memory;
     memAllocator: Allocator;
     msg: SolMessage;
     intCallStack: InternalCallFrame[];
     scope: BaseScope | undefined;
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
+    storageReadOnly: boolean;
 }
 
 /**
@@ -81,6 +86,7 @@ export function makeNoContractState(): State {
             nonce: 0n
         },
         codeAccount: undefined,
+        partialDeployedBytecode: undefined,
         memory: memAllocator.memory,
         memAllocator,
         msg: {
@@ -90,11 +96,13 @@ export function makeNoContractState(): State {
             data: new Uint8Array(),
             gas: 0n,
             value: 0n,
-            salt: undefined
+            salt: undefined,
+            isStaticCall: false
         },
         intCallStack: [],
         scope: undefined,
-        constantsMap: new Map()
+        constantsMap: new Map(),
+        storageReadOnly: true
     };
 }
 
@@ -105,7 +113,8 @@ export function makeNoContractState(): State {
 export function makeStateForAccount(
     artifactManager: ArtifactManager,
     account: AccountInfo,
-    codeAccount: AccountInfo | undefined
+    codeAccount: AccountInfo | undefined,
+    storageReadOnly: boolean
 ): State {
     const memAllocator = new DefaultAllocator();
     const contract = (codeAccount !== undefined ? codeAccount : account).contract;
@@ -119,6 +128,7 @@ export function makeStateForAccount(
     return {
         account,
         codeAccount,
+        partialDeployedBytecode: undefined,
         memory: memAllocator.memory,
         memAllocator,
         msg: {
@@ -128,11 +138,13 @@ export function makeStateForAccount(
             data: new Uint8Array(),
             gas: 0n,
             value: 0n,
-            salt: undefined
+            salt: undefined,
+            isStaticCall: false
         },
         intCallStack: [],
         scope: undefined,
-        constantsMap: constantsMap
+        constantsMap: constantsMap,
+        storageReadOnly
     };
 }
 
@@ -151,6 +163,23 @@ export function makeStateWithConstants(
             balance: 0n,
             nonce: 0n
         },
+        undefined,
+        false
+    );
+}
+
+export function makeBuiltinScope(state: State): BuiltinsScope {
+    const builtins: Array<BuiltinFunction | BuiltinStruct> = [
+        assertBuiltin,
+        abi,
+        revertBuiltin,
+        requireBuiltin,
+        makeMsgBuiltin(state)
+    ];
+
+    return new BuiltinsScope(
+        builtins.map((b) => [b.name, b.type, b]),
+        state,
         undefined
     );
 }

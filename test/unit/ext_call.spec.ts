@@ -118,7 +118,8 @@ describe("Simple function call tests", () => {
                 data,
                 gas: 0n,
                 value: 0n,
-                salt: undefined
+                salt: undefined,
+                isStaticCall: false
             });
 
             if (expectedReturns instanceof Array) {

@@ -247,7 +247,8 @@ export class TransactionSet {
             data,
             gas: 0n,
             value: step.value === undefined ? 0n : step.value,
-            salt: undefined
+            salt: undefined,
+            isStaticCall: false
         };
     }
 
@@ -301,7 +302,6 @@ export class TransactionSet {
                     );
                     return false;
                 }
-                return true;
             } else if (step.result.tag === "create_success") {
                 if (res.reverted) {
                     console.error(`${this.ppStep(step)}: Unexpected revert`);
