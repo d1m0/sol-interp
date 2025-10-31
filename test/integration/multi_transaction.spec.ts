@@ -347,6 +347,28 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 value: 111n
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/delegatecall_nonce.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: [createAddressFromString("0xd5da07ddbc00bd592642628e1e032af770ccc706")]
+                }
+            }
+        ]
     ]
 ];
 
