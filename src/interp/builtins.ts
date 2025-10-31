@@ -511,7 +511,13 @@ export const addressCall = new BuiltinFunction(
         const [addr] = self.getArgs(1, state);
         interp.expect(addr instanceof Address);
 
-        const res = new ExternalCallDescription(addr, undefined, undefined, undefined, "call");
+        const res = new ExternalCallDescription(
+            addr,
+            undefined,
+            undefined,
+            undefined,
+            self.name as "call" | "staticcall"
+        );
 
         return [res];
     },

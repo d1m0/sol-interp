@@ -34,7 +34,7 @@ contract Foo {
         return true;
     }
 
-	function main() public returns (bytes memory) {
+	function main() public {
         Child c = new Child();
         Child1 c1 = new Child1();
 

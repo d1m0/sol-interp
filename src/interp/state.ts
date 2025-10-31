@@ -45,6 +45,7 @@ export interface SolMessage {
     gas: bigint;
     value: bigint;
     salt: Uint8Array | undefined;
+    isStaticCall: boolean;
 }
 
 export interface InternalCallFrame {
@@ -66,6 +67,7 @@ export interface State {
     intCallStack: InternalCallFrame[];
     scope: BaseScope | undefined;
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
+    storageReadOnly: boolean;
 }
 
 /**
@@ -94,11 +96,13 @@ export function makeNoContractState(): State {
             data: new Uint8Array(),
             gas: 0n,
             value: 0n,
-            salt: undefined
+            salt: undefined,
+            isStaticCall: false
         },
         intCallStack: [],
         scope: undefined,
-        constantsMap: new Map()
+        constantsMap: new Map(),
+        storageReadOnly: true
     };
 }
 
@@ -109,7 +113,8 @@ export function makeNoContractState(): State {
 export function makeStateForAccount(
     artifactManager: ArtifactManager,
     account: AccountInfo,
-    codeAccount: AccountInfo | undefined
+    codeAccount: AccountInfo | undefined,
+    storageReadOnly: boolean
 ): State {
     const memAllocator = new DefaultAllocator();
     const contract = (codeAccount !== undefined ? codeAccount : account).contract;
@@ -133,11 +138,13 @@ export function makeStateForAccount(
             data: new Uint8Array(),
             gas: 0n,
             value: 0n,
-            salt: undefined
+            salt: undefined,
+            isStaticCall: false
         },
         intCallStack: [],
         scope: undefined,
-        constantsMap: constantsMap
+        constantsMap: constantsMap,
+        storageReadOnly
     };
 }
 
@@ -156,7 +163,8 @@ export function makeStateWithConstants(
             balance: 0n,
             nonce: 0n
         },
-        undefined
+        undefined,
+        false
     );
 }
 

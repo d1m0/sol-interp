@@ -27,6 +27,7 @@ import { BaseInterpType, DefType, TypeType } from "./types";
 import { Address } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
+import { NoPayloadError } from "./exceptions";
 
 /**
  * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
@@ -200,6 +201,9 @@ export function getStateStorage(state: State): rtt.Storage {
  * @returns
  */
 export function setStateStorage(state: State, newStorage: rtt.Storage): rtt.Storage {
+    if (state.storageReadOnly) {
+        throw new NoPayloadError(undefined);
+    }
     return (state.account.storage = newStorage);
 }
 
@@ -643,12 +647,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-    Address,
-    Uint8Array | undefined,
-    bigint | undefined,
-    bigint | undefined,
-    Uint8Array | undefined
-] {
+        Address,
+        Uint8Array | undefined,
+        bigint | undefined,
+        bigint | undefined,
+        Uint8Array | undefined
+    ] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -719,8 +723,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-              ? "contract_deployment"
-              : "call";
+                ? "contract_deployment"
+                : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }

@@ -10,10 +10,10 @@ type FailLoc = sol.ASTNode | BuiltinFunction;
 // Internal Errors
 export class InterpError extends Error {
     constructor(
-        public readonly node: FailLoc,
+        public readonly node: FailLoc | undefined,
         msg: string
     ) {
-        const loc = node instanceof BuiltinFunction ? node.pp() : printNode(node);
+        const loc = node === undefined ? "" : node instanceof BuiltinFunction ? node.pp() : printNode(node);
         super(`[${loc}]: ${msg}`);
     }
 }
@@ -22,7 +22,7 @@ export class InterpError extends Error {
  * Base class for all exceptions that are internal. I.e. - they are due to an
  * issue with the interpreter, not the interpreted code.
  */
-export class InternalError extends InterpError {}
+export class InternalError extends InterpError { }
 
 export class NoScope extends InternalError {
     constructor(node: FailLoc) {
@@ -49,7 +49,7 @@ export class AlreadyDefined extends InternalError {
  */
 export class RuntimeError extends InterpError {
     constructor(
-        public readonly node: FailLoc,
+        node: FailLoc | undefined,
         public readonly msg: string,
         public readonly payload: Uint8Array
     ) {
@@ -57,7 +57,7 @@ export class RuntimeError extends InterpError {
     }
 }
 
-export class CustomError extends RuntimeError {}
+export class CustomError extends RuntimeError { }
 
 export const PANIC_SELECTOR = hexToBytes("0x4e487b71");
 const PANIC_SCRATCH = concatBytes(PANIC_SELECTOR, new Uint8Array(32));
@@ -150,7 +150,7 @@ export class ErrorError extends RuntimeError {
  * An error with no payload. (e.g. require(bool), revert())
  */
 export class NoPayloadError extends RuntimeError {
-    constructor(node: FailLoc) {
+    constructor(node: FailLoc | undefined) {
         super(node, ``, new Uint8Array());
     }
 }

@@ -203,7 +203,8 @@ export class Chain implements WorldInterface {
         const interpState = makeStateForAccount(
             this.artifactManager,
             delegatingAccount ? delegatingAccount : toAccount,
-            delegatingAccount ? toAccount : undefined
+            delegatingAccount ? toAccount : undefined,
+            msg.isStaticCall
         );
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);
