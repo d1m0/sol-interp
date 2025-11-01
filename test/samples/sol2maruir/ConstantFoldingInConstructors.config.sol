@@ -14,14 +14,13 @@ contract Test {
 
     function verify() public {
         assert(someContant == 6);
-        //@todo uncomment after implementing public getters
-        //assert(this.someContant() == 6);
+        assert(this.someContant() == 6);
         assert(decimals == 8);
-        //assert(this.decimals() == 8);
+        assert(this.decimals() == 8);
         assert(totalSupply == 100000000);
-        //assert(this.totalSupply() == 100000000);
+        assert(this.totalSupply() == 100000000);
         assert(scalarNested == 6);
-        //assert(this.scalarNested() == 6);
+        assert(this.scalarNested() == 6);
     }
 }
 

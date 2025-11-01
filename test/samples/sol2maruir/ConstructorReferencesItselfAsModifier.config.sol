@@ -1,4 +1,4 @@
-pragma solidity 0.5.0;
+pragma solidity 0.5.17;
 
 contract Test {
     uint public a = 0;

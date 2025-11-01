@@ -1865,6 +1865,32 @@ export class Interpreter {
             return clampIntToType(fromV, toT);
         }
 
+        if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.AddressType) {
+            this.expect(fromV instanceof Uint8Array);
+            const addr = new Uint8Array(20);
+            const off = fromT.numBytes - 20;
+            addr.set(fromV.slice(off >= 0 ? off : 0));
+            return new Address(addr);
+        }
+
+        if (
+            fromT instanceof rtt.AddressType &&
+            toT instanceof rtt.FixedBytesType &&
+            toT.numBytes >= 20
+        ) {
+            this.expect(fromV instanceof Address);
+            const res = new Uint8Array(toT.numBytes);
+            res.set(fromV.bytes, toT.numBytes - 20);
+            return res;
+        }
+
+        if (fromT instanceof rtt.IntType && toT instanceof rtt.AddressType) {
+            this.expect(typeof fromV === "bigint");
+            const addr = new Uint8Array(20);
+            rtt.encodeBigintInBigEndianBuf(fromV, addr, fromT.numBits / 8);
+            return new Address(addr);
+        }
+
         if (fromT.pp() === toT.pp()) {
             return fromV;
         }

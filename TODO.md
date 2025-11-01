@@ -240,22 +240,34 @@
 224 - consider if I want to add a static call flag as well? How would we check that?
 225 - test with delegate call with matching layout
 226 - add test with external calls
+227 - finish throw test
+228 - refactor builtins to a simpler model with version descriptors
 
-    - finish throw test
-    - address.callcode
+- test remaining sol2maruir tests to determine readiness level
 
+- address.callcode
 - implement abi.encodePacked 
+- implement block builtins
+    - store block in state
 
+- implement gasleft/block.gas
+- implement tx builtins
+    - store tx info in state
+
+- implement math builtins 
+- implement selfdestruct
+- implement type(Contract), type(Interface), type(IntType)
+    - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
+- cli for playing
+- implement emit
+- implement storage for immutable state vars
+- implement computing the correct final deployed bytecode in the face of immutables
+- do a pass over contract scopes
 
 Issue: ContractScope seems wrong
     - defs not included from base contracts
     - functions should be internalFunRefs
     - need an "immutable" var space somewhere in the state
-- test builtins
-- implement emit
-- implement storage for immutable state vars
-- implement computing the correct final deployed bytecode in the face of immutables
-- test for type(C).creationCode and type(C).runtimeCode with link and immutable references
 
 Constructors:
     - add a test with an abstract constructor taking storage pointers
@@ -293,7 +305,6 @@ Constructors:
 // ---------------
 - test virtual function resolves to public getter
 - more coercions
-- cli for playing
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos
