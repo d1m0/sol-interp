@@ -76,7 +76,7 @@ import {
     equalsBytes,
     hexToBytes
 } from "@ethereumjs/util";
-import { BaseScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
+import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
     changeLocTo,
     clampIntToType,
@@ -121,8 +121,8 @@ import {
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
     abiEncodeBuiltin,
-    addressBuiltinStruct,
-    externalCallableBuiltinStruct,
+    ADDRESS_BUILTIN_STRUCT_NAME,
+    EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
     popBuiltin,
     pushBuiltin,
     revertBuiltin
@@ -2653,16 +2653,43 @@ export class Interpreter {
         return val;
     }
 
+    private getBuiltin(state: State, ...path: string[]): Value {
+        let s = state.scope;
+
+        // @todo: stupid. fix
+        while (s !== undefined && !(s instanceof BuiltinsScope)) {
+            s = s._next;
+        }
+
+        this.expect(s !== undefined, `No builtin scope`);
+
+        let res: Value | undefined = s.builtins;
+
+        for (let id of path) {
+            this.expect(res instanceof BuiltinStruct);
+            res = res.getField(id);
+        }
+
+        this.expect(res instanceof BuiltinStruct || res instanceof BuiltinFunction, ``);
+
+        return res;
+    }
+
+    private getBuiltinStruct(state: State, ...path: string[]): BuiltinStruct {
+        const res = this.getBuiltin(state, ...path);
+        this.expect(res instanceof BuiltinStruct)
+        return res;
+    }
+
     evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
         let baseVal = this.evalNP(expr.vExpression, state);
 
         if (baseVal instanceof Address) {
             // Builtin
             if (expr.vReferencedDeclaration === undefined) {
-                const res = addressBuiltinStruct.getFieldForVersion(
-                    expr.memberName,
-                    this.artifact.compilerVersion
-                );
+                const addressBuiltinStruct = this.getBuiltinStruct(state, ADDRESS_BUILTIN_STRUCT_NAME);
+                const res = addressBuiltinStruct.getField(expr.memberName);
+
                 this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
 
                 return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
@@ -2692,10 +2719,8 @@ export class Interpreter {
             baseVal instanceof ExternalCallDescription ||
             baseVal instanceof NewCall
         ) {
-            const res = externalCallableBuiltinStruct.getFieldForVersion(
-                expr.memberName,
-                this.artifact.compilerVersion
-            );
+            const externalCallableBuiltinStruct = this.getBuiltinStruct(state, EXTERNAL_CALL_CALLABLE_FIELDS_NAME)
+            const res = externalCallableBuiltinStruct.getField(expr.memberName);
             this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
 
             return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
@@ -2719,7 +2744,7 @@ export class Interpreter {
         }
 
         if (baseVal instanceof BuiltinStruct) {
-            const res = baseVal.getFieldForVersion(expr.memberName, this.artifact.compilerVersion);
+            const res = baseVal.getField(expr.memberName);
             this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
             return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
         }
@@ -2963,7 +2988,7 @@ export class Interpreter {
         const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
 
         if (nd instanceof BuiltinFunction) {
-            return makeBuiltinScope(state);
+            return makeBuiltinScope(state, this.compilerVersion);
         }
 
         while (nd !== undefined) {
@@ -2986,7 +3011,7 @@ export class Interpreter {
         }
 
         scopeNodes.reverse();
-        let scope: BaseScope = makeBuiltinScope(state);
+        let scope: BaseScope = makeBuiltinScope(state, this.compilerVersion);
 
         for (const nd of scopeNodes) {
             if (nd instanceof sol.SourceUnit) {

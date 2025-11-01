@@ -692,6 +692,7 @@ export const addressT = new rtt.AddressType();
 export const memStringT = new rtt.PointerType(stringT, sol.DataLocation.Memory);
 export const bytesT = new rtt.BytesType();
 export const memBytesT = new rtt.PointerType(bytesT, sol.DataLocation.Memory);
+export const cdBytesT = new rtt.PointerType(bytesT, sol.DataLocation.CallData);
 export const bytes1 = new rtt.FixedBytesType(1);
 export const defT = new DefType();
 export const typeT = new TypeType();

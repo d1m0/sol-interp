@@ -1,6 +1,6 @@
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { BuiltinFunction, DefValue, Value } from "./value";
+import { BuiltinFunction, BuiltinStruct, DefValue, Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -599,12 +599,13 @@ export class BuiltinsScope extends BaseScope {
     builtinsMap: Map<string, Value>;
 
     constructor(
-        builtins: Array<[string, rtt.BaseRuntimeType, Value]>,
+        public readonly builtins: BuiltinStruct,
         state: State,
         _next: BaseScope | undefined
     ) {
-        super(`<builtins>`, new Map(builtins.map((x) => [x[0], x[1]])), state, _next);
-        this.builtinsMap = new Map(builtins.map((x) => [x[0], x[2]]));
+        const builtinsFields: [string, rtt.BaseRuntimeType, Value][] = builtins.fields.map((([name, val]) => [name, (val as BuiltinFunction | BuiltinStruct).type, val]))
+        super(`<builtins>`, new Map(builtinsFields.map((x) => [x[0], x[1]])), state, _next);
+        this.builtinsMap = new Map(builtinsFields.map((x) => [x[0], x[2]]));
     }
 
     _lookup(name: string): Value | undefined {

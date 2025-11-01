@@ -35,6 +35,7 @@ import {
     bytes1,
     bytes32,
     bytesT,
+    cdBytesT,
     decodeView,
     getMsgSender,
     getSig,
@@ -63,7 +64,7 @@ export type BuiltinDescriptor =
     | BuiltinFunction
     | BuiltinStruct
     | Array<[BuiltinDescriptor, string]>
-    | [string, BuiltinDescriptor[]];
+    | [string, BuiltinDescriptor[]]
 
 /**
  * Given a builtin descriptor and a version return the concrete builtin for that versio
@@ -71,7 +72,7 @@ export type BuiltinDescriptor =
 export function makeBuiltin(
     descriptor: BuiltinDescriptor,
     version: string
-): BuiltinFunction | BuiltinStruct {
+): BuiltinFunction | BuiltinStruct | undefined {
     if (descriptor instanceof BuiltinFunction || descriptor instanceof BuiltinStruct) {
         return descriptor;
     }
@@ -81,7 +82,8 @@ export function makeBuiltin(
         const name = descriptor[0];
         const fields = (descriptor[1] as BuiltinDescriptor[]).map((desc) =>
             makeBuiltin(desc, version)
-        );
+        ).filter((field) => field !== undefined);
+
         const structT = new rtt.StructType(
             name,
             fields.map((field) => [field.name, field.type])
@@ -89,19 +91,24 @@ export function makeBuiltin(
         return new BuiltinStruct(
             descriptor[0],
             structT,
-            fields.map((field) => [field.name, [[field, version]]])
+            fields.map((field) => [field.name, field])
         );
     }
 
     // A choice of several options
     const matchingOptions = (descriptor as Array<[BuiltinDescriptor, string]>).filter(
-        ([descriptor, verPattern]) => satisfies(version, verPattern)
+        ([, verPattern]) => satisfies(version, verPattern)
     );
+
+    if (matchingOptions.length === 0) {
+        return undefined;
+    }
 
     sol.assert(
         matchingOptions.length === 1,
-        `Couldnt find a match for version ${version} for descriptor ${descriptor}`
+        `Multiple matching fields for version ${version} for descriptor ${descriptor}`
     );
+
     return makeBuiltin(matchingOptions[0][0], version);
 }
 
@@ -413,60 +420,6 @@ export const requireBuiltin = new BuiltinFunction(
     }
 );
 
-const abiType = new rtt.StructType("abi", [
-    ["encode", abiEncodeBuiltin.type],
-    ["encodePacked", abiEncodePackedBuiltin.type],
-    ["encodeWithSelector", abiEncodeWithSelectorBuiltin.type],
-    ["encodeWithSignature", abiEncodeWithSignatureBuiltin.type],
-    ["encodeCall", abiEncodeCallBuiltin.type],
-    ["decode", abiDecodeBuitin.type]
-]);
-
-export const abi = new BuiltinStruct("abi", abiType, [
-    ["encode", [[abiEncodeBuiltin, ">=0.4.22"]]],
-    ["decode", [[abiDecodeBuitin, ">=0.4.22"]]],
-    ["encodePacked", [[abiEncodePackedBuiltin, ">=0.4.13"]]],
-    ["encodeWithSelector", [[abiEncodeWithSelectorBuiltin, ">=0.4.13"]]],
-    ["encodeWithSignature", [[abiEncodeWithSignatureBuiltin, ">=0.4.13"]]],
-    ["encodeCall", [[abiEncodeCallBuiltin, ">=0.4.13"]]]
-]);
-
-const msgType = new rtt.StructType("msg", [
-    ["data", new rtt.PointerType(bytesT, sol.DataLocation.CallData)],
-    ["sender", new rtt.AddressType()],
-    ["sig", rtt.bytes4],
-    ["value", rtt.uint256]
-]);
-
-export function makeMsgBuiltin(state: State): BuiltinStruct {
-    return new BuiltinStruct("msg", msgType, [
-        ["data", [[new MsgDataView(), ">=0.4.13"]]],
-        ["sender", [[getMsgSender(state), ">=0.4.13"]]],
-        ["sig", [[getSig(state), ">=0.4.13"]]],
-        ["value", [[state.msg.value, ">=0.4.13"]]]
-    ]);
-}
-
-const transferT = new rtt.FunctionType([uint256], true, sol.FunctionStateMutability.Payable, []);
-const sendT = new rtt.FunctionType([uint256], true, sol.FunctionStateMutability.Payable, [
-    rtt.bool
-]);
-const callT = new rtt.FunctionType([memBytesT], true, sol.FunctionStateMutability.Payable, [
-    rtt.bool,
-    memBytesT
-]);
-
-const addressStructType = new rtt.StructType("address", [
-    ["balance", uint256],
-    ["code", memBytesT],
-    ["codehash", bytes32],
-    ["transfer", transferT],
-    ["send", sendT],
-    ["call", callT],
-    ["delegatecall", callT],
-    ["staticcall", callT]
-]);
-
 export const addressBalanceBuiltin = new BuiltinFunction(
     "balance",
     new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [uint256]),
@@ -614,34 +567,9 @@ export const addressDelegatecall = new BuiltinFunction(
 
 export const addressStaticcall = addressCall.alias("staticcall");
 
-export const addressBuiltinStruct = new BuiltinStruct("address", addressStructType, [
-    ["balance", [[addressBalanceBuiltin, ">=0.4.13"]]],
-    ["code", [[addressCodeBuiltin, ">=0.4.13"]]],
-    ["codehash", [[addressCodehashBuiltin, ">=0.4.13"]]],
-    ["transfer", [[addressTransfer, ">=0.4.13"]]],
-    ["send", [[addressSend, ">=0.4.13"]]],
-    ["call", [[addressCall, ">=0.4.13"]]],
-    ["delegatecall", [[addressDelegatecall, ">=0.4.13"]]],
-    ["staticcall", [[addressStaticcall, ">=0.4.13"]]]
-]);
-
-const valueT = new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [
-    new TRest()
-]);
-const gasT = valueT;
-const saltT = new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [
-    new TRest()
-]);
-
-const externalCallableBuiltinStructType = new rtt.StructType("<externally-callable>", [
-    ["value", valueT],
-    ["gas", gasT],
-    ["salt", saltT]
-]);
-
 export const valueBuiltin = new BuiltinFunction(
     "value",
-    valueT,
+    new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [callable, value] = self.getArgs(2, state);
         interp.expect(
@@ -665,7 +593,7 @@ export const valueBuiltin = new BuiltinFunction(
 
 export const gasBuiltin = new BuiltinFunction(
     "gas",
-    gasT,
+    new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [callable, gas] = self.getArgs(2, state);
         interp.expect(
@@ -689,7 +617,7 @@ export const gasBuiltin = new BuiltinFunction(
 
 export const saltBuiltin = new BuiltinFunction(
     "salt",
-    saltT,
+    new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [callable, salt] = self.getArgs(2, state);
         interp.expect(
@@ -711,18 +639,84 @@ export const saltBuiltin = new BuiltinFunction(
     false
 );
 
-export const externalCallableBuiltinStruct = new BuiltinStruct(
-    "<externally-callable>",
-    externalCallableBuiltinStructType,
-    [
-        ["value", [[valueBuiltin, "<=0.7.0"]]],
-        ["gas", [[gasBuiltin, "<=0.7.0"]]],
-        ["salt", [[saltBuiltin, "<=0.7.0"]]]
-    ]
+// Msg struct builtins
+const msgDataBuiltin = new BuiltinFunction(
+    "data",
+    new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        return [new MsgDataView()] 
+    },
+    [],
+    [],
+    false,
+    true,
+    false
 );
 
-export const addressBuiltinStructDesc: BuiltinDescriptor = [
-    "<address builtins>",
+const msgValueBuiltin = new BuiltinFunction(
+    "value",
+    new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [uint256]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        return [state.msg.value] 
+    },
+    [],
+    [],
+    false,
+    true,
+    false
+);
+
+const msgSenderBuiltin = new BuiltinFunction(
+    "sender",
+    new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        return [getMsgSender(state)] 
+    },
+    [],
+    [],
+    false,
+    true,
+    false
+);
+
+const msgSigBuiltin = new BuiltinFunction(
+    "sig",
+    new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        return [getSig(state)] 
+    },
+    [],
+    [],
+    false,
+    true,
+    false
+);
+
+const msgBuiltinStructDesc: BuiltinDescriptor = [
+    "msg",
+    [
+        msgDataBuiltin,
+        msgValueBuiltin,
+        msgSenderBuiltin,
+        msgSigBuiltin
+    ]
+]
+
+export const EXTERNAL_CALL_CALLABLE_FIELDS_NAME = "<external call callable fields>"
+
+const externalCallCallableFieldsDesc: BuiltinDescriptor = [
+    EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
+    [
+        [[valueBuiltin, "<=0.7.0"]],
+        [[gasBuiltin, "<=0.7.0"]],
+        [[saltBuiltin, "<=0.7.0"]]
+    ]
+]
+
+export const ADDRESS_BUILTIN_STRUCT_NAME = "<address builtins>"
+
+const addressBuiltinStructDesc: BuiltinDescriptor = [
+    ADDRESS_BUILTIN_STRUCT_NAME,
     [
         [[addressBalanceBuiltin, ">=0.4.13"]],
         [[addressCodeBuiltin, ">=0.8.0"]],
@@ -734,3 +728,28 @@ export const addressBuiltinStructDesc: BuiltinDescriptor = [
         [[addressStaticcall, ">=0.5.0"]]
     ]
 ];
+
+const abiBuiltinStructDesc: BuiltinDescriptor = [
+    "abi",
+    [
+        [[abiEncodeBuiltin, ">=0.4.22"]],
+        [[abiDecodeBuitin, ">=0.4.22"]],
+        [[abiEncodePackedBuiltin, ">=0.4.22"]],
+        [[abiEncodeWithSelectorBuiltin, ">=0.4.22"]],
+        [[abiEncodeWithSignatureBuiltin, ">=0.4.22"]],
+        [[abiEncodeCallBuiltin, ">=0.8.11"]]
+    ]
+]
+
+export const globalBuiltinStructDesc: BuiltinDescriptor = [
+    "<global builtins>",
+    [
+        assertBuiltin,
+        revertBuiltin,
+        requireBuiltin,
+        addressBuiltinStructDesc,
+        externalCallCallableFieldsDesc,
+        [[abiBuiltinStructDesc, ">=0.4.22"]],
+        msgBuiltinStructDesc
+    ]
+]

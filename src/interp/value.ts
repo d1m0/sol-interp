@@ -15,7 +15,6 @@ import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
 import { concretize, substitute } from "./polymorphic";
-import { satisfies } from "semver";
 
 export abstract class BaseInterpValue implements sol.PPAble {
     abstract pp(): string;
@@ -119,7 +118,7 @@ export class BuiltinStruct extends BaseInterpValue {
     constructor(
         public readonly name: string,
         public readonly type: rtt.StructType,
-        public readonly fields: Array<[string, Array<[Value, string]>]>
+        public readonly fields: Array<[string, Value]>
     ) {
         super();
     }
@@ -128,19 +127,14 @@ export class BuiltinStruct extends BaseInterpValue {
         return `<builtin struct ${this.name}>`;
     }
 
-    getFieldForVersion(field: string, ver: string): Value | undefined {
+    getField(field: string): Value | undefined {
         const options = this.fields.filter(([name]) => name === field);
+
         if (options.length !== 1) {
             return undefined;
         }
 
-        for (const [res, versionRange] of options[0][1]) {
-            if (satisfies(ver, versionRange)) {
-                return res;
-            }
-        }
-
-        return undefined;
+        return options[0][1];
     }
 }
 
