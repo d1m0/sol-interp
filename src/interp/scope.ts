@@ -603,7 +603,9 @@ export class BuiltinsScope extends BaseScope {
         state: State,
         _next: BaseScope | undefined
     ) {
-        const builtinsFields: [string, rtt.BaseRuntimeType, Value][] = builtins.fields.map((([name, val]) => [name, (val as BuiltinFunction | BuiltinStruct).type, val]))
+        const builtinsFields: Array<[string, rtt.BaseRuntimeType, Value]> = builtins.fields.map(
+            ([name, val]) => [name, (val as BuiltinFunction | BuiltinStruct).type, val]
+        );
         super(`<builtins>`, new Map(builtinsFields.map((x) => [x[0], x[1]])), state, _next);
         this.builtinsMap = new Map(builtinsFields.map((x) => [x[0], x[2]]));
     }

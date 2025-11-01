@@ -2665,7 +2665,7 @@ export class Interpreter {
 
         let res: Value | undefined = s.builtins;
 
-        for (let id of path) {
+        for (const id of path) {
             this.expect(res instanceof BuiltinStruct);
             res = res.getField(id);
         }
@@ -2677,7 +2677,7 @@ export class Interpreter {
 
     private getBuiltinStruct(state: State, ...path: string[]): BuiltinStruct {
         const res = this.getBuiltin(state, ...path);
-        this.expect(res instanceof BuiltinStruct)
+        this.expect(res instanceof BuiltinStruct);
         return res;
     }
 
@@ -2687,7 +2687,10 @@ export class Interpreter {
         if (baseVal instanceof Address) {
             // Builtin
             if (expr.vReferencedDeclaration === undefined) {
-                const addressBuiltinStruct = this.getBuiltinStruct(state, ADDRESS_BUILTIN_STRUCT_NAME);
+                const addressBuiltinStruct = this.getBuiltinStruct(
+                    state,
+                    ADDRESS_BUILTIN_STRUCT_NAME
+                );
                 const res = addressBuiltinStruct.getField(expr.memberName);
 
                 this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
@@ -2719,7 +2722,10 @@ export class Interpreter {
             baseVal instanceof ExternalCallDescription ||
             baseVal instanceof NewCall
         ) {
-            const externalCallableBuiltinStruct = this.getBuiltinStruct(state, EXTERNAL_CALL_CALLABLE_FIELDS_NAME)
+            const externalCallableBuiltinStruct = this.getBuiltinStruct(
+                state,
+                EXTERNAL_CALL_CALLABLE_FIELDS_NAME
+            );
             const res = externalCallableBuiltinStruct.getField(expr.memberName);
             this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
 

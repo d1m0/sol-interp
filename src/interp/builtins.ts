@@ -64,7 +64,7 @@ export type BuiltinDescriptor =
     | BuiltinFunction
     | BuiltinStruct
     | Array<[BuiltinDescriptor, string]>
-    | [string, BuiltinDescriptor[]]
+    | [string, BuiltinDescriptor[]];
 
 /**
  * Given a builtin descriptor and a version return the concrete builtin for that versio
@@ -80,9 +80,9 @@ export function makeBuiltin(
     // Version-dependent struct description
     if (typeof descriptor[0] === "string") {
         const name = descriptor[0];
-        const fields = (descriptor[1] as BuiltinDescriptor[]).map((desc) =>
-            makeBuiltin(desc, version)
-        ).filter((field) => field !== undefined);
+        const fields = (descriptor[1] as BuiltinDescriptor[])
+            .map((desc) => makeBuiltin(desc, version))
+            .filter((field) => field !== undefined);
 
         const structT = new rtt.StructType(
             name,
@@ -617,7 +617,7 @@ export const gasBuiltin = new BuiltinFunction(
 
 export const saltBuiltin = new BuiltinFunction(
     "salt",
-    new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest]),
+    new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [callable, salt] = self.getArgs(2, state);
         interp.expect(
@@ -643,8 +643,8 @@ export const saltBuiltin = new BuiltinFunction(
 const msgDataBuiltin = new BuiltinFunction(
     "data",
     new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
-    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        return [new MsgDataView()] 
+    (): Value[] => {
+        return [new MsgDataView()];
     },
     [],
     [],
@@ -656,8 +656,8 @@ const msgDataBuiltin = new BuiltinFunction(
 const msgValueBuiltin = new BuiltinFunction(
     "value",
     new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [uint256]),
-    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        return [state.msg.value] 
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.msg.value];
     },
     [],
     [],
@@ -669,8 +669,8 @@ const msgValueBuiltin = new BuiltinFunction(
 const msgSenderBuiltin = new BuiltinFunction(
     "sender",
     new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
-    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        return [getMsgSender(state)] 
+    (interp: Interpreter, state: State): Value[] => {
+        return [getMsgSender(state)];
     },
     [],
     [],
@@ -682,8 +682,8 @@ const msgSenderBuiltin = new BuiltinFunction(
 const msgSigBuiltin = new BuiltinFunction(
     "sig",
     new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
-    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        return [getSig(state)] 
+    (interp: Interpreter, state: State): Value[] => {
+        return [getSig(state)];
     },
     [],
     [],
@@ -694,26 +694,17 @@ const msgSigBuiltin = new BuiltinFunction(
 
 const msgBuiltinStructDesc: BuiltinDescriptor = [
     "msg",
-    [
-        msgDataBuiltin,
-        msgValueBuiltin,
-        msgSenderBuiltin,
-        msgSigBuiltin
-    ]
-]
+    [msgDataBuiltin, msgValueBuiltin, msgSenderBuiltin, msgSigBuiltin]
+];
 
-export const EXTERNAL_CALL_CALLABLE_FIELDS_NAME = "<external call callable fields>"
+export const EXTERNAL_CALL_CALLABLE_FIELDS_NAME = "<external call callable fields>";
 
 const externalCallCallableFieldsDesc: BuiltinDescriptor = [
     EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
-    [
-        [[valueBuiltin, "<=0.7.0"]],
-        [[gasBuiltin, "<=0.7.0"]],
-        [[saltBuiltin, "<=0.7.0"]]
-    ]
-]
+    [[[valueBuiltin, "<=0.7.0"]], [[gasBuiltin, "<=0.7.0"]], [[saltBuiltin, "<=0.7.0"]]]
+];
 
-export const ADDRESS_BUILTIN_STRUCT_NAME = "<address builtins>"
+export const ADDRESS_BUILTIN_STRUCT_NAME = "<address builtins>";
 
 const addressBuiltinStructDesc: BuiltinDescriptor = [
     ADDRESS_BUILTIN_STRUCT_NAME,
@@ -739,7 +730,7 @@ const abiBuiltinStructDesc: BuiltinDescriptor = [
         [[abiEncodeWithSignatureBuiltin, ">=0.4.22"]],
         [[abiEncodeCallBuiltin, ">=0.8.11"]]
     ]
-]
+];
 
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
@@ -752,4 +743,4 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         [[abiBuiltinStructDesc, ">=0.4.22"]],
         msgBuiltinStructDesc
     ]
-]
+];

@@ -169,12 +169,8 @@ export function makeStateWithConstants(
 }
 
 export function makeBuiltinScope(state: State, compilerVersion: string): BuiltinsScope {
-    const builtinStruct = makeBuiltin(globalBuiltinStructDesc, compilerVersion)
-    assert(builtinStruct instanceof BuiltinStruct, ``)
+    const builtinStruct = makeBuiltin(globalBuiltinStructDesc, compilerVersion);
+    assert(builtinStruct instanceof BuiltinStruct, ``);
 
-    return new BuiltinsScope(
-        builtinStruct,
-        state,
-        undefined
-    );
+    return new BuiltinsScope(builtinStruct, state, undefined);
 }
