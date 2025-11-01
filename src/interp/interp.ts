@@ -1024,8 +1024,8 @@ export class Interpreter {
 
         if (stmt.vExpression) {
             const retVal = this.evalNP(stmt.vExpression, state);
-            retVals =
-                stmt.vExpression instanceof sol.TupleExpression ? (retVal as Value[]) : [retVal];
+            const retExprT = this.typeOf(stmt.vExpression);
+            retVals = retExprT instanceof rtt.TupleType ? (retVal as Value[]) : [retVal];
         } else {
             retVals = [];
         }
@@ -1038,9 +1038,7 @@ export class Interpreter {
         );
 
         sol.assert(
-            fun !== undefined &&
-                (retVals.length === fun.vReturnParameters.vParameters.length ||
-                    retVals.length === 0),
+            retVals.length === fun.vReturnParameters.vParameters.length || retVals.length === 0,
             `Mismatch in number of ret vals and formal returns`
         );
 
@@ -2175,7 +2173,7 @@ export class Interpreter {
             retTs.push(...getterRetT);
         }
 
-        return decode(data, retTs, state);
+        return this.assertNotPoison(state, decode(data, retTs, state));
     }
 
     evalExternalCall(expr: sol.FunctionCall, callee: ExternalCallDescription, state: State): Value {
@@ -2193,6 +2191,11 @@ export class Interpreter {
             }
 
             if (callee.callKind === "send") {
+                return !res.reverted;
+            }
+
+            // *call builtins returns just bool for Solidity <0.5.0
+            if (lt(getCodeContractInfo(state).artifact.compilerVersion, "0.5.0")) {
                 return !res.reverted;
             }
 
@@ -3050,5 +3053,27 @@ export class Interpreter {
         }
 
         return res;
+    }
+
+    /**
+     * Check that none of the passed in values are Poison. If any of them is poison throw a runtime exception
+     */
+    public assertNotPoison(state: State, vals: Value[]): Value[] {
+        for (const v of vals) {
+            if (v instanceof ExternalCallDescription || v instanceof NewCall) {
+                continue;
+            }
+
+            if (v instanceof Array) {
+                this.assertNotPoison(state, v);
+                continue;
+            }
+
+            if (isPoison(v)) {
+                this.runtimeError(NoPayloadError, state);
+            }
+        }
+
+        return vals;
     }
 }

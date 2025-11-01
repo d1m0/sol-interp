@@ -13,7 +13,8 @@ export class InterpError extends Error {
         public readonly node: FailLoc | undefined,
         msg: string
     ) {
-        const loc = node === undefined ? "" : node instanceof BuiltinFunction ? node.pp() : printNode(node);
+        const loc =
+            node === undefined ? "" : node instanceof BuiltinFunction ? node.pp() : printNode(node);
         super(`[${loc}]: ${msg}`);
     }
 }
@@ -22,7 +23,7 @@ export class InterpError extends Error {
  * Base class for all exceptions that are internal. I.e. - they are due to an
  * issue with the interpreter, not the interpreted code.
  */
-export class InternalError extends InterpError { }
+export class InternalError extends InterpError {}
 
 export class NoScope extends InternalError {
     constructor(node: FailLoc) {
@@ -57,7 +58,7 @@ export class RuntimeError extends InterpError {
     }
 }
 
-export class CustomError extends RuntimeError { }
+export class CustomError extends RuntimeError {}
 
 export const PANIC_SELECTOR = hexToBytes("0x4e487b71");
 const PANIC_SCRATCH = concatBytes(PANIC_SELECTOR, new Uint8Array(32));

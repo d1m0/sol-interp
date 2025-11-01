@@ -647,12 +647,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -723,8 +723,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }

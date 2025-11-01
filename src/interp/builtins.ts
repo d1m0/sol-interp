@@ -50,21 +50,28 @@ import { decode, encode, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
-import { satisfies } from "semver"
+import { satisfies } from "semver";
 
 /**
  * A version-dependent buitlin description. This is a recursive datatype with several cases:
  * - a concrete builtin function
  * - a concrete builtin struct
- * - [BuiltinDescriptor, string][] a  choice from multiple builtin descriptors for different version ranges  
+ * - [BuiltinDescriptor, string][] a  choice from multiple builtin descriptors for different version ranges
  *  - [string, BuiltinDescriptor[]]- a builtin struct whose field types depend on the version
  */
-export type BuiltinDescriptor = BuiltinFunction | BuiltinStruct | [BuiltinDescriptor, string][] | [string, BuiltinDescriptor[]]
+export type BuiltinDescriptor =
+    | BuiltinFunction
+    | BuiltinStruct
+    | Array<[BuiltinDescriptor, string]>
+    | [string, BuiltinDescriptor[]];
 
 /**
  * Given a builtin descriptor and a version return the concrete builtin for that versio
  */
-export function makeBuiltin(descriptor: BuiltinDescriptor, version: string): BuiltinFunction | BuiltinStruct {
+export function makeBuiltin(
+    descriptor: BuiltinDescriptor,
+    version: string
+): BuiltinFunction | BuiltinStruct {
     if (descriptor instanceof BuiltinFunction || descriptor instanceof BuiltinStruct) {
         return descriptor;
     }
@@ -72,16 +79,30 @@ export function makeBuiltin(descriptor: BuiltinDescriptor, version: string): Bui
     // Version-dependent struct description
     if (typeof descriptor[0] === "string") {
         const name = descriptor[0];
-        const fields = (descriptor[1] as BuiltinDescriptor[]).map((desc) => makeBuiltin(desc, version))
-        const structT = new rtt.StructType(name, fields.map((field) => [field.name, field.type]))
-        return new BuiltinStruct(descriptor[0], structT, fields.map((field) => [field.name, [[field, version]]]))
+        const fields = (descriptor[1] as BuiltinDescriptor[]).map((desc) =>
+            makeBuiltin(desc, version)
+        );
+        const structT = new rtt.StructType(
+            name,
+            fields.map((field) => [field.name, field.type])
+        );
+        return new BuiltinStruct(
+            descriptor[0],
+            structT,
+            fields.map((field) => [field.name, [[field, version]]])
+        );
     }
 
     // A choice of several options
-    const matchingOptions = (descriptor as [BuiltinDescriptor, string][]).filter(([descriptor, verPattern]) => satisfies(version, verPattern))
+    const matchingOptions = (descriptor as Array<[BuiltinDescriptor, string]>).filter(
+        ([descriptor, verPattern]) => satisfies(version, verPattern)
+    );
 
-    sol.assert(matchingOptions.length === 1, `Couldnt find a match for version ${version} for descriptor ${descriptor}`)
-    return makeBuiltin(matchingOptions[0][0], version)
+    sol.assert(
+        matchingOptions.length === 1,
+        `Couldnt find a match for version ${version} for descriptor ${descriptor}`
+    );
+    return makeBuiltin(matchingOptions[0][0], version);
 }
 
 export const assertBuiltin = new BuiltinFunction(
@@ -334,10 +355,13 @@ export const abiDecodeBuitin = new BuiltinFunction(
         const typesTuple = typeValueToType(args[1]);
 
         sol.assert(typesTuple instanceof rtt.TupleType, ``);
-        return decode(
-            bytes,
-            typesTuple.elementTypes.map((t) => rtt.specializeType(t, sol.DataLocation.Memory)),
-            state
+        return interp.assertNotPoison(
+            state,
+            decode(
+                bytes,
+                typesTuple.elementTypes.map((t) => rtt.specializeType(t, sol.DataLocation.Memory)),
+                state
+            )
         );
     }
 );
@@ -622,8 +646,8 @@ export const valueBuiltin = new BuiltinFunction(
         const [callable, value] = self.getArgs(2, state);
         interp.expect(
             callable instanceof rtt.ExternalFunRef ||
-            callable instanceof ExternalCallDescription ||
-            callable instanceof NewCall
+                callable instanceof ExternalCallDescription ||
+                callable instanceof NewCall
         );
         interp.expect(typeof value === "bigint");
 
@@ -646,8 +670,8 @@ export const gasBuiltin = new BuiltinFunction(
         const [callable, gas] = self.getArgs(2, state);
         interp.expect(
             callable instanceof rtt.ExternalFunRef ||
-            callable instanceof ExternalCallDescription ||
-            callable instanceof NewCall
+                callable instanceof ExternalCallDescription ||
+                callable instanceof NewCall
         );
         interp.expect(typeof gas === "bigint");
 
@@ -670,8 +694,8 @@ export const saltBuiltin = new BuiltinFunction(
         const [callable, salt] = self.getArgs(2, state);
         interp.expect(
             callable instanceof rtt.ExternalFunRef ||
-            callable instanceof ExternalCallDescription ||
-            callable instanceof NewCall
+                callable instanceof ExternalCallDescription ||
+                callable instanceof NewCall
         );
         interp.expect(salt instanceof Uint8Array);
 
@@ -696,3 +720,17 @@ export const externalCallableBuiltinStruct = new BuiltinStruct(
         ["salt", [[saltBuiltin, "<=0.7.0"]]]
     ]
 );
+
+export const addressBuiltinStructDesc: BuiltinDescriptor = [
+    "<address builtins>",
+    [
+        [[addressBalanceBuiltin, ">=0.4.13"]],
+        [[addressCodeBuiltin, ">=0.8.0"]],
+        [[addressCodehashBuiltin, ">=0.8.0"]],
+        [[addressTransfer, ">=0.4.13"]],
+        [[addressSend, ">=0.4.13"]],
+        [[addressCall, ">=0.4.13"]],
+        [[addressDelegatecall, ">=0.4.13"]],
+        [[addressStaticcall, ">=0.5.0"]]
+    ]
+];
