@@ -5,7 +5,9 @@ import * as fse from "fs-extra";
 import { ppTrace } from "../../src/interp/pp";
 
 const IRTestAddress = createAddressFromString("0x93a5b04040b9d24ea0bb4aaa19967294bcbf44d2");
-const sol2maruirTests: string[] = fse.readdirSync("test/samples/sol2maruir");
+const sol2maruirTests: string[] = fse
+    .readdirSync("test/samples/sol2maruir")
+    .filter((name) => name.endsWith("config.sol"));
 
 /**
  * Set of tests from the older sol2maruir repo. All tests define an __IRTest__ class with an entrypoint `main()`

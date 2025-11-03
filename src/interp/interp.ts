@@ -74,7 +74,8 @@ import {
     bytesToHex,
     concatBytes,
     equalsBytes,
-    hexToBytes
+    hexToBytes,
+    setLengthLeft
 } from "@ethereumjs/util";
 import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
@@ -899,7 +900,7 @@ export class Interpreter {
             return this.execTryCatchClause(lowLevelClauses[0], vals, state);
         }
 
-        this.runtimeError(RuntimeError, state, res.data);
+        this.runtimeError(RuntimeError, state, "", res.data);
     }
 
     private execTryCatchClause(
@@ -1557,7 +1558,13 @@ export class Interpreter {
         }
 
         if (left instanceof Uint8Array && typeof right === "bigint") {
-            return [left, bigIntToBytes(right)];
+            right = bigIntToBytes(right);
+            const len = left.length > right.length ? left.length : right.length;
+
+            left = setLengthLeft(left, len);
+            right = setLengthLeft(right, len);
+
+            return [left, right];
         }
 
         this.fail(InterpError, `Unexpected values ${ppValue(left)} and ${ppValue(right)}`);
@@ -2400,7 +2407,7 @@ export class Interpreter {
             const res = this._evalMsgCall(expr, liftExtCalRef(callee), state);
 
             if (res.reverted) {
-                this.runtimeError(RuntimeError, state, res.data);
+                this.runtimeError(RuntimeError, state, "Contract creation reverted", res.data);
             }
 
             this.expect(res.newContract !== undefined);

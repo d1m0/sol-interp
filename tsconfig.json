@@ -22,7 +22,8 @@
         "noImplicitReturns": true,
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
-        "resolveJsonModule": true
+        "resolveJsonModule": true,
+        "allowJs": true
     },
     "include": [
         "src/**/*"
