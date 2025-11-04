@@ -1,8 +1,7 @@
 import { StepNode } from "./nodes";
-import { parse } from "./step_parser_gen"
+import { parse } from "./step_parser_gen";
 
-export type ParsedStep = StepNode
+export type ParsedStep = StepNode;
 export function parseStep(contents: string): ParsedStep {
-    // @ts-ignore
     return parse(contents);
 }

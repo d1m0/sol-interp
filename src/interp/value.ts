@@ -285,9 +285,14 @@ export type NonPoisonValue =
     | DefValue
     | Value[];
 
+export class BytesStorageLength {
+    constructor(public readonly view: rtt.BytesStorageView) {}
+}
+
 export type LValue =
     | View<StateArea, BaseValue, any, rtt.BaseRuntimeType>
     | null // empty components of tuple assignments
+    | BytesStorageLength
     | LValue[]; // Tuple assignments
 
 // @todo move to sol-dbg

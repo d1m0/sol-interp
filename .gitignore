@@ -6,3 +6,5 @@ coverage
 *.swp
 *.swn
 *.swo
+src/bin/ast/step_parser_gen.js
+src/bin/ast/step_parser_gen.d.ts

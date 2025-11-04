@@ -53,6 +53,7 @@ import {
     BaseTypeValue,
     BuiltinFunction,
     BuiltinStruct,
+    BytesStorageLength,
     DefValue,
     ExternalCallDescription,
     isPrimitiveValue,
@@ -75,10 +76,12 @@ import {
     concatBytes,
     equalsBytes,
     hexToBytes,
-    setLengthLeft
+    setLengthLeft,
+    setLengthRight
 } from "@ethereumjs/util";
 import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
+    bytesT,
     changeLocTo,
     clampIntToType,
     decodeView,
@@ -1389,6 +1392,11 @@ export class Interpreter {
                 );
 
                 res = fieldView;
+            } else if (baseLV instanceof rtt.ArrayStorageView && expr.memberName === "length") {
+                // Assinging to storage array lengths changes their length
+                // @todo (dimo) do we zero-out elements when we truncate the length?
+                // @todo (dimo) support assinging to bytes.length
+                res = rtt.makeStorageView(rtt.uint256, [baseLV.key, baseLV.endOffsetInWord]);
             } else {
                 nyi(`evalLV(${printNode(expr)}): ${ppLValue(baseLV)}`);
             }
@@ -1403,6 +1411,49 @@ export class Interpreter {
         this.nodes.pop();
 
         return res;
+    }
+
+    private implicitCoercion(
+        rvalue: rtt.PrimitiveValue,
+        lvType: rtt.BaseRuntimeType
+    ): PrimitiveValue {
+        // No Coercion
+        if (
+            (typeof rvalue === "bigint" && lvType instanceof rtt.IntType) ||
+            (typeof rvalue === "boolean" && lvType instanceof rtt.BoolType) ||
+            (rvalue instanceof Uint8Array && lvType instanceof rtt.FixedBytesType) ||
+            (rvalue instanceof Address && lvType instanceof rtt.AddressType) ||
+            ((rvalue instanceof rtt.InternalFunRef ||
+                rvalue instanceof rtt.ExternalFunRef ||
+                rvalue instanceof NewCall ||
+                rvalue instanceof ExternalCallDescription) &&
+                lvType instanceof rtt.FunctionType) ||
+            (rvalue instanceof View && isDirectlyAssignable(lvType, rvalue.type)) ||
+            rvalue instanceof TypeTuple
+        ) {
+            return rvalue;
+        }
+
+        // string -> bytes cast in memory/storage
+        if (
+            rvalue instanceof View &&
+            rvalue.type instanceof rtt.StringType &&
+            lvType instanceof rtt.PointerType &&
+            lvType.toType instanceof rtt.BytesType
+        ) {
+            if (rvalue instanceof StringMemView) {
+                return new BytesMemView(bytesT, rvalue.offset);
+            } else if (rvalue instanceof StringCalldataView) {
+                return new BytesCalldataView(bytesT, rvalue.offset, rvalue.base);
+            }
+        }
+
+        // Int literals to fixed byte
+        if (typeof rvalue === "bigint" && lvType instanceof rtt.FixedBytesType) {
+            return bigIntToBytes(rvalue);
+        }
+
+        nyi(`NYI Implicit coercion from ${ppValue(rvalue)} to type ${lvType.pp()}`);
     }
 
     public assign(lvalue: LValue, rvalue: Value, state: State): void {
@@ -1430,6 +1481,19 @@ export class Interpreter {
             isPrimitiveValue(rvalue),
             `Unexpected rvalue ${ppValue(rvalue)} in assignment to ${ppLValue(lvalue)}`
         );
+
+        // Special case - assigning to bytes length in storage requires decoding and re-encoding
+        // due to the compressed way length is handled in storage
+        if (lvalue instanceof BytesStorageLength) {
+            rvalue = this.implicitCoercion(rvalue, rtt.uint256) as bigint;
+
+            let bytes = decodeView(lvalue.view, state) as Uint8Array;
+            bytes = setLengthRight(bytes, bigIntToNum(rvalue));
+            setStateStorage(state, lvalue.view.encode(bytes, getStateStorage(state)));
+            return;
+        }
+
+        rvalue = this.implicitCoercion(rvalue, lvalue.type);
 
         // The following ref-type assignments result in a copy of the underlying complex value
         // - storage-to-storage
@@ -1487,7 +1551,7 @@ export class Interpreter {
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
                 !(lvalue.type instanceof sol.PointerType) ||
-                    isPoison(rvalue) ||
+                    isPoison(rvalue as rtt.PrimitiveValue) ||
                     (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp()),
                 `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
             );
@@ -2154,20 +2218,28 @@ export class Interpreter {
             isLibCall = false;
         } else {
             const args = expr.vArguments.map((arg) => this.eval(arg, state));
-            this.expect(args.length === 1, `Unexpected arguments to *call builtin`);
 
             if (callee.callKind === "send" || callee.callKind === "transfer") {
-                this.expect(typeof args[0] === "bigint", `Unexpected arguments to *call builtin`);
+                this.expect(
+                    args.length === 1 && typeof args[0] === "bigint",
+                    `Unexpected arguments to *call builtin`
+                );
                 data = new Uint8Array();
                 isLibCall = false;
                 value = args[0];
                 gas = 2300n;
             } else {
-                this.expect(
-                    args[0] instanceof BytesMemView,
-                    `Unexpected arguments to *call builtin`
-                );
-                data = decodeView(args[0], state) as Uint8Array;
+                this.expect(args.length <= 1, `Unexpected arguments to *call builtin`);
+
+                if (args.length === 1) {
+                    this.expect(args[0] instanceof View, `Unexpected arguments to *call builtin`);
+                    const dataView = this.implicitCoercion(args[0], memBytesT);
+                    this.expect(dataView instanceof View && dataView.type instanceof rtt.BytesType);
+                    data = decodeView(dataView, state) as Uint8Array;
+                } else {
+                    data = new Uint8Array();
+                }
+
                 isLibCall = callee.callKind === "delegatecall";
             }
         }
@@ -2232,7 +2304,7 @@ export class Interpreter {
                 return !res.reverted;
             }
 
-            const encodedData = PointerMemView.allocMemFor(res.data, memBytesT, state.memAllocator);
+            const encodedData = PointerMemView.allocMemFor(res.data, bytesT, state.memAllocator);
             encodedData.encode(res.data, state.memory, state.memAllocator);
 
             return [!res.reverted, encodedData];

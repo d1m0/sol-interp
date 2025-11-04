@@ -29,7 +29,8 @@ describe("Old Sol2Marir test", () => {
                     contract: "__IRTest__",
                     method: "main",
                     args: [],
-                    result: { tag: "call_success", returns: [] }
+                    result: { tag: "call_success", returns: [] },
+                    value: 1000000n
                 }
             ]);
 

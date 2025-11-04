@@ -1,11 +1,13 @@
 import { Command } from "commander";
-import * as sol from "solc-typed-ast"
-const { version } = require("../../package.json");
-import * as fse from "fs-extra"
-import { PartialSolcOutput } from "sol-dbg";
+import * as sol from "solc-typed-ast";
+import * as fse from "fs-extra";
+import { PartialSolcOutput, Value as BaseValue, Struct } from "sol-dbg";
 import { ArtifactManager } from "../interp/artifactManager";
 import { Runner } from "./runner";
 import { parseStep, SyntaxError } from "./ast";
+import { CallResult } from "../interp/state";
+import { Address, bytesToUtf8 } from "@ethereumjs/util";
+import { ppTrace } from "../interp/pp";
 
 function terminate(message?: string, exitCode = 0): never {
     if (message !== undefined) {
@@ -23,13 +25,54 @@ function error(message: string): never {
     terminate(message, 1);
 }
 
+function ppBaseValue(v: BaseValue): string {
+    if (v instanceof Address) {
+        return v.toString();
+    }
+
+    if (v instanceof Array) {
+        return "[" + v.map(ppBaseValue).join(", ") + "]";
+    }
+
+    if (v instanceof Struct) {
+        return `{${v.entries.map(([name, val]) => `${name}: ${ppBaseValue(val)}`)}}`;
+    }
+
+    return sol.pp(v as unknown as any);
+}
+
+function ppRes(res: CallResult, decodedReturns: BaseValue[] | undefined): string {
+    if (res.reverted) {
+        return `reverted`;
+    }
+
+    if (decodedReturns) {
+        return `return [${decodedReturns.map(ppBaseValue).join(", ")}]`;
+    }
+
+    return `succeeded`;
+}
+
+function addSourcesToResult(artifact: PartialSolcOutput, files: sol.FileMap): void {
+    for (const name in artifact.sources) {
+        if (artifact.sources[name].contents !== undefined) {
+            continue;
+        }
+
+        const file = files.get(name);
+
+        if (file) {
+            artifact.sources[name].contents = bytesToUtf8(file);
+        }
+    }
+}
+
 (async () => {
     const program = new Command();
 
     program
         .name("sol-interp")
         .description("Execute a sequence of steps given some solidity files")
-        .version(version, "-v, --version", "Print package version.")
         .helpOption("-h, --help", "Print help message.");
 
     program.argument(
@@ -37,27 +80,28 @@ function error(message: string): never {
         "Either one or more Solidity files, or JSON compiler output files."
     );
 
-    program
-        .option("--steps [step...]", "Steps to execute")
+    program.option("--steps [step...]", "Steps to execute");
+    program.option("-v --verbose", "Verbose");
 
     program.parse(process.argv);
     const args = program.args;
     const options = program.opts();
 
     if (args.length === 0) {
-        error("Need at least one file")
+        error("Need at least one file");
     }
 
-    const artifacts: PartialSolcOutput[] = []
+    const artifacts: PartialSolcOutput[] = [];
 
     try {
         for (const file of args) {
             if (file.endsWith("sol")) {
-                const { data } = await sol.compileSol(file, "auto");
+                const { data, files } = await sol.compileSol(file, "auto");
+                addSourcesToResult(data, files);
                 artifacts.push(data);
             } else {
-                const data = fse.readJSONSync(file)
-                artifacts.push(data)
+                const data = fse.readJSONSync(file);
+                artifacts.push(data);
             }
         }
     } catch (e: any) {
@@ -82,20 +126,36 @@ function error(message: string): never {
         error(e.message);
     }
 
-    const artifactManager = new ArtifactManager(artifacts)
+    const artifactManager = new ArtifactManager(artifacts);
     const runner = new Runner(artifactManager);
 
     for (const step of options.steps) {
         try {
             const parsedStep = parseStep(step);
-            const res = runner.run(parsedStep);
-            console.error(res)
+            const oldTraceLen = runner.visitor.getTrace().length;
+            try {
+                const [res, returns] = runner.run(parsedStep);
+
+                if (options.verbose) {
+                    const newSegment = runner.visitor.getTrace().slice(oldTraceLen);
+                    console.error(ppTrace(newSegment, artifactManager));
+                }
+
+                console.error(ppRes(res, returns));
+            } catch (e) {
+                if (options.verbose) {
+                    const newSegment = runner.visitor.getTrace().slice(oldTraceLen);
+                    console.error(ppTrace(newSegment, artifactManager));
+                }
+
+                throw e;
+            }
         } catch (e) {
             if (e instanceof SyntaxError) {
                 error(`SyntaxError ${e.location}: ${e.message}`);
             }
 
-            throw (e)
+            throw e;
         }
     }
 })();

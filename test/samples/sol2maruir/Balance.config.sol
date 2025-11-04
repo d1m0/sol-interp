@@ -19,7 +19,7 @@ contract Balance {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Balance __this__ = (new Balance).value(43)();
         __testCase52__(__this__);
         BalanceFunc __this1__ = new BalanceFunc();

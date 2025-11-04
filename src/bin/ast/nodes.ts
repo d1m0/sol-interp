@@ -2,7 +2,7 @@ import { Location } from "./step_parser_gen";
 
 export interface Node {
     kind: string;
-    loc: Location
+    loc: Location;
 }
 
 export interface NamedNode extends Node {
@@ -18,34 +18,34 @@ export interface Var extends NamedNode {
 }
 
 export interface StringLiteral extends Node {
-    kind: "StringLiteral"
+    kind: "StringLiteral";
     value: string;
 }
 
 export interface HexNumber extends Node {
-    kind: "HexNumber"
+    kind: "HexNumber";
     value: bigint;
 }
 
 export interface DecNumber extends Node {
-    kind: "DecNumber"
+    kind: "DecNumber";
     value: bigint;
 }
 
-export type ExpressionNode = StringLiteral | HexNumber | DecNumber | Var
+export type ExpressionNode = StringLiteral | HexNumber | DecNumber | Var;
 
 export interface Deploy extends Node {
-    kind: "Deploy",
+    kind: "Deploy";
     contract: string;
-    args: ExpressionNode[],
-    name?: Var
+    args: ExpressionNode[];
+    name?: Var;
 }
 
 export interface Call extends Node {
-    kind: "Call",
+    kind: "Call";
     contract: HexNumber | Var;
     method: string;
-    args: ExpressionNode[],
+    args: ExpressionNode[];
 }
 
-export type StepNode = Call | Deploy
+export type StepNode = Call | Deploy;

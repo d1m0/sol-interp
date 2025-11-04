@@ -242,11 +242,15 @@
 226 - add test with external calls
 227 - finish throw test
 228 - refactor builtins to a simpler model with version descriptors
+229 - get debugging to work with new binary
 
-- test remaining sol2maruir tests to determine readiness level
-
-- address.callcode
 - implement abi.encodePacked 
+- keccak256
+
+- on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?
+- is "foo".length byte length or uncode code points?
+- test remaining sol2maruir tests to determine readiness level
+- address.callcode
 - implement block builtins
     - store block in state
 
