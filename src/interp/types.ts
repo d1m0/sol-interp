@@ -1,6 +1,6 @@
 import * as rtt from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { memStringT } from "./utils";
+import { memBytesT, memStringT } from "./utils";
 
 export class DefType extends rtt.BaseRuntimeType {
     pp(): string {
@@ -62,7 +62,7 @@ export function astToRuntimeType(
     loc: sol.DataLocation | undefined = undefined
 ): rtt.BaseRuntimeType {
     if (rawT instanceof sol.StringLiteralType) {
-        return memStringT;
+        return rawT.isHex ? memBytesT : memStringT;
     }
 
     if (rawT instanceof sol.ArrayType) {

@@ -23,6 +23,7 @@ CallArgs = "(" __ es: ExpressionList? __  ")" { return es === null ? [] : es; }
 Expression
     = StringLiteral
     / Number
+    / Bool
     / Var
 
 Var = "$" Identifier { return { kind: "Var", name: text(), loc: location() }}
@@ -119,6 +120,8 @@ DecNumber =
 
 Number =
     value: (HexNumber / DecNumber)
+
+Bool = "true" / "false" { return {kind: "Bool", value: text() == "true", loc: location() }}
 
 __ =
     (PrimitiveWhiteSpace / LineTerminator)*

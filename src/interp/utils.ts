@@ -364,6 +364,26 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
 }
 
 /**
+ * The type of a "view" value is a Pointer to the underlying view type
+ * @param v
+ */
+export function typeOfView(v: rtt.View): rtt.BaseRuntimeType {
+    let loc: sol.DataLocation;
+
+    if (v instanceof BaseMemoryView) {
+        loc = sol.DataLocation.Memory;
+    } else if (v instanceof BaseStorageView) {
+        loc = sol.DataLocation.Storage;
+    } else if (v instanceof BaseCalldataView) {
+        loc = sol.DataLocation.CallData;
+    } else {
+        nyi(`View type ${v.constructor.name}`);
+    }
+
+    return new rtt.PointerType(v.type, loc);
+}
+
+/**
  * Returns true IFF a value of `rType` is directly assignable to an LValue of `lvType`.
  * @param lvType
  * @param rType
@@ -397,7 +417,7 @@ export function isDirectlyAssignable(
             );
         }
 
-        return typesEqualModuloLocation(lvType.toType, rType);
+        return typesEqualModuloLocation(lvType, rType);
     }
 
     // Primitive LValue type
@@ -606,7 +626,9 @@ export function removeLiteralTypes(
     }
 
     if (t instanceof sol.StringLiteralType) {
-        return sol.types.stringMemory;
+        return t.isHex || (e instanceof sol.Literal && e.value === null)
+            ? sol.types.bytesMemory
+            : sol.types.stringMemory;
     }
 
     // Tuples
@@ -728,4 +750,17 @@ export function liftExtCalRef(
               : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
+}
+
+export function indexOfEnumOption(
+    enumDef: sol.EnumDefinition,
+    optionName: string
+): number | undefined {
+    for (let i = 0; i < enumDef.vMembers.length; i++) {
+        if (enumDef.vMembers[i].name == optionName) {
+            return i;
+        }
+    }
+
+    return undefined;
 }

@@ -32,7 +32,12 @@ export interface DecNumber extends Node {
     value: bigint;
 }
 
-export type ExpressionNode = StringLiteral | HexNumber | DecNumber | Var;
+export interface Bool extends Node {
+    kind: "Bool";
+    value: boolean;
+}
+
+export type ExpressionNode = StringLiteral | HexNumber | DecNumber | Var | Bool;
 
 export interface Deploy extends Node {
     kind: "Deploy";

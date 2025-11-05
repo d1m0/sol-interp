@@ -99,6 +99,7 @@ import {
     getMsgSender,
     getStateStorage,
     getThis,
+    indexOfEnumOption,
     isBaseOf,
     isDirectlyAssignable,
     isMethod,
@@ -112,7 +113,9 @@ import {
     printNode,
     removeLiteralTypes,
     setStateStorage,
-    solcValueToValue
+    solcValueToValue,
+    stringT,
+    typeOfView
 } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
@@ -835,11 +838,8 @@ export class Interpreter {
                 return [];
             }
 
-            const memBytesView = rtt.PointerMemView.allocMemFor(
-                data,
-                memBytesT,
-                state.memAllocator
-            );
+            const memBytesView = rtt.PointerMemView.allocMemFor(data, bytesT, state.memAllocator);
+
             memBytesView.encode(data, state.memory, state.memAllocator);
 
             return [memBytesView];
@@ -1428,8 +1428,9 @@ export class Interpreter {
                 rvalue instanceof NewCall ||
                 rvalue instanceof ExternalCallDescription) &&
                 lvType instanceof rtt.FunctionType) ||
-            (rvalue instanceof View && isDirectlyAssignable(lvType, rvalue.type)) ||
-            rvalue instanceof TypeTuple
+            (rvalue instanceof View && isDirectlyAssignable(lvType, typeOfView(rvalue))) ||
+            rvalue instanceof TypeTuple ||
+            rvalue instanceof Poison // Local/return variables are initialized to None at scope creation
         ) {
             return rvalue;
         }
@@ -1445,6 +1446,18 @@ export class Interpreter {
                 return new BytesMemView(bytesT, rvalue.offset);
             } else if (rvalue instanceof StringCalldataView) {
                 return new BytesCalldataView(bytesT, rvalue.offset, rvalue.base);
+            }
+        }
+
+        // bytes -> string cast in memory
+        if (
+            rvalue instanceof View &&
+            rvalue.type instanceof rtt.BytesType &&
+            lvType instanceof rtt.PointerType &&
+            lvType.toType instanceof rtt.StringType
+        ) {
+            if (rvalue instanceof BytesMemView) {
+                return new StringMemView(stringT, rvalue.offset);
             }
         }
 
@@ -1513,7 +1526,7 @@ export class Interpreter {
         ) {
             // Types should be equal modulo location
             this.expect(
-                isDirectlyAssignable(lvalue.type, rvalue.type),
+                isDirectlyAssignable(lvalue.type, typeOfView(rvalue)),
                 `Mismatching types in copying ref assignment (modulo location): ${lvalue.type.pp()} and ${rvalue.type.pp()} `
             );
 
@@ -1866,7 +1879,7 @@ export class Interpreter {
         if (fromT instanceof rtt.IntType && toT instanceof rtt.FixedBytesType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
             this.expect(
-                fromT.numBits / 8 === toT.numBytes,
+                fromT.numBits / 8 <= toT.numBytes,
                 `Unexpected cast from ${fromT.pp()} to ${toT.pp()}`
             );
 
@@ -2865,12 +2878,18 @@ export class Interpreter {
         }
 
         if (baseVal instanceof DefValue) {
-            // @todo need to check the expr.memberName here!
             if (
-                baseVal.def instanceof sol.EventDefinition ||
-                baseVal.def instanceof sol.ErrorDefinition
+                (baseVal.def instanceof sol.EventDefinition ||
+                    baseVal.def instanceof sol.ErrorDefinition) &&
+                expr.memberName === "selector"
             ) {
                 return hexToBytes(`0x${this._infer.signatureHash(baseVal.def)}`);
+            }
+
+            if (baseVal.def instanceof sol.EnumDefinition) {
+                const res = indexOfEnumOption(baseVal.def, expr.memberName);
+                this.expect(res !== undefined);
+                return BigInt(res);
             }
 
             // Lib.Fun where Fun is external is an external fun ref

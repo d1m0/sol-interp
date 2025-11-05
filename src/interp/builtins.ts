@@ -47,7 +47,7 @@ import {
     setStateStorage
 } from "./utils";
 import { Address, concatBytes } from "@ethereumjs/util";
-import { decode, encode, signatureToSelector } from "./abi";
+import { decode, encode, encodePacked, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
@@ -280,6 +280,26 @@ function encodeImpl(
     return res;
 }
 
+function encodePackedImpl(
+    self: BuiltinFunction,
+    paramTs: rtt.BaseRuntimeType[],
+    args: Value[],
+    state: State
+): Value {
+    let encBytes: Uint8Array;
+
+    if (paramTs.length === 0) {
+        encBytes = new Uint8Array();
+    } else {
+        encBytes = encodePacked(args, paramTs, state);
+    }
+
+    const res = PointerMemView.allocMemFor(encBytes, bytesT, state.memAllocator) as BytesMemView;
+    res.encode(encBytes, state.memory);
+
+    return res;
+}
+
 export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
     new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
@@ -295,7 +315,8 @@ export const abiEncodePackedBuiltin = new BuiltinFunction(
     new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = self.type.argTs;
-        rtt.nyi(`encodePacked(${paramTs.map((t) => t.pp()).join(", ")})`);
+        const args = self.getArgs(paramTs.length, state);
+        return [encodePackedImpl(self, paramTs, args, state)];
     }
 );
 

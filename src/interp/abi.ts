@@ -7,6 +7,7 @@ import { ppValue } from "./pp";
 import { State } from "./state";
 import {
     Address,
+    bytesToHex,
     concatBytes,
     createAddressFromString,
     equalsBytes,
@@ -15,6 +16,7 @@ import {
 import { bytes24, decodeView, deref, indexView, isStructView, isValueType, length } from "./utils";
 import { BaseInterpType } from "./types";
 import { isArrayLikeView } from "./view";
+import { encodePacked as web3EncodePacked } from "@metamask/abi-utils";
 
 /**
  * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
@@ -129,7 +131,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
 
     if (typ instanceof rtt.FixedBytesType) {
         assert(v instanceof Uint8Array, `Expected Uint8Array for ${typ.pp()} not ${ppValue(v)}`);
-        return v;
+        return bytesToHex(v);
     }
 
     // Pointer ref values (views)
@@ -142,7 +144,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
             v instanceof View && v.type instanceof rtt.BytesType,
             `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`
         );
-        return decodeView(v, s);
+        return bytesToHex(decodeView(v, s) as Uint8Array);
     }
 
     if (typ instanceof rtt.StringType) {
@@ -247,6 +249,18 @@ export function encode(vs: Value[], ts: BaseInterpType[], state: State): Uint8Ar
     const abiVals = vs.map((v, i) => valueToAbiValue(v, abiTypes[i], state));
 
     return hexToBytes(ethABI.encodeParameters(typeNames, abiVals) as `0x${string}`);
+}
+
+/**
+ * Packed encode the given interpeter values `vs` with types `ts` in the state
+ * `state` and return the resulting bytes.
+ */
+export function encodePacked(vs: Value[], ts: BaseInterpType[], state: State): Uint8Array {
+    const typeNames = ts.map((t) => abiTypeToCanonicalName(t));
+
+    const abiVals = vs.map((v, i) => valueToAbiValue(v, ts[i], state));
+
+    return web3EncodePacked(typeNames, abiVals);
 }
 
 export function signatureToSelector(sig: string): Uint8Array {

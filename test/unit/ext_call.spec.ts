@@ -81,7 +81,7 @@ describe("Simple function call tests", () => {
             const contractInfo = artifactManager.getContractInfo(fun);
             sol.assert(contractInfo !== undefined, `No info for contract ${contract}`);
 
-            chain.makeEOA(SENDER, 1000000n);
+            chain.makeEmptyAccount(SENDER, 1000000n);
             chain.setAccount(RECEIVER, {
                 address: RECEIVER,
                 contract: contractInfo,

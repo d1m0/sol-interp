@@ -20,7 +20,8 @@ import {
     Value,
     ZERO_ADDRESS,
     Value as BaseValue,
-    BaseRuntimeType
+    BaseRuntimeType,
+    BoolType
 } from "sol-dbg";
 import { BaseInterpType } from "../interp/types";
 import { ExpressionNode } from "./ast";
@@ -63,6 +64,15 @@ export class Runner {
                 expr.kind === "HexNumber" || expr.kind === "DecNumber",
                 `Expected a number for ${type.pp()} not ${expr.kind}`
             );
+            return expr.value;
+        }
+
+        if (type instanceof BoolType) {
+            this.expect(
+                expr.kind === "Bool",
+                `Expected a boolean for ${type.pp()} not ${expr.kind}`
+            );
+
             return expr.value;
         }
 

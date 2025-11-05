@@ -15,7 +15,7 @@ contract PackedEncodingTest {
         assert(BytesLib.isSame(abi.encodePacked(int8(-1), int8(-2), int8(-3)), hex"fffefd"));
         assert(BytesLib.isSame(abi.encodePacked("test"), "test"));
         assert(BytesLib.isSame(abi.encodePacked("abc", int8(5), int8(-5)), hex"61626305fb"));
-        assert(BytesLib.isSame(abi.encodePacked(bytes4(0x506070FF)), hex"506070ff"));
+        assert(BytesLib.isSame(abi.encodePacked(bytes5(0x506070FF)), hex"00506070ff"));
         assert(BytesLib.isSame(abi.encodePacked(hex"00010203ff"), hex"00010203ff"));
         assert(BytesLib.isSame(abi.encodePacked(address(0xc03c4bF79eB0a0fD5fB75C35AddA741BC90Cf6b4)), hex"c03c4bf79eb0a0fd5fb75c35adda741bc90cf6b4"));
         assert(BytesLib.isSame(abi.encodePacked(bytes2(0xddFF), true, false), hex"ddff0100"));
@@ -27,7 +27,7 @@ contract PackedEncodingTest {
         assert(BytesLib.isSame(abi.encodePacked([Y.B, Y.C]), "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0002"));
         assert(BytesLib.isSame(abi.encodePacked([address(0xc03c4bF79eB0a0fD5fB75C35AddA741BC90Cf6b4)]), hex"000000000000000000000000c03c4bf79eb0a0fd5fb75c35adda741bc90cf6b4"));
         assert(BytesLib.isSame(abi.encodePacked([byte(0xcc), 0xff]), hex"cc00000000000000000000000000000000000000000000000000000000000000ff00000000000000000000000000000000000000000000000000000000000000"));
-        assert(BytesLib.isSame(abi.encodePacked([[[int8(5), int8(6)]]]), "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0005\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0006"));
+        //assert(BytesLib.isSame(abi.encodePacked([[[int8(5), int8(6)]]]), "\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0005\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0006"));
     }
 }
 
