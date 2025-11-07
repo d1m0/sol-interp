@@ -753,6 +753,39 @@ const abiBuiltinStructDesc: BuiltinDescriptor = [
     ]
 ];
 
+const keccak256v04Builtin = new BuiltinFunction(
+    "keccak256",
+    new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const args = self.getArgs(self.type.argTs.length, state);
+        const encoded = encodePacked(args, self.type.argTs, state);
+        const hash = keccak256(encoded);
+        return [hash];
+    },
+    [],
+    [],
+    false,
+    false,
+    false
+);
+
+const keccak256v05Builtin = new BuiltinFunction(
+    "keccak256",
+    new rtt.FunctionType([memBytesT], false, sol.FunctionStateMutability.Pure, [memBytesT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [data] = self.getArgs(1, state);
+        interp.expect(data instanceof View && data.type instanceof rtt.BytesType);
+        return [keccak256(decodeView(data, state) as Uint8Array)];
+    },
+    [],
+    [],
+    false,
+    false,
+    false
+);
+
+const sha3 = keccak256v04Builtin.alias("sha3");
+
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
     [
@@ -762,6 +795,11 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         addressBuiltinStructDesc,
         externalCallCallableFieldsDesc,
         [[abiBuiltinStructDesc, ">=0.4.22"]],
+        [[sha3, "<0.5.0"]],
+        [
+            [keccak256v04Builtin, "<0.5.0"],
+            [keccak256v05Builtin, ">=0.5.0"]
+        ],
         msgBuiltinStructDesc
     ]
 ];

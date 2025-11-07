@@ -2725,7 +2725,24 @@ export class Interpreter {
     }
 
     evalIndexRangeAccess(expr: sol.IndexRangeAccess, state: State): Value {
-        nyi(`evalIndexRangeAccess(${printNode(expr)}, ${state})`);
+        const base = this.evalNP(expr.vBaseExpression, state);
+        const start =
+            expr.vStartExpression !== undefined ? this.evalNP(expr.vStartExpression, state) : 0n;
+        const end =
+            expr.vEndExpression !== undefined ? this.evalNP(expr.vEndExpression, state) : -1n;
+
+        this.expect(typeof start === "bigint" && typeof end === "bigint");
+        this.expect(base instanceof BytesCalldataView);
+
+        const cd = getMsg(state);
+        const len = base.size(cd);
+        this.expect(typeof len === "bigint");
+
+        if (start < 0 || end < start || end > len) {
+            this.runtimeError(NoPayloadError, state);
+        }
+
+        return new BytesCalldataView(bytesT, base.offset + start, base.base);
     }
 
     evalLiteral(expr: sol.Literal, state: State): Value {
