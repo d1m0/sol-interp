@@ -297,7 +297,12 @@ export function indexView<T extends rtt.StateArea>(
 
         if (v instanceof rtt.ArrayMemView || v instanceof rtt.BytesMemView) {
             res = v.indexView(key, state.memory);
-        } else if (v instanceof rtt.ArrayCalldataView || v instanceof rtt.BytesCalldataView) {
+        } else if (
+            v instanceof rtt.ArrayCalldataView ||
+            v instanceof rtt.BytesCalldataView ||
+            v instanceof rtt.ArraySliceCalldataView ||
+            v instanceof rtt.BytesSliceCalldataView
+        ) {
             res = v.indexView(key, getMsg(state));
         } else if (v instanceof rtt.ArrayStorageView || v instanceof rtt.BytesStorageView) {
             res = v.indexView(key, getStateStorage(state));

@@ -21,11 +21,9 @@ import {
     MapStorageView,
     StringMemView,
     BytesMemView,
-    StringCalldataView,
     StringStorageView,
     BytesStorageView,
     MAX_ARR_DECODE_LIMIT,
-    BytesCalldataView,
     stackTop,
     ArtifactInfo,
     isPoison,
@@ -1444,8 +1442,8 @@ export class Interpreter {
         ) {
             if (rvalue instanceof StringMemView) {
                 return new BytesMemView(bytesT, rvalue.offset);
-            } else if (rvalue instanceof StringCalldataView) {
-                return new BytesCalldataView(bytesT, rvalue.offset, rvalue.base);
+            } else if (rvalue instanceof rtt.StringCalldataView) {
+                return new rtt.BytesCalldataView(bytesT, rvalue.offset, rvalue.base);
             }
         }
 
@@ -1903,8 +1901,8 @@ export class Interpreter {
 
             if (fromV instanceof StringMemView) {
                 return new BytesMemView(new rtt.BytesType(), fromV.offset);
-            } else if (fromV instanceof StringCalldataView) {
-                return new BytesCalldataView(new rtt.BytesType(), fromV.offset, fromV.base);
+            } else if (fromV instanceof rtt.StringCalldataView) {
+                return new rtt.BytesCalldataView(new rtt.BytesType(), fromV.offset, fromV.base);
             } else {
                 this.expect(fromV instanceof StringStorageView);
                 return new BytesStorageView(new rtt.BytesType(), [
@@ -1925,12 +1923,16 @@ export class Interpreter {
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            let bytesView: BytesCalldataView | BytesMemView | BytesStorageView;
+            let bytesView: rtt.BytesCalldataView | BytesMemView | BytesStorageView;
 
             if (fromV instanceof StringMemView) {
                 bytesView = new BytesMemView(new rtt.BytesType(), fromV.offset);
-            } else if (fromV instanceof StringCalldataView) {
-                bytesView = new BytesCalldataView(new rtt.BytesType(), fromV.offset, fromV.base);
+            } else if (fromV instanceof rtt.StringCalldataView) {
+                bytesView = new rtt.BytesCalldataView(
+                    new rtt.BytesType(),
+                    fromV.offset,
+                    fromV.base
+                );
             } else {
                 this.expect(fromV instanceof StringStorageView);
                 bytesView = new BytesStorageView(new rtt.BytesType(), [
@@ -2732,17 +2734,36 @@ export class Interpreter {
             expr.vEndExpression !== undefined ? this.evalNP(expr.vEndExpression, state) : -1n;
 
         this.expect(typeof start === "bigint" && typeof end === "bigint");
-        this.expect(base instanceof BytesCalldataView);
+        this.expect(
+            base instanceof rtt.BytesCalldataView ||
+                base instanceof rtt.StringCalldataView ||
+                base instanceof rtt.ArrayCalldataView
+        );
 
         const cd = getMsg(state);
-        const len = base.size(cd);
-        this.expect(typeof len === "bigint");
+        const indexableView =
+            base instanceof rtt.StringCalldataView
+                ? new rtt.BytesCalldataView(bytesT, base.offset, base.base)
+                : base;
+        const len = end - start;
+        const actualLen = indexableView.size(cd);
+        this.expect(typeof actualLen === "bigint");
 
-        if (start < 0 || end < start || end > len) {
+        if (start < 0 || end < start || end > actualLen) {
             this.runtimeError(NoPayloadError, state);
         }
 
-        return new BytesCalldataView(bytesT, base.offset + start, base.base);
+        const rangeOffset = indexableView.indexView(start, cd);
+        this.expect(rangeOffset instanceof BaseCalldataView);
+        const startOffset = rangeOffset.offset + rangeOffset.base;
+
+        if (base instanceof rtt.BytesCalldataView) {
+            return new rtt.BytesSliceCalldataView(startOffset, len);
+        } else if (base instanceof rtt.StringCalldataView) {
+            return new rtt.StringSliceCalldataView(startOffset, len);
+        } else {
+            return new rtt.ArraySliceCalldataView(base.type, startOffset, len);
+        }
     }
 
     evalLiteral(expr: sol.Literal, state: State): Value {

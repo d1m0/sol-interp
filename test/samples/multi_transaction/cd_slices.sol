@@ -1,3 +1,5 @@
+pragma solidity 0.8.29;
+
 contract Foo {
     function slice(bytes calldata b, uint start, uint end) external returns (bytes memory) {
         return b[start:end];
@@ -12,8 +14,10 @@ contract Foo {
     }
     
 
-    function main() public returns (bytes memory) {
-        this.slice(hex"010203", 0, 2);
+    function main() public {
+        bytes memory bs = this.slice(hex"010203", 0, 2);
+        assert(bs.length == 2 && bs[0] == 0x01 && bs[1] == 0x02);
+
         try this.slice(hex"010203", 2, 0) {
             assert(false);
         } catch (bytes memory b) {
@@ -51,7 +55,7 @@ contract Foo {
         string memory s = "hello world";
 
         try this.strSlice(s, 1, 3) returns (string memory t) {
-            assert(bytes(t).length == 2 && bytes(t)[0] == "e");
+            assert(bytes(t).length == 2 && bytes(t)[0] == bytes1("e"));
         } catch (bytes memory b) {
             assert(b.length == 0);
         }
