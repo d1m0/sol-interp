@@ -1,4 +1,3 @@
-import { assert, repeat, DataLocation } from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { isPrimitiveValue, Value } from "./value";
 import * as ethABI from "web3-eth-abi";
@@ -16,7 +15,8 @@ import {
 import { bytes24, decodeView, deref, indexView, isStructView, isValueType, length } from "./utils";
 import { BaseInterpType } from "./types";
 import { isArrayLikeView } from "./view";
-import { encodePacked as web3EncodePacked } from "@metamask/abi-utils";
+import * as sol from "solc-typed-ast";
+import { castStringToBytes } from "sol-dbg/dist/debug/decoding/utils";
 
 /**
  * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
@@ -45,7 +45,7 @@ export function toABIEncodedType(type: BaseInterpType): BaseInterpType {
     if (type instanceof rtt.ArrayType) {
         if (type.size !== undefined) {
             return new rtt.TupleType(
-                repeat(toABIEncodedType(type.elementT), bigIntToNum(type.size))
+                sol.repeat(toABIEncodedType(type.elementT), bigIntToNum(type.size))
             );
         }
 
@@ -58,7 +58,7 @@ export function toABIEncodedType(type: BaseInterpType): BaseInterpType {
 
     if (type instanceof rtt.PointerType) {
         // For storage types we pass in the raw storage location
-        if (type.location === DataLocation.Storage) {
+        if (type.location === sol.DataLocation.Storage) {
             return rtt.uint256;
         }
 
@@ -92,7 +92,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
             v instanceof rtt.StructStorageView ||
             v instanceof rtt.PackedArrayStorageView)
     ) {
-        assert(v.endOffsetInWord === 32, `Unexpected non-aligned view {0}`, v);
+        sol.assert(v.endOffsetInWord === 32, `Unexpected non-aligned view {0}`, v);
         return v.key;
     }
 
@@ -106,23 +106,23 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.IntType) {
-        assert(typeof v === "bigint", `Expected bigint for ${typ.pp()} not ${ppValue(v)}`);
+        sol.assert(typeof v === "bigint", `Expected bigint for ${typ.pp()} not ${ppValue(v)}`);
         return v;
     }
 
     if (typ instanceof rtt.BoolType) {
-        assert(typeof v === "boolean", `Expected bool for ${typ.pp()} not ${ppValue(v)}`);
+        sol.assert(typeof v === "boolean", `Expected bool for ${typ.pp()} not ${ppValue(v)}`);
         return v;
     }
 
     if (typ instanceof rtt.AddressType) {
-        assert(v instanceof Address, `Expected Address for ${typ.pp()} not ${ppValue(v)}`);
+        sol.assert(v instanceof Address, `Expected Address for ${typ.pp()} not ${ppValue(v)}`);
         return v.toString();
     }
 
     // External fun refs are stored as bytes24 - address then selector
     if (typ instanceof rtt.FunctionType) {
-        assert(
+        sol.assert(
             v instanceof rtt.ExternalFunRef,
             `Expected ExternalFunRef for ${typ.pp()} not ${ppValue(v)}`
         );
@@ -130,7 +130,10 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.FixedBytesType) {
-        assert(v instanceof Uint8Array, `Expected Uint8Array for ${typ.pp()} not ${ppValue(v)}`);
+        sol.assert(
+            v instanceof Uint8Array,
+            `Expected Uint8Array for ${typ.pp()} not ${ppValue(v)}`
+        );
         return bytesToHex(v);
     }
 
@@ -140,7 +143,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.BytesType) {
-        assert(
+        sol.assert(
             v instanceof View && v.type instanceof rtt.BytesType,
             `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`
         );
@@ -148,7 +151,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.StringType) {
-        assert(
+        sol.assert(
             v instanceof View && v.type instanceof rtt.StringType,
             `Expected string View for ${typ.pp()} not ${ppValue(v)}`
         );
@@ -156,9 +159,9 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.ArrayType) {
-        assert(isArrayLikeView(v), `Expected Array for ${typ.pp()} not ${ppValue(v)}`);
+        sol.assert(isArrayLikeView(v), `Expected Array for ${typ.pp()} not ${ppValue(v)}`);
         const len = length(v, s);
-        assert(typeof len === "bigint", `Failed decoding len`);
+        sol.assert(typeof len === "bigint", `Failed decoding len`);
 
         const res: any[] = [];
         const elT = typ.elementT;
@@ -194,7 +197,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
                 }
 
                 const fieldV = v.fieldView(name);
-                assert(!(fieldV instanceof rtt.DecodingFailure), ``);
+                sol.assert(!(fieldV instanceof rtt.DecodingFailure), ``);
 
                 res.push(valueToAbiValue(fieldV, typ.elementTypes[i], s));
             }
@@ -235,7 +238,7 @@ export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType): string {
         return abiTypeToCanonicalName(t.toType);
     }
 
-    assert(false, "Unexpected ABI Type: {0}", t);
+    sol.assert(false, "Unexpected ABI Type: {0}", t);
 }
 
 /**
@@ -251,16 +254,81 @@ export function encode(vs: Value[], ts: BaseInterpType[], state: State): Uint8Ar
     return hexToBytes(ethABI.encodeParameters(typeNames, abiVals) as `0x${string}`);
 }
 
+const scratchWord = new Uint8Array(32);
+const ZERO_B1 = new Uint8Array([0]);
+const ONE_B1 = new Uint8Array([1]);
+
+/**
+ * Packed encode a single primitive value or bytes/strings
+ */
+export function encodePackedSingle(val: Value, type: BaseInterpType, state: State): Uint8Array {
+    const memView = rtt.makeMemoryView(type, 0n);
+
+    if (type instanceof rtt.IntType) {
+        sol.assert(typeof val === "bigint", ``);
+        memView.encode(val, scratchWord, undefined as unknown as any);
+        return scratchWord.slice(32 - type.numBits / 8);
+    } else if (type instanceof rtt.BoolType) {
+        sol.assert(typeof val === "boolean", ``);
+        return val ? ONE_B1 : ZERO_B1;
+    } else if (type instanceof rtt.FixedBytesType) {
+        sol.assert(val instanceof Uint8Array, ``);
+        return val;
+    } else if (type instanceof rtt.AddressType) {
+        sol.assert(val instanceof Address, ``);
+        return val.bytes;
+    } else if (type instanceof rtt.PointerType) {
+        if (type.toType instanceof rtt.BytesType) {
+            sol.assert(val instanceof View && val.type instanceof rtt.BytesType, ``);
+            const bytes = decodeView(val, state);
+            sol.assert(bytes instanceof Uint8Array, ``);
+            return bytes;
+        } else if (type.toType instanceof rtt.StringType) {
+            sol.assert(
+                val instanceof rtt.StringMemView ||
+                    val instanceof rtt.StringStorageView ||
+                    val instanceof rtt.StringCalldataView ||
+                    val instanceof rtt.StringSliceCalldataView,
+                ``
+            );
+            // cast to string type
+            const bytesView = castStringToBytes(val);
+            const bytes = decodeView(bytesView, state);
+            sol.assert(bytes instanceof Uint8Array, ``);
+            return bytes;
+        }
+    }
+
+    nyi(`encodePackedSingle(${ppValue(val)}, ${type.pp()})`);
+}
+
 /**
  * Packed encode the given interpeter values `vs` with types `ts` in the state
  * `state` and return the resulting bytes.
+ * This works only with primitive values, bytes, strings and non-nested arrays
  */
 export function encodePacked(vs: Value[], ts: BaseInterpType[], state: State): Uint8Array {
-    const typeNames = ts.map((t) => abiTypeToCanonicalName(t));
+    const els: Uint8Array[] = [];
+    sol.assert(vs.length === ts.length, ``);
 
-    const abiVals = vs.map((v, i) => valueToAbiValue(v, ts[i], state));
+    for (let i = 0; i < vs.length; i++) {
+        const val = vs[i];
+        const type = ts[i];
 
-    return web3EncodePacked(typeNames, abiVals);
+        if (type instanceof rtt.PointerType && type.toType instanceof rtt.ArrayType) {
+            // Encode arrays with padding between elements, but without length
+            sol.assert(isArrayLikeView(val), ``);
+            const memAlloc = new rtt.DefaultAllocator();
+            const arrVal = decodeView(val as unknown as View, state);
+            const memView = PointerMemView.allocMemFor(arrVal, type.toType, memAlloc);
+            memView.encode(arrVal, memAlloc.memory, memAlloc);
+            els.push(memAlloc.memory.slice(0x80));
+        } else {
+            els.push(encodePackedSingle(val, type, state));
+        }
+    }
+
+    return concatBytes(...els);
 }
 
 export function signatureToSelector(sig: string): Uint8Array {
@@ -311,7 +379,7 @@ export function abiValueToBaseValue(v: any, type: rtt.BaseRuntimeType): BaseValu
     if (type instanceof rtt.TupleType) {
         const res: BaseValue[] = [];
 
-        assert(
+        sol.assert(
             type.elementTypes.length === v.__length__,
             `Mismatch in decoded tuple length. Expected {0} got {1}.`,
             type.elementTypes.length,
@@ -334,17 +402,17 @@ function liftABIBaseValue(v: BaseValue, type: rtt.BaseRuntimeType): BaseValue {
     }
 
     if (type instanceof rtt.ArrayType) {
-        assert(v instanceof Array, ``);
+        sol.assert(v instanceof Array, ``);
         return v.map((el) => liftABIBaseValue(el, type.elementT));
     }
 
     if (type instanceof rtt.TupleType) {
-        assert(v instanceof Array, ``);
+        sol.assert(v instanceof Array, ``);
         return v.map((el, i) => liftABIBaseValue(el, type.elementTypes[i]));
     }
 
     if (type instanceof rtt.StructType) {
-        assert(v instanceof Array && v.length === type.fields.length, ``);
+        sol.assert(v instanceof Array && v.length === type.fields.length, ``);
         const fields: Array<[string, BaseValue]> = [];
 
         for (let i = 0; i < v.length; i++) {
@@ -396,23 +464,23 @@ export function decode(
 
         if (isValueType(typ)) {
             // Primitive value - just return it
-            assert(isPrimitiveValue(baseValue), ``);
+            sol.assert(isPrimitiveValue(baseValue), ``);
             val = baseValue;
-        } else if (typ instanceof rtt.PointerType && typ.location === DataLocation.Storage) {
-            assert(
+        } else if (typ instanceof rtt.PointerType && typ.location === sol.DataLocation.Storage) {
+            sol.assert(
                 abiType instanceof rtt.IntType && typeof baseValue === "bigint",
                 `Unexpected pointer storage type ${abiType.pp()} or val ${baseValue}`
             );
             val = rtt.makeStorageView(typ, [baseValue, 32]);
-        } else if (typ instanceof rtt.PointerType && typ.location === DataLocation.Memory) {
+        } else if (typ instanceof rtt.PointerType && typ.location === sol.DataLocation.Memory) {
             // Non-primitive value - encode it in memory
             const memView = PointerMemView.allocMemFor(baseValue, typ.toType, state.memAllocator);
             memView.encode(baseValue, state.memory, state.memAllocator);
             val = memView;
-        } else if (typ instanceof rtt.PointerType && typ.location === DataLocation.CallData) {
+        } else if (typ instanceof rtt.PointerType && typ.location === sol.DataLocation.CallData) {
             val = view;
         } else if (typ instanceof rtt.FunctionType) {
-            assert(
+            sol.assert(
                 baseValue instanceof Uint8Array,
                 `Unexpected base value for function ref ${baseValue}`
             );

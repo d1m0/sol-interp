@@ -136,7 +136,7 @@ import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { astToRuntimeType, BaseInterpType } from "./types";
 import { InterpVisitor } from "./visitors";
-import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
+import { castStringToBytes, decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -1440,11 +1440,12 @@ export class Interpreter {
             lvType instanceof rtt.PointerType &&
             lvType.toType instanceof rtt.BytesType
         ) {
-            if (rvalue instanceof StringMemView) {
-                return new BytesMemView(bytesT, rvalue.offset);
-            } else if (rvalue instanceof rtt.StringCalldataView) {
-                return new rtt.BytesCalldataView(bytesT, rvalue.offset, rvalue.base);
-            }
+            this.expect(
+                rvalue instanceof StringMemView ||
+                    rvalue instanceof rtt.StringCalldataView ||
+                    rvalue instanceof rtt.StringSliceCalldataView
+            );
+            return castStringToBytes(rvalue);
         }
 
         // bytes -> string cast in memory
@@ -1895,21 +1896,14 @@ export class Interpreter {
             toT instanceof rtt.BytesType
         ) {
             this.expect(
-                fromV instanceof View && fromV.type instanceof rtt.StringType,
+                fromV instanceof StringMemView ||
+                    fromV instanceof rtt.StringCalldataView ||
+                    fromV instanceof rtt.StringSliceCalldataView ||
+                    fromV instanceof StringStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            if (fromV instanceof StringMemView) {
-                return new BytesMemView(new rtt.BytesType(), fromV.offset);
-            } else if (fromV instanceof rtt.StringCalldataView) {
-                return new rtt.BytesCalldataView(new rtt.BytesType(), fromV.offset, fromV.base);
-            } else {
-                this.expect(fromV instanceof StringStorageView);
-                return new BytesStorageView(new rtt.BytesType(), [
-                    fromV.key,
-                    fromV.endOffsetInWord
-                ]);
-            }
+            return castStringToBytes(fromV);
         }
 
         // string literals -> fixed bytes
@@ -1919,28 +1913,18 @@ export class Interpreter {
             toT instanceof rtt.FixedBytesType
         ) {
             this.expect(
-                fromV instanceof View && fromV.type instanceof rtt.StringType,
+                fromV instanceof StringMemView ||
+                    fromV instanceof rtt.StringCalldataView ||
+                    fromV instanceof rtt.StringStorageView ||
+                    fromV instanceof rtt.StringSliceCalldataView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            let bytesView: rtt.BytesCalldataView | BytesMemView | BytesStorageView;
-
-            if (fromV instanceof StringMemView) {
-                bytesView = new BytesMemView(new rtt.BytesType(), fromV.offset);
-            } else if (fromV instanceof rtt.StringCalldataView) {
-                bytesView = new rtt.BytesCalldataView(
-                    new rtt.BytesType(),
-                    fromV.offset,
-                    fromV.base
-                );
-            } else {
-                this.expect(fromV instanceof StringStorageView);
-                bytesView = new BytesStorageView(new rtt.BytesType(), [
-                    fromV.key,
-                    fromV.endOffsetInWord
-                ]);
-            }
-
+            const bytesView:
+                | rtt.BytesCalldataView
+                | BytesMemView
+                | BytesStorageView
+                | rtt.BytesSliceCalldataView = castStringToBytes(fromV);
             const bts = decodeView(bytesView, state);
             this.expect(bts instanceof Uint8Array && bts.length === toT.numBytes);
             return bts;
