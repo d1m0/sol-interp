@@ -19,7 +19,15 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { ExternalCallDescription, NewCall, none, Value } from "./value";
+import {
+    BaseTypeValue,
+    ExternalCallDescription,
+    NewCall,
+    none,
+    TypeTuple,
+    TypeValue,
+    Value
+} from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { ArrayLikeLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
@@ -768,4 +776,12 @@ export function indexOfEnumOption(
     }
 
     return undefined;
+}
+
+export function unwrapUnaryTypeTuples(t: BaseTypeValue): TypeValue {
+    while (t instanceof TypeTuple && t.elements.length === 1) {
+        t = t.elements[0];
+    }
+
+    return t as TypeValue;
 }

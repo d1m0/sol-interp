@@ -14,6 +14,6 @@ contract __IRTest__ {
 
     function __testCase29__(CodeSize __this__) internal {
         uint256 ret_29_0 = __this__.f();
-        assert(ret_29_0 == uint256(4));
+        assert(ret_29_0 == uint256(204));
     }
 }
