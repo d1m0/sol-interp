@@ -8,7 +8,12 @@ const sol2maruirTests: string[] = fse
     .filter((name) => name.endsWith("config.sol"));
 
 const libDependencies = new Map<string, string[]>([
-    ["PackedEncodingTest.config.sol", ["BytesLib"]]
+    ["PackedEncodingTest.config.sol", ["BytesLib"]],
+    ["EncodingWithSelectorOrSignature.config.sol", ["BytesLib"]],
+    ["LibToLibCall.config.sol", ["Test"]],
+    ["LibraryThis.config.sol", ["GetThis"]],
+    ["PublicGetterSelectorAccess.config.sol", ["BytesLib"]],
+    ["EncodingWithSelectorOrSignature.config.sol", ["BytesLib"]]
 ]);
 
 /**

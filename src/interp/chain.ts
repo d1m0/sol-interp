@@ -215,6 +215,7 @@ export class Chain implements WorldInterface {
             delegatingAccount ? toAccount : undefined,
             msg.isStaticCall
         );
+
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);
 

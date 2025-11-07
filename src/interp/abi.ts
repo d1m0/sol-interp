@@ -332,7 +332,7 @@ export function encodePacked(vs: Value[], ts: BaseInterpType[], state: State): U
 }
 
 export function signatureToSelector(sig: string): Uint8Array {
-    return hexToBytes(`0x${ethABI.encodeFunctionSignature(sig)}`);
+    return hexToBytes(ethABI.encodeFunctionSignature(sig) as `0x{string}`);
 }
 
 /**

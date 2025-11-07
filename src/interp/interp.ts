@@ -455,7 +455,7 @@ export class Interpreter {
 
         // Decode Arguments
         const [calldataArgs, argTs] = this.getCalldataArgsAndTypes(entryPoint, getMsg(state));
-        let res: Value[]
+        let res: Value[];
         let resTs: rtt.BaseRuntimeType[];
 
         // Execute actual call
@@ -528,7 +528,7 @@ export class Interpreter {
     private initializeStateVar(v: sol.VariableDeclaration, s: State): void {
         this.expect(v.stateVariable && v.vScope instanceof sol.ContractDefinition);
         this.nodes.push(v);
-        if (v.vValue === undefined) {
+        if (v.vValue === undefined || v.mutability === sol.Mutability.Constant) {
             return;
         }
 
@@ -1038,8 +1038,11 @@ export class Interpreter {
         );
 
         for (let i = 0; i < retVals.length; i++) {
-            const retName = LocalsScope.returnName(fun?.vReturnParameters.vParameters[i], i);
-            state.scope.set(retName, retVals[i]);
+            const ret = frame.scope._lookupLocation(
+                LocalsScope.returnName(fun?.vReturnParameters.vParameters[i], i)
+            );
+            this.expect(ret !== undefined);
+            this.assign(ret, retVals[i], state);
         }
 
         return ControlFlow.Return;
@@ -1460,6 +1463,10 @@ export class Interpreter {
             return bigIntToBytes(rvalue);
         }
 
+        if (typeof rvalue === "bigint" && lvType instanceof rtt.AddressType) {
+            return new Address(setLengthLeft(bigIntToBytes(rvalue), 20));
+        }
+
         nyi(`NYI Implicit coercion from ${ppValue(rvalue)} to type ${lvType.pp()}`);
     }
 
@@ -1869,6 +1876,10 @@ export class Interpreter {
         const fromT = this.typeOf(expr.vArguments[0]);
         const fromV = this.evalNP(expr.vArguments[0], state);
 
+        if (fromT.pp() === toT.pp()) {
+            return fromV;
+        }
+
         // int -> fixed bytes
         if (fromT instanceof rtt.IntType && toT instanceof rtt.FixedBytesType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
@@ -1956,10 +1967,6 @@ export class Interpreter {
             return new Address(addr);
         }
 
-        if (fromT.pp() === toT.pp()) {
-            return fromV;
-        }
-
         if (
             fromT instanceof rtt.TypeType &&
             fromT.rawT instanceof sol.UserDefinedType &&
@@ -1968,6 +1975,15 @@ export class Interpreter {
             toT instanceof rtt.AddressType
         ) {
             return getLibraryLinkedAddress(fromT.rawT.definition, state);
+        }
+
+        if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.FixedBytesType) {
+            this.expect(fromV instanceof Uint8Array);
+            if (fromT.numBytes < toT.numBytes) {
+                return setLengthLeft(fromV, toT.numBytes);
+            }
+
+            return fromV.slice(0, toT.numBytes);
         }
 
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
@@ -2392,7 +2408,10 @@ export class Interpreter {
             res = target.vReturnParameters.vParameters.map((ret, i) => {
                 const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
                 if (res === undefined) {
-                    this.fail(NotDefined, ``);
+                    this.fail(
+                        NotDefined,
+                        `Missing value for return ${LocalsScope.returnName(ret, i)}`
+                    );
                 }
                 return res;
             });

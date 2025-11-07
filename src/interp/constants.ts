@@ -197,7 +197,7 @@ export function gatherConstants(
         } else {
             sol.assert(isPrimitiveValue(val), `Unexpected constant value ${ppValue(val)}`);
             view = PointerMemView.allocMemFor(val, typ, state.memAllocator);
-            view.encode(val, state.memory, state.memAllocator);
+            interp.assign(view, val, state);
         }
 
         state.constantsMap.set(nd.id, view);
