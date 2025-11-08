@@ -419,7 +419,13 @@ export class ContractScope extends BaseScope {
     }
 
     _lookupLocation(name: string): View | undefined {
-        return this.fieldToView.get(name) as any;
+        const res = this.fieldToView.get(name);
+
+        if (res !== undefined) {
+            return res;
+        }
+
+        return this.constFieldToView.get(name)
     }
 
     // @todo is this method really necessary? Don't assignments to storage happen through Interpreter.assign?

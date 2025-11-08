@@ -34,7 +34,6 @@ import * as rtt from "sol-dbg";
 import { WorldInterface, State, SolMessage, CallResult, makeBuiltinScope } from "./state";
 import {
     InternalError,
-    InterpError,
     NoScope,
     NotDefined,
     OOBError,
@@ -79,7 +78,9 @@ import {
 } from "@ethereumjs/util";
 import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
+    bytes32,
     bytesT,
+    cdBytesT,
     changeLocTo,
     clampIntToType,
     decodeView,
@@ -98,6 +99,7 @@ import {
     getStateStorage,
     getThis,
     indexOfEnumOption,
+    int256,
     isBaseOf,
     isDirectlyAssignable,
     isMethod,
@@ -223,19 +225,27 @@ export class Interpreter {
         return rtt.astToRuntimeType(this._infer.variableDeclarationToTypeNode(decl), this._infer);
     }
 
-    typeOf(e: sol.Expression): BaseInterpType {
-        const solT = removeLiteralTypes(this._infer.typeOf(e), e, this._infer);
-
-        // Detect global ref type constants and treat them as stored in memory
-        let loc: sol.DataLocation | undefined;
-
+    isConstant(e: sol.Expression): boolean {
         if (
             (e instanceof sol.Identifier || e instanceof sol.MemberAccess) &&
             e.vReferencedDeclaration instanceof sol.VariableDeclaration &&
             e.vReferencedDeclaration.mutability === sol.Mutability.Constant
         ) {
-            loc = sol.DataLocation.Memory;
+            return true;
         }
+
+        if (e instanceof sol.FunctionCall && e.kind === sol.FunctionCallKind.TypeConversion && this.isConstant(e.vArguments[0])) {
+            return true;
+        }
+
+        return false;
+    }
+
+    typeOf(e: sol.Expression): BaseInterpType {
+        const solT = removeLiteralTypes(this._infer.typeOf(e), e, this._infer);
+
+        // Detect global ref type constants (strings, bytes) and treat them as stored in memory
+        let loc: sol.DataLocation | undefined = this.isConstant(e) ? sol.DataLocation.Memory : undefined;
 
         return this.astToRuntimeType(solT, loc);
     }
@@ -248,6 +258,15 @@ export class Interpreter {
     ): [PrimitiveValue[], BaseInterpType[]] {
         const contract = entryPoint.vScope;
         this.expect(contract instanceof sol.ContractDefinition);
+
+        // Fallbacks are a special case with an (optional) single arg which is a MsgDataView
+        if (entryPoint instanceof sol.FunctionDefinition && entryPoint.kind === sol.FunctionKind.Fallback) {
+            if (entryPoint.vParameters.vParameters.length === 0) {
+                return [[], []]
+            }
+
+            return [[new MsgDataView()], [cdBytesT]]
+        }
 
         // Decode args
         let calldataViews: Array<View<rtt.Memory>> = buildMsgViews(
@@ -301,7 +320,7 @@ export class Interpreter {
 
             if (view instanceof PointerCalldataView) {
                 const innerView = view.toView(data);
-                this.expect(innerView instanceof BaseCalldataView, ``);
+                this.expect(innerView instanceof BaseCalldataView, `Unexpected pointer calldata view`);
                 return innerView;
             }
 
@@ -477,17 +496,30 @@ export class Interpreter {
             throw e;
         }
 
-        // Encode returns
-        const resBytecode = encode(res, resTs, state);
+        let resData: Uint8Array;
+
+        if (entryPoint instanceof sol.FunctionDefinition && entryPoint.kind === sol.FunctionKind.Fallback) {
+            // Fallback functions return data without it being encoded
+            if (res.length == 1) {
+                this.expect(res[0] instanceof View && res[0].type instanceof rtt.BytesType)
+                resData = decodeView(res[0], state) as Uint8Array;
+            } else {
+                this.expect(res.length === 0);
+                resData = new Uint8Array();
+            }
+        } else {
+            // Encode returns
+            resData = encode(res, resTs, state);
+        }
 
         for (const v of this.visitors) {
-            v.return(this, state, resBytecode);
+            v.return(this, state, resData);
         }
 
         // If we succeed update the world on our new state
         this.world.updateAccount(state.account);
 
-        return resBytecode;
+        return resData;
     }
 
     private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
@@ -641,6 +673,7 @@ export class Interpreter {
         const storage = getStateStorage(state);
         let stateVarView:
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
+            | BaseMemoryView<BaseValue, rtt.BaseRuntimeType>
             | DecodingFailure
             | undefined = scope.lookupLocation(callee.name) as
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
@@ -1409,65 +1442,88 @@ export class Interpreter {
         return res;
     }
 
-    private implicitCoercion(
-        rvalue: rtt.PrimitiveValue,
-        lvType: rtt.BaseRuntimeType
-    ): PrimitiveValue {
+    private implicitCoercionImpl(
+        value: rtt.PrimitiveValue,
+        toType: rtt.BaseRuntimeType,
+        state: State
+    ): PrimitiveValue | undefined {
         // No Coercion
         if (
-            (typeof rvalue === "bigint" && lvType instanceof rtt.IntType) ||
-            (typeof rvalue === "boolean" && lvType instanceof rtt.BoolType) ||
-            (rvalue instanceof Uint8Array && lvType instanceof rtt.FixedBytesType) ||
-            (rvalue instanceof Address && lvType instanceof rtt.AddressType) ||
-            ((rvalue instanceof rtt.InternalFunRef ||
-                rvalue instanceof rtt.ExternalFunRef ||
-                rvalue instanceof NewCall ||
-                rvalue instanceof ExternalCallDescription) &&
-                lvType instanceof rtt.FunctionType) ||
-            (rvalue instanceof View && isDirectlyAssignable(lvType, typeOfView(rvalue))) ||
-            rvalue instanceof TypeTuple ||
-            rvalue instanceof Poison // Local/return variables are initialized to None at scope creation
+            (typeof value === "bigint" && toType instanceof rtt.IntType) ||
+            (typeof value === "boolean" && toType instanceof rtt.BoolType) ||
+            (value instanceof Uint8Array && toType instanceof rtt.FixedBytesType) ||
+            (value instanceof Address && toType instanceof rtt.AddressType) ||
+            ((value instanceof rtt.InternalFunRef ||
+                value instanceof rtt.ExternalFunRef ||
+                value instanceof NewCall ||
+                value instanceof ExternalCallDescription) &&
+                toType instanceof rtt.FunctionType) ||
+            (value instanceof View && isDirectlyAssignable(toType, typeOfView(value))) ||
+            value instanceof TypeTuple ||
+            value instanceof Poison // Local/return variables are initialized to None at scope creation
         ) {
-            return rvalue;
+            return value;
         }
 
         // string -> bytes cast in memory/storage
         if (
-            rvalue instanceof View &&
-            rvalue.type instanceof rtt.StringType &&
-            lvType instanceof rtt.PointerType &&
-            lvType.toType instanceof rtt.BytesType
+            value instanceof View &&
+            value.type instanceof rtt.StringType &&
+            toType instanceof rtt.PointerType &&
+            toType.toType instanceof rtt.BytesType
         ) {
             this.expect(
-                rvalue instanceof StringMemView ||
-                    rvalue instanceof rtt.StringCalldataView ||
-                    rvalue instanceof rtt.StringSliceCalldataView
+                value instanceof StringMemView ||
+                    value instanceof rtt.StringCalldataView ||
+                    value instanceof rtt.StringSliceCalldataView
             );
-            return castStringToBytes(rvalue);
+            return castStringToBytes(value);
         }
 
         // bytes -> string cast in memory
         if (
-            rvalue instanceof View &&
-            rvalue.type instanceof rtt.BytesType &&
-            lvType instanceof rtt.PointerType &&
-            lvType.toType instanceof rtt.StringType
+            value instanceof View &&
+            value.type instanceof rtt.BytesType &&
+            toType instanceof rtt.PointerType &&
+            toType.toType instanceof rtt.StringType
         ) {
-            if (rvalue instanceof BytesMemView) {
-                return new StringMemView(stringT, rvalue.offset);
+            if (value instanceof BytesMemView) {
+                return new StringMemView(stringT, value.offset);
             }
         }
 
         // Int literals to fixed byte
-        if (typeof rvalue === "bigint" && lvType instanceof rtt.FixedBytesType) {
-            return bigIntToBytes(rvalue);
+        if (typeof value === "bigint" && toType instanceof rtt.FixedBytesType) {
+            const view = makeMemoryView(value < 0n ? int256 : rtt.uint256, 0n);
+            view.encode(value, scratchWord, undefined as unknown as any);
+
+            return scratchWord.slice(32 - toType.numBytes);
         }
 
-        if (typeof rvalue === "bigint" && lvType instanceof rtt.AddressType) {
-            return new Address(setLengthLeft(bigIntToBytes(rvalue), 20));
+        if (typeof value === "bigint" && toType instanceof rtt.AddressType) {
+            return new Address(setLengthLeft(bigIntToBytes(value), 20));
         }
 
-        nyi(`NYI Implicit coercion from ${ppValue(rvalue)} to type ${lvType.pp()}`);
+        if (value instanceof View && value.type instanceof rtt.BytesType && toType instanceof rtt.FixedBytesType) {
+            const t = decodeView(value, state) as Uint8Array;
+            if (t.length !== toType.numBytes) {
+                return undefined;
+            }
+
+            return t;
+        }
+
+        return undefined;
+    }
+
+    private implicitCoercion(
+        rvalue: rtt.PrimitiveValue,
+        lvType: rtt.BaseRuntimeType,
+        state: State
+    ): PrimitiveValue {
+        const res = this.implicitCoercionImpl(rvalue, lvType, state)
+        this.expect(res !== undefined, `NYI Implicit coercion from ${ppValue(rvalue)} to type ${lvType.pp()}`)
+        return res;
     }
 
     public assign(lvalue: LValue, rvalue: Value, state: State): void {
@@ -1499,7 +1555,7 @@ export class Interpreter {
         // Special case - assigning to bytes length in storage requires decoding and re-encoding
         // due to the compressed way length is handled in storage
         if (lvalue instanceof BytesStorageLength) {
-            rvalue = this.implicitCoercion(rvalue, rtt.uint256) as bigint;
+            rvalue = this.implicitCoercion(rvalue, rtt.uint256, state) as bigint;
 
             let bytes = decodeView(lvalue.view, state) as Uint8Array;
             bytes = setLengthRight(bytes, bigIntToNum(rvalue));
@@ -1507,7 +1563,7 @@ export class Interpreter {
             return;
         }
 
-        rvalue = this.implicitCoercion(rvalue, lvalue.type);
+        rvalue = this.implicitCoercion(rvalue, lvalue.type, state);
 
         // The following ref-type assignments result in a copy of the underlying complex value
         // - storage-to-storage
@@ -1588,12 +1644,15 @@ export class Interpreter {
             const op = expr.operator.slice(0, -1);
             const lVal = this.lvToValue(lv, state);
             const lType = this.typeOf(expr.vLeftHandSide);
+            const rType = this.typeOf(expr.vRightHandSide);
             // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
 
             rvalue = this.computeBinary(
                 lVal,
+                lType,
                 op,
                 rvalue,
+                rType,
                 lType,
                 undefined,
                 this.isUnchecked(expr),
@@ -1624,6 +1683,7 @@ export class Interpreter {
         return clampedVal;
     }
 
+    /*
     private coerceIntLiteralsToBytes(left: Value, right: Value): [Value, Value] {
         if (typeof left === typeof right) {
             return [left, right];
@@ -1647,12 +1707,35 @@ export class Interpreter {
 
         this.fail(InterpError, `Unexpected values ${ppValue(left)} and ${ppValue(right)}`);
     }
+        */
+
+    private coerceToSameType(left: PrimitiveValue, lType: BaseInterpType, right: PrimitiveValue, rType: BaseInterpType, state: State): [PrimitiveValue, PrimitiveValue] {
+        if (lType.pp() == rType.pp()) {
+            return [left, right]
+        }
+
+        const castRigth = this.implicitCoercionImpl(right, lType, state)
+
+        if (castRigth !== undefined) {
+            return [left, castRigth]
+        }
+
+        const castLeft = this.implicitCoercionImpl(left, rType, state);
+
+        if (castLeft !== undefined) {
+            return [castLeft, right]
+        }
+
+        nyi(`Cannot cast ${ppValue(left)} of type ${lType.pp()} and ${ppValue(right)} of type ${rType.pp()} to same type`)
+    }
 
     private computeBinary(
         left: Value,
+        lType: BaseInterpType,
         operator: string,
         right: Value,
-        type: BaseInterpType,
+        rType: BaseInterpType,
+        expType: BaseInterpType,
         userFunction: sol.FunctionDefinition | undefined,
         unchecked: boolean,
         state: State
@@ -1662,8 +1745,11 @@ export class Interpreter {
             nyi("User-defined operators");
         }
 
+        this.expect(isPrimitiveValue(left) && isPrimitiveValue(right));
+
         if (sol.BINARY_OPERATOR_GROUPS.Logical.includes(operator)) {
             this.expect(typeof left === "boolean" && typeof right === "boolean");
+
             if (operator === "&&") {
                 return left && right;
             }
@@ -1678,7 +1764,7 @@ export class Interpreter {
         if (sol.BINARY_OPERATOR_GROUPS.Equality.includes(operator)) {
             let isEqual: boolean;
 
-            [left, right] = this.coerceIntLiteralsToBytes(left, right);
+            [left, right] = this.coerceToSameType(left, lType, right, rType, state)
 
             if (typeof left === "boolean" && typeof right === "boolean") {
                 isEqual = left === right;
@@ -1690,7 +1776,7 @@ export class Interpreter {
                 isEqual = left.equals(right);
             } else {
                 nyi(
-                    `${left}(${left.constructor.name}) ${operator} ${right}(${right.constructor.name})`
+                    `${left}(${left.constructor.name}) <${lType.pp()}> ${operator} ${right}(${right.constructor.name}) <${rType.pp()}>`
                 );
             }
 
@@ -1706,7 +1792,12 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Comparison.includes(operator)) {
-            let [sleft, sright]: [any, any] = this.coerceIntLiteralsToBytes(left, right);
+            let [sleft, sright]: [any, any] = this.coerceToSameType(left, lType, right, rType, state)
+
+            if (sleft instanceof Address && sright instanceof Address) {
+                sleft = sleft.toString();
+                sright = sright.toString();
+            }
 
             if (sleft instanceof Uint8Array && sright instanceof Uint8Array) {
                 // Perform lexicographical comparison
@@ -1762,7 +1853,7 @@ export class Interpreter {
                 nyi(`Unknown arithmetic operator ${operator}`);
             }
 
-            return this.clamp(res, type, unchecked, state);
+            return this.clamp(res, expType, unchecked, state);
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
@@ -1776,8 +1867,6 @@ export class Interpreter {
                 this.expect(left instanceof Uint8Array);
                 nyi(`Bitshift of fixed bytes`);
             }
-
-            [left, right] = this.coerceIntLiteralsToBytes(left, right);
 
             if (typeof left === "bigint" && typeof right === "bigint") {
                 if (operator === "|") {
@@ -1813,8 +1902,10 @@ export class Interpreter {
 
         return this.computeBinary(
             lVal,
+            this.typeOf(expr.vLeftExpression),
             expr.operator,
             rVal,
+            this.typeOf(expr.vRightExpression),
             this.typeOf(expr),
             expr.vUserFunction,
             this.isUnchecked(expr),
@@ -2243,7 +2334,7 @@ export class Interpreter {
 
                 if (args.length === 1) {
                     this.expect(args[0] instanceof View, `Unexpected arguments to *call builtin`);
-                    const dataView = this.implicitCoercion(args[0], memBytesT);
+                    const dataView = this.implicitCoercion(args[0], memBytesT, state);
                     this.expect(dataView instanceof View && dataView.type instanceof rtt.BytesType);
                     data = decodeView(dataView, state) as Uint8Array;
                 } else {
@@ -2552,7 +2643,11 @@ export class Interpreter {
 
         // @todo The order of operations here may not match whats implemented!!!
         for (const [name, optExpr] of expr.vOptionsMap) {
-            const optV = this.evalNP(optExpr, state);
+            let optV = this.evalNP(optExpr, state);
+            this.expect(isPrimitiveValue(optV));
+            const expectedT = name === "salt" ? bytes32 : rtt.uint256;
+
+            optV = this.implicitCoercion(optV, expectedT, state) as NonPoisonValue;
 
             if (name === "value") {
                 this.expect(typeof optV === "bigint");
@@ -2991,6 +3086,10 @@ export class Interpreter {
                 );
 
                 return res;
+            }
+
+            if (expr.vReferencedDeclaration instanceof sol.EnumDefinition) {
+                return new DefValue(expr.vReferencedDeclaration);
             }
         }
 

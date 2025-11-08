@@ -51,7 +51,7 @@ export abstract class BaseLocalView<
 
 export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, BaseRuntimeType> {}
 
-export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
+export class SingleByteLocalView extends BaseLocalView<Uint8Array, FixedBytesType> {
     constructor(
         loc: [BaseScope, string],
         private byteOffset: number
@@ -59,7 +59,7 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
         super(bytes1, loc);
     }
 
-    decode(): bigint | DecodingFailure {
+    decode(): Uint8Array | DecodingFailure {
         const [scope, name] = this.loc;
         const word = scope._lookup(name);
 
@@ -73,10 +73,10 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
             return new DecodingFailure(`OoB index ${this.byteOffset} in ${name} in ${scope.name}`);
         }
 
-        return BigInt(word[this.byteOffset]);
+        return word.slice(this.byteOffset, this.byteOffset + 1);
     }
 
-    encode(v: bigint): void {
+    encode(v: Uint8Array): void {
         const [scope, name] = this.loc;
         const word = scope._lookup(name);
 
@@ -90,11 +90,7 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
             throw new EncodingError(`OoB index ${this.byteOffset} in ${name} in ${scope.name}`);
         }
 
-        if (v < 0n || v >= 256) {
-            throw new EncodingError(`Value ${v} is not a byte`);
-        }
-
-        word[this.byteOffset] = Number(v);
+        word.set(v, this.byteOffset)
     }
 }
 

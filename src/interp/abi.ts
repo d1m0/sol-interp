@@ -246,6 +246,10 @@ export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType): string {
  * Note that the given type names are assumed to be *generalized*.
  */
 export function encode(vs: Value[], ts: BaseInterpType[], state: State): Uint8Array {
+    if (vs.length === 0) {
+        return new Uint8Array();
+    }
+
     const abiTypes = ts.map((t) => toABIEncodedType(t)).filter((t) => !skipFieldDueToMap(t));
     const typeNames = abiTypes.map((t) => abiTypeToCanonicalName(t));
 
