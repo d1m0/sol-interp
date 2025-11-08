@@ -243,10 +243,11 @@
 227 - finish throw test
 228 - refactor builtins to a simpler model with version descriptors
 229 - get debugging to work with new binary
+230 - implement abi.encodePacked 
+231 - keccak256
 
-- implement abi.encodePacked 
-- keccak256
-
+- add a new polymorpic TVar type TMovedTo(N, Location) saying that it matches any type, but it moves it to the given location.
+Use this type for abi.encode. Can we also use it for push?
 - on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?
 - is "foo".length byte length or uncode code points?
 - test remaining sol2maruir tests to determine readiness level

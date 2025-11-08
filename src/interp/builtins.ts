@@ -36,6 +36,7 @@ import {
     bytes32,
     bytesT,
     cdBytesT,
+    changeLocTo,
     decodeView,
     getMsgSender,
     getSig,
@@ -304,7 +305,9 @@ export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
     new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const paramTs = self.type.argTs;
+        const paramTs = self.type.argTs.map((paramT) =>
+            changeLocTo(paramT, sol.DataLocation.Memory)
+        );
         const args = self.getArgs(paramTs.length, state);
         return [encodeImpl(self, paramTs, args, state)];
     }

@@ -76,7 +76,14 @@ import {
     setLengthLeft,
     setLengthRight
 } from "@ethereumjs/util";
-import { BaseScope, BuiltinsScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
+import {
+    BaseScope,
+    BuiltinsScope,
+    ContractScope,
+    GlobalScope,
+    LocalsScope,
+    TempsScope
+} from "./scope";
 import {
     bytes32,
     bytesT,
@@ -129,7 +136,6 @@ import {
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
-    abiEncodeBuiltin,
     ADDRESS_BUILTIN_STRUCT_NAME,
     EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
     popBuiltin,
@@ -831,12 +837,10 @@ export class Interpreter {
             changeLocTo(self.varDeclToRuntimeType(d), sol.DataLocation.Memory)
         );
         const argVs = stmt.errorCall.vArguments.map((arg) => this.eval(arg, state));
-        const [dataView] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
-        this.expect(
-            dataView instanceof BytesMemView,
-            `Expected encoded data not ${ppValue(dataView)}`
-        );
-        const argData = dataView.decode(state.memory);
+        const ts = this.pushTempScope(argTs, state);
+        this.assign(ts.temps, argVs, state);
+        const argData = encode(ts.tempVals, argTs, state);
+        this.popScope(state);
         this.expect(argData instanceof Uint8Array);
         const data = concatBytes(selector, argData);
         const msg = `${errorDef.name}(${argVs.map(ppValue).join(", ")})`;
@@ -2284,6 +2288,17 @@ export class Interpreter {
         return res;
     }
 
+    private pushTempScope(tempTs: rtt.BaseRuntimeType[], state: State): TempsScope {
+        const newScope = new TempsScope(tempTs, state, state.scope);
+
+        for (const lv of newScope.temps) {
+            newScope.set(lv.name, none);
+        }
+
+        state.scope = newScope;
+        return newScope;
+    }
+
     private _evalMsgCall(
         expr: sol.FunctionCall,
         callee: ExternalCallDescription,
@@ -2312,13 +2327,11 @@ export class Interpreter {
 
             // Next compute the msg data
             const argVs = expr.vArguments.map((arg) => this.eval(arg, state));
-            const [dataView] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
-            this.expect(
-                dataView instanceof BytesMemView,
-                `Expected encoded data not ${ppValue(dataView)}`
-            );
+            const ts = this.pushTempScope(argTs, state);
+            this.assign(ts.temps, argVs, state);
+            const argData = encode(ts.tempVals, argTs, state);
+            this.popScope(state);
 
-            const argData = dataView.decode(state.memory);
             this.expect(argData instanceof Uint8Array);
             data = concatBytes(selector, argData);
 
@@ -2339,12 +2352,11 @@ export class Interpreter {
                 );
             }
 
-            const [dataView] = this._execCall(abiEncodeBuiltin, args, argTs, state);
-            this.expect(
-                dataView instanceof BytesMemView,
-                `Expected encoded data not ${ppValue(dataView)}`
-            );
-            const argData = dataView.decode(state.memory);
+            const ts = this.pushTempScope(argTs, state);
+            this.assign(ts.temps, args, state);
+            const argData = encode(ts.tempVals, argTs, state);
+            this.popScope(state);
+
             this.expect(argData instanceof Uint8Array, ``);
 
             const newContractInfo = this.artifactManager.getContractInfo(contract);

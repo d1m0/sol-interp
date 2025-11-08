@@ -13,8 +13,9 @@ import {
 } from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
-import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
+import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
 import { defT, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
+import { BaseInterpType } from "./types";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -87,7 +88,75 @@ export abstract class BaseScope {
     }
 }
 
-export type LocalsScopeNodeType =
+/**
+ * Base class for a Scope that stores data locally. Could be either Solidity stack locals (function args, returns, locals) or
+ * interpreter specific temporaries.
+ */
+abstract class BaseLocalsScope extends BaseScope {
+    protected defs = new Map<string, Value>();
+    protected readonly views: Array<BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>>;
+    protected readonly viewsMap: Map<string, BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>>;
+
+    constructor(
+        name: string,
+        defTypesMap: Map<string, rtt.BaseRuntimeType>,
+        state: State,
+        _next: BaseScope | undefined
+    ) {
+        super(name, defTypesMap, state, _next);
+
+        this.views = [...defTypesMap.entries()].map(([name, type]) =>
+            this.makeLocalView(name, type)
+        );
+        this.viewsMap = new Map(this.views.map((t) => [t.name, t]));
+    }
+
+    _lookup(name: string): Value | undefined {
+        return this.defs.get(name);
+    }
+
+    private makeLocalView(
+        name: string,
+        t: rtt.BaseRuntimeType
+    ): BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType> {
+        if (t instanceof rtt.PointerType) {
+            return new PointerLocalView(t, [this, name]);
+        }
+
+        if (t instanceof rtt.FixedBytesType) {
+            return new ArrayLikeLocalView(t, [this, name]);
+        }
+
+        return new PrimitiveLocalView(t, [this, name]);
+    }
+
+    _lookupLocation(name: string): View | undefined {
+        return this.viewsMap.get(name);
+    }
+
+    _set(name: string, val: Value): void {
+        this.defs.set(name, val);
+    }
+}
+
+export class TempsScope extends BaseLocalsScope {
+    constructor(tempTs: BaseInterpType[], state: State, next: BaseScope | undefined) {
+        const knownIds = new Map<string, rtt.BaseRuntimeType>(
+            tempTs.map((t, i) => [`<temp_${i}>`, t])
+        );
+        super(`<temp scope>`, knownIds, state, next);
+    }
+
+    get temps(): Array<BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>> {
+        return this.views;
+    }
+
+    get tempVals(): Value[] {
+        return this.temps.map((t) => this.defs.get(t.name) as Value);
+    }
+}
+
+type LocalsScopeNodeType =
     | sol.UncheckedBlock
     | sol.Block
     | sol.UncheckedBlock
@@ -103,8 +172,32 @@ export type LocalsScopeNodeType =
  * The relationship is fixed at construction, since we store a reference to the
  * underlying map. So if we push more scopes
  */
-export class LocalsScope extends BaseScope {
-    protected readonly defs: Map<string, Value>;
+export class LocalsScope extends BaseLocalsScope {
+    constructor(
+        public readonly node: LocalsScopeNodeType,
+        state: State,
+        version: string,
+        _next: BaseScope | undefined
+    ) {
+        const defTypesMap = LocalsScope.detectIds(node, version);
+
+        let name: string;
+        if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
+            name = `<block ${node.print(0)}>`;
+        } else if (node instanceof sol.VariableDeclarationStatement) {
+            name = `<locals ${[...defTypesMap.keys()].join(", ")}>`;
+        } else if (node instanceof sol.FunctionDefinition) {
+            name = `<args/rets for function ${node.name}>`;
+        } else if (node instanceof sol.ModifierDefinition) {
+            name = `<args for modifier ${node.name}>`;
+        } else if (node instanceof sol.TryCatchClause) {
+            name = `<args for try-catch clause#${node.id}>`;
+        } else {
+            name = `<args for ${node.pp()}>`;
+        }
+
+        super(name, defTypesMap, state, _next);
+    }
 
     public static returnName(decl: sol.VariableDeclaration, idx: number): string {
         return decl.name === "" ? `<ret_${idx}>` : decl.name;
@@ -208,58 +301,6 @@ export class LocalsScope extends BaseScope {
         }
 
         return res;
-    }
-
-    constructor(
-        public readonly node: LocalsScopeNodeType,
-        state: State,
-        version: string,
-        _next: BaseScope | undefined
-    ) {
-        const defTypesMap = LocalsScope.detectIds(node, version);
-
-        let name: string;
-        if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
-            name = `<block ${node.print(0)}>`;
-        } else if (node instanceof sol.VariableDeclarationStatement) {
-            name = `<locals ${[...defTypesMap.keys()].join(", ")}>`;
-        } else if (node instanceof sol.FunctionDefinition) {
-            name = `<args/rets for function ${node.name}>`;
-        } else if (node instanceof sol.ModifierDefinition) {
-            name = `<args for modifier ${node.name}>`;
-        } else if (node instanceof sol.TryCatchClause) {
-            name = `<args for try-catch clause#${node.id}>`;
-        } else {
-            name = `<args for ${node.pp()}>`;
-        }
-
-        super(name, defTypesMap, state, _next);
-        this.defs = new Map();
-    }
-
-    _lookup(name: string): Value | undefined {
-        return this.defs.get(name);
-    }
-
-    _lookupLocation(name: string): View | undefined {
-        const t = this.knownIds.get(name);
-        if (t === undefined) {
-            return undefined;
-        }
-
-        if (t instanceof rtt.PointerType) {
-            return new PointerLocalView(t, [this, name]);
-        }
-
-        if (t instanceof rtt.FixedBytesType) {
-            return new ArrayLikeLocalView(t, [this, name]);
-        }
-
-        return new PrimitiveLocalView(t, [this, name]);
-    }
-
-    _set(name: string, val: Value): void {
-        this.defs.set(name, val);
     }
 }
 
