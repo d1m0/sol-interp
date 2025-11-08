@@ -425,7 +425,7 @@ export class ContractScope extends BaseScope {
             return res;
         }
 
-        return this.constFieldToView.get(name)
+        return this.constFieldToView.get(name);
     }
 
     // @todo is this method really necessary? Don't assignments to storage happen through Interpreter.assign?

@@ -90,7 +90,7 @@ export class SingleByteLocalView extends BaseLocalView<Uint8Array, FixedBytesTyp
             throw new EncodingError(`OoB index ${this.byteOffset} in ${name} in ${scope.name}`);
         }
 
-        word.set(v, this.byteOffset)
+        word.set(v, this.byteOffset);
     }
 }
 

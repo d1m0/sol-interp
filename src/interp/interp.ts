@@ -234,7 +234,11 @@ export class Interpreter {
             return true;
         }
 
-        if (e instanceof sol.FunctionCall && e.kind === sol.FunctionCallKind.TypeConversion && this.isConstant(e.vArguments[0])) {
+        if (
+            e instanceof sol.FunctionCall &&
+            e.kind === sol.FunctionCallKind.TypeConversion &&
+            this.isConstant(e.vArguments[0])
+        ) {
             return true;
         }
 
@@ -245,7 +249,9 @@ export class Interpreter {
         const solT = removeLiteralTypes(this._infer.typeOf(e), e, this._infer);
 
         // Detect global ref type constants (strings, bytes) and treat them as stored in memory
-        let loc: sol.DataLocation | undefined = this.isConstant(e) ? sol.DataLocation.Memory : undefined;
+        const loc: sol.DataLocation | undefined = this.isConstant(e)
+            ? sol.DataLocation.Memory
+            : undefined;
 
         return this.astToRuntimeType(solT, loc);
     }
@@ -260,12 +266,15 @@ export class Interpreter {
         this.expect(contract instanceof sol.ContractDefinition);
 
         // Fallbacks are a special case with an (optional) single arg which is a MsgDataView
-        if (entryPoint instanceof sol.FunctionDefinition && entryPoint.kind === sol.FunctionKind.Fallback) {
+        if (
+            entryPoint instanceof sol.FunctionDefinition &&
+            entryPoint.kind === sol.FunctionKind.Fallback
+        ) {
             if (entryPoint.vParameters.vParameters.length === 0) {
-                return [[], []]
+                return [[], []];
             }
 
-            return [[new MsgDataView()], [cdBytesT]]
+            return [[new MsgDataView()], [cdBytesT]];
         }
 
         // Decode args
@@ -320,7 +329,10 @@ export class Interpreter {
 
             if (view instanceof PointerCalldataView) {
                 const innerView = view.toView(data);
-                this.expect(innerView instanceof BaseCalldataView, `Unexpected pointer calldata view`);
+                this.expect(
+                    innerView instanceof BaseCalldataView,
+                    `Unexpected pointer calldata view`
+                );
                 return innerView;
             }
 
@@ -498,10 +510,13 @@ export class Interpreter {
 
         let resData: Uint8Array;
 
-        if (entryPoint instanceof sol.FunctionDefinition && entryPoint.kind === sol.FunctionKind.Fallback) {
+        if (
+            entryPoint instanceof sol.FunctionDefinition &&
+            entryPoint.kind === sol.FunctionKind.Fallback
+        ) {
             // Fallback functions return data without it being encoded
             if (res.length == 1) {
-                this.expect(res[0] instanceof View && res[0].type instanceof rtt.BytesType)
+                this.expect(res[0] instanceof View && res[0].type instanceof rtt.BytesType);
                 resData = decodeView(res[0], state) as Uint8Array;
             } else {
                 this.expect(res.length === 0);
@@ -1504,7 +1519,11 @@ export class Interpreter {
             return new Address(setLengthLeft(bigIntToBytes(value), 20));
         }
 
-        if (value instanceof View && value.type instanceof rtt.BytesType && toType instanceof rtt.FixedBytesType) {
+        if (
+            value instanceof View &&
+            value.type instanceof rtt.BytesType &&
+            toType instanceof rtt.FixedBytesType
+        ) {
             const t = decodeView(value, state) as Uint8Array;
             if (t.length !== toType.numBytes) {
                 return undefined;
@@ -1521,8 +1540,11 @@ export class Interpreter {
         lvType: rtt.BaseRuntimeType,
         state: State
     ): PrimitiveValue {
-        const res = this.implicitCoercionImpl(rvalue, lvType, state)
-        this.expect(res !== undefined, `NYI Implicit coercion from ${ppValue(rvalue)} to type ${lvType.pp()}`)
+        const res = this.implicitCoercionImpl(rvalue, lvType, state);
+        this.expect(
+            res !== undefined,
+            `NYI Implicit coercion from ${ppValue(rvalue)} to type ${lvType.pp()}`
+        );
         return res;
     }
 
@@ -1709,24 +1731,32 @@ export class Interpreter {
     }
         */
 
-    private coerceToSameType(left: PrimitiveValue, lType: BaseInterpType, right: PrimitiveValue, rType: BaseInterpType, state: State): [PrimitiveValue, PrimitiveValue] {
+    private coerceToSameType(
+        left: PrimitiveValue,
+        lType: BaseInterpType,
+        right: PrimitiveValue,
+        rType: BaseInterpType,
+        state: State
+    ): [PrimitiveValue, PrimitiveValue] {
         if (lType.pp() == rType.pp()) {
-            return [left, right]
+            return [left, right];
         }
 
-        const castRigth = this.implicitCoercionImpl(right, lType, state)
+        const castRigth = this.implicitCoercionImpl(right, lType, state);
 
         if (castRigth !== undefined) {
-            return [left, castRigth]
+            return [left, castRigth];
         }
 
         const castLeft = this.implicitCoercionImpl(left, rType, state);
 
         if (castLeft !== undefined) {
-            return [castLeft, right]
+            return [castLeft, right];
         }
 
-        nyi(`Cannot cast ${ppValue(left)} of type ${lType.pp()} and ${ppValue(right)} of type ${rType.pp()} to same type`)
+        nyi(
+            `Cannot cast ${ppValue(left)} of type ${lType.pp()} and ${ppValue(right)} of type ${rType.pp()} to same type`
+        );
     }
 
     private computeBinary(
@@ -1764,7 +1794,7 @@ export class Interpreter {
         if (sol.BINARY_OPERATOR_GROUPS.Equality.includes(operator)) {
             let isEqual: boolean;
 
-            [left, right] = this.coerceToSameType(left, lType, right, rType, state)
+            [left, right] = this.coerceToSameType(left, lType, right, rType, state);
 
             if (typeof left === "boolean" && typeof right === "boolean") {
                 isEqual = left === right;
@@ -1792,7 +1822,13 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Comparison.includes(operator)) {
-            let [sleft, sright]: [any, any] = this.coerceToSameType(left, lType, right, rType, state)
+            let [sleft, sright]: [any, any] = this.coerceToSameType(
+                left,
+                lType,
+                right,
+                rType,
+                state
+            );
 
             if (sleft instanceof Address && sright instanceof Address) {
                 sleft = sleft.toString();
