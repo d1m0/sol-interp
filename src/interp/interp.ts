@@ -1519,17 +1519,25 @@ export class Interpreter {
             return scratchWord.slice(32 - toType.numBytes);
         }
 
+        // ints to address
         if (typeof value === "bigint" && toType instanceof rtt.AddressType) {
             return new Address(setLengthLeft(bigIntToBytes(value), 20));
         }
 
-        if (
-            value instanceof View &&
-            value.type instanceof rtt.BytesType &&
-            toType instanceof rtt.FixedBytesType
-        ) {
+        // bytes memory literals to fixed bytes
+        if (value instanceof BytesMemView && toType instanceof rtt.FixedBytesType) {
             const t = decodeView(value, state) as Uint8Array;
             if (t.length !== toType.numBytes) {
+                return undefined;
+            }
+
+            return t;
+        }
+
+        // string memory literals to fixed bytes
+        if (value instanceof StringMemView && toType instanceof rtt.FixedBytesType) {
+            const t = decodeView(castStringToBytes(value), state) as Uint8Array;
+            if (t.length > toType.numBytes) {
                 return undefined;
             }
 
