@@ -107,6 +107,7 @@ import {
     getStateStorage,
     getThis,
     indexOfEnumOption,
+    indexView,
     int256,
     isBaseOf,
     isDirectlyAssignable,
@@ -1446,6 +1447,8 @@ export class Interpreter {
                 // @todo (dimo) do we zero-out elements when we truncate the length?
                 // @todo (dimo) support assinging to bytes.length
                 res = rtt.makeStorageView(rtt.uint256, [baseLV.key, baseLV.endOffsetInWord]);
+            } else if (baseLV instanceof rtt.BytesStorageView && expr.memberName === "length") {
+                res = new BytesStorageLength(baseLV);
             } else {
                 nyi(`evalLV(${printNode(expr)}): ${ppLValue(baseLV)}`);
             }
@@ -1468,13 +1471,21 @@ export class Interpreter {
         state: State
     ): PrimitiveValue | undefined {
         // fixed bytes -> bigger fixed bytes
-        if (value instanceof Uint8Array && toType instanceof rtt.FixedBytesType && value.length < toType.numBytes) {
-            return setLengthRight(value, toType.numBytes)
+        if (
+            value instanceof Uint8Array &&
+            toType instanceof rtt.FixedBytesType &&
+            value.length < toType.numBytes
+        ) {
+            return setLengthRight(value, toType.numBytes);
         }
 
         // fixed bytes -> smaller fixed bytes not allowed implicitly
-        if (value instanceof Uint8Array && toType instanceof rtt.FixedBytesType && value.length > toType.numBytes) {
-            return undefined
+        if (
+            value instanceof Uint8Array &&
+            toType instanceof rtt.FixedBytesType &&
+            value.length > toType.numBytes
+        ) {
+            return undefined;
         }
 
         // No Coercion
@@ -1571,6 +1582,39 @@ export class Interpreter {
         return res;
     }
 
+    /**
+     * We handle assignments to storage arrays separately as they are not as strictly typed, and may modify the length
+     * We implement them as a loop assigning each individual elements, which allows implicit coercions in the element type.
+     */
+    private assignToStorageArray(lvalue: rtt.ArrayStorageView, rvalue: Value, state: State): void {
+        this.expect(
+            rvalue instanceof View &&
+            isArrayLikeView(rvalue) &&
+            rvalue.type instanceof rtt.ArrayType
+        );
+        this.expect(lvalue.type.size === undefined || lvalue.type.size === rvalue.type.size);
+
+        const rvalueLen = length(rvalue, state);
+
+        // @todo dimo if we need to delete the previous contents we should do this here
+        if (lvalue.type.size === undefined) {
+            const lenView = new rtt.IntStorageView(rtt.uint256, [
+                lvalue.key,
+                lvalue.endOffsetInWord
+            ]);
+            setStateStorage(state, lenView.encode(rvalueLen, getStateStorage(state)));
+        }
+
+        for (let i = 0n; i < rvalueLen; i++) {
+            const stor = getStateStorage(state);
+            const elLV = lvalue.indexView(i, stor);
+            const elRV = this.lvToValue(indexView(rvalue, i, state), state);
+
+            this.expect(!(elLV instanceof Poison || elRV instanceof Poison));
+            this.assign(elLV, elRV, state);
+        }
+    }
+
     public assign(lvalue: LValue, rvalue: Value, state: State): void {
         // Handle tuple assignments first
         if (lvalue instanceof Array) {
@@ -1596,6 +1640,18 @@ export class Interpreter {
             isPrimitiveValue(rvalue),
             `Unexpected rvalue ${ppValue(rvalue)} in assignment to ${ppLValue(lvalue)}`
         );
+
+        // Special case - assignments to storage arrays are more permissive. The types of LValue and RValue
+        // don't have to exactly match both the array size, and the element type. The only requirements are:
+        //  - if LValue is a sized array then RValue must be a sized array of the same size
+        //  - the element type of RValue has to be coercible to the element type of LValue
+        if (
+            lvalue instanceof rtt.PointerStorageView &&
+            lvalue.type.toType instanceof rtt.ArrayType
+        ) {
+            this.assignToStorageArray(lvalue.toView() as rtt.ArrayStorageView, rvalue, state);
+            return;
+        }
 
         // Special case - assigning to bytes length in storage requires decoding and re-encoding
         // due to the compressed way length is handled in storage
@@ -2044,7 +2100,10 @@ export class Interpreter {
         if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.IntType) {
             this.expect(fromV instanceof Uint8Array, `Expected bytes`);
 
-            return bytesToIntOfType(fromV.slice(fromT.numBytes - toT.numBits / 8, fromT.numBytes), toT);
+            return bytesToIntOfType(
+                fromV.slice(fromT.numBytes - toT.numBits / 8, fromT.numBytes),
+                toT
+            );
         }
 
         // string ptr -> bytes
@@ -2796,7 +2855,10 @@ export class Interpreter {
 
         if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "super") {
             const contract = getCodeContract(state);
-            this.expect(contract.vLinearizedBaseContracts.length > 1, `Unexpected call to super() in contract with no bases`);
+            this.expect(
+                contract.vLinearizedBaseContracts.length > 1,
+                `Unexpected call to super() in contract with no bases`
+            );
             return new DefValue(contract.vLinearizedBaseContracts[1]);
         }
 
@@ -2809,8 +2871,14 @@ export class Interpreter {
             const contract = getCodeContract(state);
             let def: any = expr.vReferencedDeclaration;
 
-            def = (isMethod(def) && def.visibility !== sol.FunctionVisibility.External) ? sol.resolve(contract, def, this._infer) : def;
-            this.expect(def instanceof sol.FunctionDefinition, `Unexpected resolution of ${expr.name} to ${def}`)
+            def =
+                isMethod(def) && def.visibility !== sol.FunctionVisibility.External
+                    ? sol.resolve(contract, def, this._infer)
+                    : def;
+            this.expect(
+                def instanceof sol.FunctionDefinition,
+                `Unexpected resolution of ${expr.name} to ${def}`
+            );
 
             return new rtt.InternalFunRef(def);
         }
@@ -3089,6 +3157,10 @@ export class Interpreter {
 
         if (isArrayLikeView(baseVal) && expr.memberName === "length") {
             return length(baseVal, state);
+        }
+
+        if (baseVal instanceof Uint8Array && expr.memberName === "length") {
+            return BigInt(baseVal.length);
         }
 
         if (baseVal instanceof DefValue) {

@@ -682,12 +682,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -759,8 +759,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }
@@ -786,7 +786,10 @@ export function unwrapUnaryTypeTuples(t: BaseTypeValue): TypeValue {
     return t as TypeValue;
 }
 
-export function bytesToIntOfType(bytes: Uint8Array, type: rtt.IntType): bigint | rtt.DecodingFailure {
+export function bytesToIntOfType(
+    bytes: Uint8Array,
+    type: rtt.IntType
+): bigint | rtt.DecodingFailure {
     let res = rtt.bigEndianBufToBigint(bytes);
 
     // Convert signed negative 2's complement values
