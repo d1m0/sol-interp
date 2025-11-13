@@ -133,6 +133,8 @@ export function getContract(state: State): sol.ContractDefinition {
 /**
  * Get the `BytecodeInfo` and actual bytecode for the currently running context.
  * This handles delegate calls and distinguishing between bytecode and deployed bytecode
+ *
+ * Note: In a creation context this should not be called before we link the partialDeployedBytecode
  */
 export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     if (state.codeAccount) {
@@ -145,7 +147,7 @@ export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     sol.assert(info !== undefined, ``);
 
     return state.msg.to.equals(rtt.ZERO_ADDRESS)
-        ? [info.bytecode, state.account.bytecode]
+        ? [info.bytecode, state.partialDeployedBytecode as Uint8Array]
         : [info.deployedBytecode, state.account.deployedBytecode];
 }
 
