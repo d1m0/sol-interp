@@ -13,6 +13,7 @@ contract ImplicitStringLiteralFixedByteCasts {
         assert(b2 == hex"61");
         assert(b2 == b[0]);
         assert(b3 == "ab");
+        assert(b2 != "abc");
     }
 }
 
