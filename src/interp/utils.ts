@@ -682,12 +682,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-    Address,
-    Uint8Array | undefined,
-    bigint | undefined,
-    bigint | undefined,
-    Uint8Array | undefined
-] {
+        Address,
+        Uint8Array | undefined,
+        bigint | undefined,
+        bigint | undefined,
+        Uint8Array | undefined
+    ] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -759,8 +759,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-              ? "contract_deployment"
-              : "call";
+                ? "contract_deployment"
+                : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }
@@ -784,4 +784,22 @@ export function unwrapUnaryTypeTuples(t: BaseTypeValue): TypeValue {
     }
 
     return t as TypeValue;
+}
+
+export function bytesToIntOfType(bytes: Uint8Array, type: rtt.IntType): bigint | rtt.DecodingFailure {
+    let res = rtt.bigEndianBufToBigint(bytes);
+
+    // Convert signed negative 2's complement values
+    if (type.signed && (res & (BigInt(1) << BigInt(type.numBits - 1))) !== BigInt(0)) {
+        // Mask out any 1's above the number's size
+        res = res & ((BigInt(1) << BigInt(type.numBits)) - BigInt(1));
+        res = -((BigInt(1) << BigInt(type.numBits)) - res);
+    }
+
+    if (!rtt.fits(res, type)) {
+        return new rtt.DecodingFailure(
+            `Decoded value ${res} doesn't fit in expected type ${type.pp()}`
+        );
+    }
+    return res;
 }

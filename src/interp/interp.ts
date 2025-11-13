@@ -87,6 +87,7 @@ import {
 import {
     bytes32,
     bytesT,
+    bytesToIntOfType,
     cdBytesT,
     changeLocTo,
     clampIntToType,
@@ -2032,16 +2033,18 @@ export class Interpreter {
         // int -> fixed bytes
         if (fromT instanceof rtt.IntType && toT instanceof rtt.FixedBytesType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
-            this.expect(
-                fromT.numBits / 8 <= toT.numBytes,
-                `Unexpected cast from ${fromT.pp()} to ${toT.pp()}`
-            );
-
             scratchWord.fill(0);
             const view = new IntMemView(fromT, 0n);
             view.encode(fromV, scratchWord);
 
             return scratchWord.slice(32 - toT.numBytes, 32);
+        }
+
+        // fixed bytes -> int
+        if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.IntType) {
+            this.expect(fromV instanceof Uint8Array, `Expected bytes`);
+
+            return bytesToIntOfType(fromV.slice(fromT.numBytes - toT.numBits / 8, fromT.numBytes), toT);
         }
 
         // string ptr -> bytes
@@ -2085,11 +2088,13 @@ export class Interpreter {
             return bts;
         }
 
+        // int -> int
         if (fromT instanceof rtt.IntType && toT instanceof rtt.IntType) {
             this.expect(typeof fromV === "bigint");
             return clampIntToType(fromV, toT);
         }
 
+        // fixed bytes -> address
         if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.AddressType) {
             this.expect(fromV instanceof Uint8Array);
             const addr = new Uint8Array(20);
@@ -2098,6 +2103,7 @@ export class Interpreter {
             return new Address(addr);
         }
 
+        // address -> fixed bytes
         if (
             fromT instanceof rtt.AddressType &&
             toT instanceof rtt.FixedBytesType &&
@@ -2109,6 +2115,7 @@ export class Interpreter {
             return res;
         }
 
+        // int (literal) -> address
         if (fromT instanceof rtt.IntType && toT instanceof rtt.AddressType) {
             this.expect(typeof fromV === "bigint");
             const addr = new Uint8Array(20);
@@ -2116,6 +2123,7 @@ export class Interpreter {
             return new Address(addr);
         }
 
+        // library -> address
         if (
             fromT instanceof rtt.TypeType &&
             fromT.rawT instanceof sol.UserDefinedType &&
@@ -2126,6 +2134,7 @@ export class Interpreter {
             return getLibraryLinkedAddress(fromT.rawT.definition, state);
         }
 
+        // fixed bytes -> fixed bytes
         if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.FixedBytesType) {
             this.expect(fromV instanceof Uint8Array);
             if (fromT.numBytes < toT.numBytes) {
