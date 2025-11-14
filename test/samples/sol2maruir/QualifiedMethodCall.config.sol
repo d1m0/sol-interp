@@ -1,4 +1,4 @@
-pragma solidity 0.4.13;
+pragma solidity 0.4.24;
 
 contract A {
     function add(uint a, uint b) internal pure returns (uint256) {

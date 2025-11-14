@@ -154,6 +154,7 @@ export class BuiltinStruct extends BaseInterpValue {
 export class DefValue extends BaseInterpValue {
     constructor(
         public readonly def:
+            | sol.ImportDirective
             | sol.ContractDefinition
             | sol.SourceUnit
             | sol.FunctionDefinition
@@ -167,7 +168,12 @@ export class DefValue extends BaseInterpValue {
     }
 
     pp(): string {
-        const name = this.def instanceof sol.SourceUnit ? this.def.sourceEntryKey : this.def.name;
+        const name =
+            this.def instanceof sol.SourceUnit
+                ? this.def.sourceEntryKey
+                : this.def instanceof sol.ImportDirective
+                  ? this.def.unitAlias
+                  : this.def.name;
         return `<${this.def.constructor.name} ${name}>`;
     }
 }
@@ -284,6 +290,12 @@ export type NonPoisonValue =
     | BuiltinStruct
     | DefValue
     | Value[];
+
+// Values that represent possible external call targets. Must determine at least an address and a selector
+export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDescription;
+
+// Values that represent possible internal call targets. Currently just InteranalFunRef
+export type InternalCallTargetValue = InternalFunRef;
 
 export class BytesStorageLength {
     constructor(public readonly view: rtt.BytesStorageView) {}
@@ -416,4 +428,10 @@ export function match<T extends ValueTypeConstructors>(
     }
 
     nyi(`Type constructor ${typeConstructor}`);
+}
+
+export function isExternalCallTarget(v: any): v is ExternalCallTargetValue {
+    return (
+        v instanceof ExternalFunRef || v instanceof ExternalCallDescription || v instanceof NewCall
+    );
 }

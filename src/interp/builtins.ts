@@ -4,6 +4,8 @@ import {
     BuiltinFunction,
     BuiltinStruct,
     ExternalCallDescription,
+    ExternalCallTargetValue,
+    isExternalCallTarget,
     NewCall,
     none,
     TypeTuple,
@@ -595,15 +597,10 @@ export const valueBuiltin = new BuiltinFunction(
     "value",
     new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const [callable, value] = self.getArgs(2, state);
-        interp.expect(
-            callable instanceof rtt.ExternalFunRef ||
-                callable instanceof ExternalCallDescription ||
-                callable instanceof NewCall
-        );
-        interp.expect(typeof value === "bigint");
+        const [target, value] = self.getArgs(2, state);
+        interp.expect(isExternalCallTarget(target) && typeof value === "bigint");
 
-        const res: ExternalCallDescription = liftExtCalRef(callable);
+        const res: ExternalCallDescription = liftExtCalRef(target);
         res.value = value;
 
         return [res];
@@ -620,12 +617,7 @@ export const gasBuiltin = new BuiltinFunction(
     new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [callable, gas] = self.getArgs(2, state);
-        interp.expect(
-            callable instanceof rtt.ExternalFunRef ||
-                callable instanceof ExternalCallDescription ||
-                callable instanceof NewCall
-        );
-        interp.expect(typeof gas === "bigint");
+        interp.expect(isExternalCallTarget(callable) && typeof gas === "bigint");
 
         const res = liftExtCalRef(callable);
         res.gas = gas;
@@ -643,15 +635,10 @@ export const saltBuiltin = new BuiltinFunction(
     "salt",
     new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const [callable, salt] = self.getArgs(2, state);
-        interp.expect(
-            callable instanceof rtt.ExternalFunRef ||
-                callable instanceof ExternalCallDescription ||
-                callable instanceof NewCall
-        );
-        interp.expect(salt instanceof Uint8Array);
+        const [target, salt] = self.getArgs(2, state);
+        interp.expect(isExternalCallTarget(target) && salt instanceof Uint8Array);
 
-        const res = liftExtCalRef(callable);
+        const res = liftExtCalRef(target);
         res.salt = salt;
 
         return [res];
@@ -661,6 +648,73 @@ export const saltBuiltin = new BuiltinFunction(
     true,
     false,
     false
+);
+
+/**
+ * Get the selector for an external call target
+ */
+function getSelector(v: ExternalCallTargetValue): Uint8Array {
+    if (v instanceof rtt.ExternalFunRef) {
+        return v.selector;
+    }
+
+    if (v instanceof NewCall) {
+        return new Uint8Array();
+    }
+
+    sol.assert(!(v.target instanceof Address), `Can't take selector of low-level call`);
+    return getSelector(v.target);
+}
+
+/**
+ * Get the address of an external call target
+ */
+function getAddress(v: ExternalCallTargetValue): Address {
+    if (v instanceof rtt.ExternalFunRef) {
+        return v.address;
+    }
+
+    if (v instanceof NewCall) {
+        return rtt.ZERO_ADDRESS;
+    }
+
+    if (v.target instanceof Address) {
+        return v.target;
+    }
+
+    return getAddress(v.target);
+}
+
+const selectorBuiltin = new BuiltinFunction(
+    "selector",
+    new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [rtt.bytes4]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [target] = self.getArgs(1, state);
+        interp.expect(isExternalCallTarget(target));
+
+        return [getSelector(target)];
+    },
+    [],
+    [],
+    true,
+    true,
+    true
+);
+
+const addressBuiltin = new BuiltinFunction(
+    "address",
+    new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [addressT]),
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
+        const [target] = self.getArgs(1, state);
+        interp.expect(isExternalCallTarget(target));
+
+        return [getAddress(target)];
+    },
+    [],
+    [],
+    true,
+    true,
+    true
 );
 
 // Msg struct builtins
@@ -725,7 +779,13 @@ export const EXTERNAL_CALL_CALLABLE_FIELDS_NAME = "<external call callable field
 
 const externalCallCallableFieldsDesc: BuiltinDescriptor = [
     EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
-    [[[valueBuiltin, "<=0.7.0"]], [[gasBuiltin, "<=0.7.0"]], [[saltBuiltin, "<=0.7.0"]]]
+    [
+        [[valueBuiltin, "<=0.7.0"]],
+        [[gasBuiltin, "<=0.7.0"]],
+        [[saltBuiltin, "<=0.7.0"]],
+        [[selectorBuiltin, ">=0.4.13"]],
+        [[addressBuiltin, ">=0.4.13"]]
+    ]
 ];
 
 export const ADDRESS_BUILTIN_STRUCT_NAME = "<address builtins>";

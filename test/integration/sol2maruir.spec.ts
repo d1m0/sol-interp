@@ -13,7 +13,8 @@ const libDependencies = new Map<string, string[]>([
     ["LibToLibCall.config.sol", ["Test"]],
     ["LibraryThis.config.sol", ["GetThis"]],
     ["PublicGetterSelectorAccess.config.sol", ["BytesLib"]],
-    ["EncodingWithSelectorOrSignature.config.sol", ["BytesLib"]]
+    ["EncodingWithSelectorOrSignature.config.sol", ["BytesLib"]],
+    ["SelectorTest062.config.sol", ["TestLibrary"]]
 ]);
 
 /**

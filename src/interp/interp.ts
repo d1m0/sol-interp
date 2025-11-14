@@ -53,6 +53,8 @@ import {
     BytesStorageLength,
     DefValue,
     ExternalCallDescription,
+    ExternalCallTargetValue,
+    InternalCallTargetValue,
     isPrimitiveValue,
     LValue,
     match,
@@ -895,12 +897,11 @@ export class Interpreter {
     }
 
     private execTryStatement(stmt: sol.TryStatement, state: State): ControlFlow {
-        const callee = this.evalNP(stmt.vExternalCall.vExpression, state);
-        this.expect(
-            callee instanceof NewCall ||
-                callee instanceof rtt.ExternalFunRef ||
-                callee instanceof ExternalCallDescription
+        const callee = this.coerceToExternallyCallable(
+            this.evalNP(stmt.vExternalCall.vExpression, state),
+            state
         );
+        this.expect(callee !== undefined);
         const res = this._evalMsgCall(stmt.vExternalCall, liftExtCalRef(callee), state);
 
         const actualCallee = callee instanceof ExternalCallDescription ? callee.target : callee;
@@ -1464,6 +1465,49 @@ export class Interpreter {
         this.nodes.pop();
 
         return res;
+    }
+
+    private coerceToInternallyCallable(v: Value): InternalCallTargetValue | undefined {
+        if (v instanceof rtt.InternalFunRef) {
+            return v;
+        }
+
+        if (v instanceof DefValue && v.def instanceof sol.FunctionDefinition) {
+            return new rtt.InternalFunRef(v.def);
+        }
+
+        return undefined;
+    }
+
+    private coerceToExternallyCallable(
+        v: Value,
+        state: State
+    ): ExternalCallTargetValue | undefined {
+        if (
+            v instanceof rtt.ExternalFunRef ||
+            v instanceof ExternalCallDescription ||
+            v instanceof NewCall
+        ) {
+            return v;
+        }
+
+        if (
+            v instanceof DefValue &&
+            v.def instanceof sol.FunctionDefinition &&
+            (v.def.visibility === sol.FunctionVisibility.External ||
+                v.def.visibility === sol.FunctionVisibility.Public) &&
+            v.def.vScope instanceof sol.ContractDefinition &&
+            v.def.vScope.kind === sol.ContractKind.Library
+        ) {
+            const addr = getLibraryLinkedAddress(v.def.vScope, state);
+
+            if (addr) {
+                const selector = hexToBytes(`0x${this._infer.signatureHash(v.def)}`);
+                return new rtt.ExternalFunRef(addr, selector);
+            }
+        }
+
+        return undefined;
     }
 
     private implicitCoercionImpl(
@@ -2201,7 +2245,12 @@ export class Interpreter {
             fromT.rawT.definition.kind === sol.ContractKind.Library &&
             toT instanceof rtt.AddressType
         ) {
-            return getLibraryLinkedAddress(fromT.rawT.definition, state);
+            const addr = getLibraryLinkedAddress(fromT.rawT.definition, state);
+            this.expect(
+                addr !== undefined,
+                `Missing link reference for library ${fromT.rawT.definition.name}`
+            );
+            return addr;
         }
 
         // fixed bytes -> fixed bytes
@@ -2850,17 +2899,15 @@ export class Interpreter {
         }
 
         // External calls
-        if (callee instanceof rtt.ExternalFunRef || callee instanceof ExternalCallDescription) {
-            return this.evalExternalCall(expr, liftExtCalRef(callee), state);
+        const extCallee = this.coerceToExternallyCallable(callee, state);
+        if (extCallee !== undefined) {
+            return this.evalExternalCall(expr, liftExtCalRef(extCallee), state);
         }
 
         // Internal calls
-        if (callee instanceof rtt.InternalFunRef) {
-            return this.evalInternalCall(expr, callee, state);
-        }
-
-        console.error(callee);
-        nyi(`Call to ${ppValue(callee)} ${callee.constructor.name}`);
+        const intCallee = this.coerceToInternallyCallable(callee);
+        this.expect(intCallee !== undefined, `Unknown callee ${ppValue(callee)}`);
+        return this.evalInternalCall(expr, intCallee, state);
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
@@ -3100,7 +3147,7 @@ export class Interpreter {
         let baseVal = this.evalNP(expr.vExpression, state);
 
         if (baseVal instanceof Address) {
-            // Builtin
+            // Builtin field of address
             if (expr.vReferencedDeclaration === undefined) {
                 const addressBuiltinStruct = this.getBuiltinStruct(
                     state,
@@ -3113,38 +3160,32 @@ export class Interpreter {
                 return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
             }
 
-            const solT = this._infer.typeOf(expr.vExpression);
+            const def = expr.vReferencedDeclaration;
 
+            // Reference to an external function or public state var on a contract
             if (
-                solT instanceof sol.UserDefinedType &&
-                solT.definition instanceof sol.ContractDefinition
+                def instanceof sol.FunctionDefinition ||
+                (def instanceof sol.VariableDeclaration &&
+                    def.visibility === sol.StateVariableVisibility.Public)
             ) {
-                const def = expr.vReferencedDeclaration;
-                if (
-                    def instanceof sol.FunctionDefinition ||
-                    (def instanceof sol.VariableDeclaration &&
-                        def.visibility === sol.StateVariableVisibility.Public)
-                ) {
-                    const selector = hexToBytes(`0x${this._infer.signatureHash(def)}`);
+                const selector = hexToBytes(`0x${this._infer.signatureHash(def)}`);
 
-                    return new rtt.ExternalFunRef(baseVal, selector);
-                }
+                return new rtt.ExternalFunRef(baseVal, selector);
             }
         }
 
-        if (
-            baseVal instanceof rtt.ExternalFunRef ||
-            baseVal instanceof ExternalCallDescription ||
-            baseVal instanceof NewCall
-        ) {
+        // Check if this is a reference to an external callable builtin (e.g. .value(), .gas(), ...)
+        const extCallableV = this.coerceToExternallyCallable(baseVal, state);
+        if (extCallableV !== undefined) {
             const externalCallableBuiltinStruct = this.getBuiltinStruct(
                 state,
                 EXTERNAL_CALL_CALLABLE_FIELDS_NAME
             );
             const res = externalCallableBuiltinStruct.getField(expr.memberName);
-            this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
 
-            return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
+            if (res) {
+                return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
+            }
         }
 
         if (isPointerView(baseVal)) {
@@ -3179,72 +3220,48 @@ export class Interpreter {
         }
 
         if (baseVal instanceof DefValue) {
+            // Handle Event/Error/Function definition selectors
             if (
                 (baseVal.def instanceof sol.EventDefinition ||
-                    baseVal.def instanceof sol.ErrorDefinition) &&
+                    baseVal.def instanceof sol.ErrorDefinition ||
+                    baseVal.def instanceof sol.FunctionDefinition) &&
                 expr.memberName === "selector"
             ) {
                 return hexToBytes(`0x${this._infer.signatureHash(baseVal.def)}`);
             }
 
+            // EnumDef.Option -> the number of the option
             if (baseVal.def instanceof sol.EnumDefinition) {
                 const res = indexOfEnumOption(baseVal.def, expr.memberName);
                 this.expect(res !== undefined);
                 return BigInt(res);
             }
 
-            // Lib.Fun where Fun is external is an external fun ref
-            if (
-                baseVal.def instanceof sol.ContractDefinition &&
-                baseVal.def.kind === sol.ContractKind.Library &&
-                expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
-                (expr.vReferencedDeclaration.visibility === sol.FunctionVisibility.External ||
-                    expr.vReferencedDeclaration.visibility === sol.FunctionVisibility.Public)
-            ) {
-                const addr = getLibraryLinkedAddress(baseVal.def, state);
-                const selector = hexToBytes(
-                    `0x${this._infer.signatureHash(expr.vReferencedDeclaration)}`
-                );
-                return new rtt.ExternalFunRef(addr, selector);
-            }
-
-            // Contract.Fun where Fun is NOT external is an internal fun ref
-            if (
-                baseVal.def instanceof sol.ContractDefinition &&
-                expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
-                expr.vReferencedDeclaration.visibility !== sol.FunctionVisibility.External
-            ) {
-                return new rtt.InternalFunRef(expr.vReferencedDeclaration);
-            }
-
-            // BaseContract.stateVariable
-            if (
-                baseVal.def instanceof sol.SourceUnit ||
-                (baseVal.def instanceof sol.ContractDefinition &&
-                    isBaseOf(baseVal.def, getCodeContract(state)))
-            ) {
-                const scope = this.makeStaticScope(baseVal.def, state);
-                const res = scope.lookup(expr.memberName);
-                this.expect(
-                    res !== undefined,
-                    `Couldnt find ${expr.memberName} in ${ppValue(baseVal)}`
-                );
-
-                return res;
-            }
-
             // - source unit definitions/constants
             // - contract constants. We need to tweak how we built scope here
-            if (
-                baseVal.def instanceof sol.SourceUnit ||
-                (baseVal.def instanceof sol.ContractDefinition &&
-                    expr.vReferencedDeclaration instanceof sol.VariableDeclaration &&
-                    expr.vReferencedDeclaration.mutability === sol.Mutability.Constant)
-            ) {
-                const scope =
-                    baseVal.def instanceof sol.SourceUnit
-                        ? new GlobalScope(baseVal.def, state, this._infer, undefined)
-                        : new ContractScope(baseVal.def, this._infer, state, undefined);
+            // - base state vars called with the base notation Base.Var
+            if (expr.vReferencedDeclaration instanceof sol.VariableDeclaration) {
+                let scope: BaseScope;
+
+                if (expr.vReferencedDeclaration.mutability === sol.Mutability.Constant) {
+                    // Contract or Global scope constant vars
+                    this.expect(
+                        baseVal.def instanceof sol.SourceUnit ||
+                            baseVal.def instanceof sol.ContractDefinition
+                    );
+                    scope =
+                        baseVal.def instanceof sol.SourceUnit
+                            ? new GlobalScope(baseVal.def, state, this._infer, undefined)
+                            : new ContractScope(baseVal.def, this._infer, state, undefined);
+                } else {
+                    // Base contract state var
+                    this.expect(
+                        baseVal.def instanceof sol.ContractDefinition &&
+                            isBaseOf(baseVal.def, getCodeContract(state))
+                    );
+                    scope = this.makeStaticScope(baseVal.def, state);
+                }
+
                 const res = scope.lookup(expr.memberName);
                 this.expect(
                     res !== undefined,
@@ -3252,10 +3269,6 @@ export class Interpreter {
                 );
 
                 return res;
-            }
-
-            if (expr.vReferencedDeclaration instanceof sol.EnumDefinition) {
-                return new DefValue(expr.vReferencedDeclaration);
             }
         }
 
@@ -3265,6 +3278,20 @@ export class Interpreter {
         ) {
             const res = expr.memberName === "push" ? pushBuiltin : popBuiltin;
             return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
+        }
+
+        if (
+            expr.vReferencedDeclaration instanceof sol.ImportDirective ||
+            expr.vReferencedDeclaration instanceof sol.SourceUnit ||
+            expr.vReferencedDeclaration instanceof sol.ContractDefinition ||
+            expr.vReferencedDeclaration instanceof sol.FunctionDefinition ||
+            expr.vReferencedDeclaration instanceof sol.EventDefinition ||
+            expr.vReferencedDeclaration instanceof sol.EnumDefinition ||
+            expr.vReferencedDeclaration instanceof sol.ErrorDefinition ||
+            expr.vReferencedDeclaration instanceof sol.StructDefinition ||
+            expr.vReferencedDeclaration instanceof sol.UserDefinedValueTypeDefinition
+        ) {
+            return new DefValue(expr.vReferencedDeclaration);
         }
 
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);

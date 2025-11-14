@@ -131,10 +131,8 @@ export function getContract(state: State): sol.ContractDefinition {
 }
 
 /**
- * Get the `BytecodeInfo` and actual bytecode for the currently running context.
- * This handles delegate calls and distinguishing between bytecode and deployed bytecode
- *
- * Note: In a creation context this should not be called before we link the partialDeployedBytecode
+ * Get the `BytecodeInfo` and actual running bytecode for the currently context.
+ * This handles delegate calls, contract constructors (bytecode) and normal execution (deployed bytecode)
  */
 export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     if (state.codeAccount) {
@@ -146,27 +144,28 @@ export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     const info = state.account.contract;
     sol.assert(info !== undefined, ``);
 
-    return state.msg.to.equals(rtt.ZERO_ADDRESS)
-        ? [info.bytecode, state.partialDeployedBytecode as Uint8Array]
-        : [info.deployedBytecode, state.account.deployedBytecode];
+    if (state.msg.to.equals(rtt.ZERO_ADDRESS)) {
+        const creationBytecode = getMsg(state).slice(0, info.bytecode.bytecode.length);
+        return [info.bytecode, creationBytecode];
+    }
+
+    return [info.deployedBytecode, state.account.deployedBytecode];
 }
 
 /**
  * Given a library `ContractDefinition` and the current `State` get the linked address
  * for that library.
  */
-export function getLibraryLinkedAddress(lib: sol.ContractDefinition, state: State): Address {
+export function getLibraryLinkedAddress(
+    lib: sol.ContractDefinition,
+    state: State
+): Address | undefined {
     sol.assert(lib.kind === sol.ContractKind.Library, ``);
     const libId = `${lib.vScope.sourceEntryKey}:${lib.name}`;
     const [bytecodeInfo, bytecode] = getBytecodeInfo(state);
-    const ranges = bytecodeInfo.linkReferences.get(libId);
-
-    sol.assert(ranges !== undefined && ranges.length > 0, `Ranges missing for ${libId}: ${ranges}`);
-
     const linkMap = decodeLinkMap(bytecodeInfo, bytecode);
     const addr = linkMap.get(libId);
 
-    sol.assert(addr !== undefined, `No linked address found for ${libId}`);
     return addr;
 }
 
