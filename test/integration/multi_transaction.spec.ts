@@ -413,6 +413,52 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 }
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/modify_return_in_modifier_invocation.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                },
+                value: 111n
+            }
+        ]
+    ],
+    [
+        "test/samples/multi_transaction/modify_args_and_state_in_base_constructor_invocation.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Foo",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Foo",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                },
+                value: 111n
+            }
+        ]
     ]
 ];
 

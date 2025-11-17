@@ -270,10 +270,15 @@ export class Interpreter {
 
     ///*********************EXTERNAL FUNCTION CALLS************************************
     private getCalldataArgsAndTypes(
-        entryPoint: sol.FunctionDefinition | sol.VariableDeclaration,
+        entryPoint: sol.FunctionDefinition | sol.VariableDeclaration | undefined,
         data: Uint8Array,
         base?: bigint
     ): [PrimitiveValue[], BaseInterpType[]] {
+        // entryPoint is undefined when we are missing a constructor
+        if (entryPoint === undefined) {
+            return [[], []];
+        }
+
         const contract = entryPoint.vScope;
         this.expect(contract instanceof sol.ContractDefinition);
 
@@ -386,6 +391,12 @@ export class Interpreter {
         );
 
         try {
+            const [calldataArgs, calldataArgTs] = this.getCalldataArgsAndTypes(
+                mdc.ast.vConstructor,
+                msg.data,
+                BigInt(mdc.bytecode.bytecode.length)
+            );
+
             // As per:
             // https://docs.soliditylang.org/en/v0.8.30/ir-breaking-changes.html#semantic-only-changes
             // Contract initialization proceeds by:
@@ -401,16 +412,12 @@ export class Interpreter {
                 }
 
                 // 3. Evaluate base constructor arguments from most derived to most base contract.
-                const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
-
-                if (mdc.ast.vConstructor) {
-                    const [calldataArgs, argTs] = this.getCalldataArgsAndTypes(
-                        mdc.ast.vConstructor,
-                        msg.data,
-                        BigInt(mdc.bytecode.bytecode.length)
-                    );
-                    baseArgMap.set(mdc.ast.vConstructor, [calldataArgs, argTs]);
-                }
+                const constrScopeMap = this.evalBaseConstructorArgs(
+                    mdc.ast,
+                    calldataArgs,
+                    calldataArgTs,
+                    state
+                );
 
                 // 4. Run the constructor, if present, for all contracts in the linearized hierarchy from most base to most derived.
                 for (const base of bases) {
@@ -419,10 +426,12 @@ export class Interpreter {
                     }
 
                     this.nodes.push(base.vConstructor);
-                    const argDesc = baseArgMap.get(base.vConstructor);
-                    this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
-                    const [args, argTs] = argDesc;
-                    this._execCall(base.vConstructor, args, argTs, state);
+                    const constrScope = constrScopeMap.get(base.vConstructor);
+                    this.expect(
+                        constrScope !== undefined,
+                        `Missing constructor scope for ${base.name}`
+                    );
+                    this._execCallInt(base.vConstructor, constrScope, state);
                     this.nodes.pop();
                 }
             } else {
@@ -430,7 +439,12 @@ export class Interpreter {
                 //
                 // 1. All state variables are zero-initialized at the beginning.
                 // 2. Evaluate base constructor arguments from most derived to most base contract.
-                const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
+                const constrScopeMap = this.evalBaseConstructorArgs(
+                    mdc.ast,
+                    calldataArgs,
+                    calldataArgTs,
+                    state
+                );
 
                 // 3. For every contract in order from most base to most derived in the linearized hierarchy:
                 for (const base of bases) {
@@ -445,10 +459,12 @@ export class Interpreter {
                     }
 
                     this.nodes.push(base.vConstructor);
-                    const argDesc = baseArgMap.get(base.vConstructor);
-                    this.expect(argDesc !== undefined, `Missing constructor args for ${base.name}`);
-                    const [args, argTs] = argDesc;
-                    this._execCall(base.vConstructor, args, argTs, state);
+                    const constrScope = constrScopeMap.get(base.vConstructor);
+                    this.expect(
+                        constrScope !== undefined,
+                        `Missing constructor scope for ${base.name}`
+                    );
+                    this._execCallInt(base.vConstructor, constrScope, state);
                     this.nodes.pop();
                 }
             }
@@ -608,20 +624,26 @@ export class Interpreter {
      *  - Inheirtance speicifiers are evaluated in the containing source unit scope
      *  - Constructor modifiers are evaluated in the conrtact scope
      * @param mdc
-     * @param s
+     * @param state
      */
     private evalBaseConstructorArgs(
         mdc: sol.ContractDefinition,
-        s: State
-    ): Map<sol.FunctionDefinition, [Value[], BaseInterpType[]]> {
-        const res = new Map<sol.FunctionDefinition, [Value[], BaseInterpType[]]>();
-        const oldScope = s.scope;
+        rootArgs: Value[],
+        rootArgTs: BaseInterpType[],
+        state: State
+    ): Map<sol.FunctionDefinition, BaseScope> {
+        const res = new Map<sol.FunctionDefinition, BaseScope>();
+        const oldScope = state.scope;
+
+        if (mdc.vConstructor) {
+            res.set(mdc.vConstructor, this.makeScope(mdc.vConstructor, rootArgs, rootArgTs, state));
+        }
 
         for (const base of mdc.vLinearizedBaseContracts) {
-            const curBaseArgs = new Map<sol.FunctionDefinition, [Value[], BaseInterpType[]]>();
+            const curBaseArgs = new Map<sol.FunctionDefinition, BaseScope>();
 
             for (const inhSpec of base.vInheritanceSpecifiers) {
-                s.scope = this.makeStaticScope(base.vScope, s);
+                state.scope = this.makeStaticScope(base.vScope, state);
                 const baseContract = inhSpec.vBaseType.vReferencedDeclaration;
                 this.expect(baseContract instanceof sol.ContractDefinition);
 
@@ -639,15 +661,26 @@ export class Interpreter {
                 const argTs: BaseInterpType[] = [];
 
                 for (let i = 0; i < inhSpec.vArguments.length; i++) {
-                    args.push(this.eval(inhSpec.vArguments[i], s));
+                    args.push(this.eval(inhSpec.vArguments[i], state));
                     argTs.push(this.typeOf(inhSpec.vArguments[i]));
                 }
 
-                curBaseArgs.set(baseContract.vConstructor, [args, argTs]);
+                // The inheritance specifier may omit args, and instead they can be given by the modifier invocation on the constructor
+                if (
+                    args.length === 0 &&
+                    baseContract.vConstructor.vParameters.vParameters.length > 0
+                ) {
+                    continue;
+                }
+
+                curBaseArgs.set(
+                    baseContract.vConstructor,
+                    this.makeScope(baseContract.vConstructor, args, argTs, state)
+                );
             }
 
             if (base.vConstructor) {
-                s.scope = this.makeStaticScope(base.vConstructor, s);
+                const callerScope = res.get(base.vConstructor);
 
                 for (const mod of base.vConstructor.vModifiers) {
                     if (
@@ -660,8 +693,6 @@ export class Interpreter {
                     }
 
                     const constr = mod.vModifier.vConstructor;
-                    const args: Value[] = [];
-                    const argTs: BaseInterpType[] = [];
 
                     // In solidity <0.5.0 you could specify arguments for the same base multiple times.
                     // Only the first one in the C3-linearization order counts.
@@ -669,12 +700,17 @@ export class Interpreter {
                         continue;
                     }
 
+                    state.scope = callerScope;
+
+                    const args: Value[] = [];
+                    const argTs: BaseInterpType[] = [];
+
                     for (let i = 0; i < mod.vArguments.length; i++) {
-                        args.push(this.eval(mod.vArguments[i], s));
+                        args.push(this.eval(mod.vArguments[i], state));
                         argTs.push(this.typeOf(mod.vArguments[i]));
                     }
 
-                    curBaseArgs.set(constr, [args, argTs]);
+                    curBaseArgs.set(constr, this.makeScope(constr, args, argTs, state));
                 }
             }
 
@@ -683,7 +719,7 @@ export class Interpreter {
             }
         }
 
-        s.scope = oldScope;
+        state.scope = oldScope;
         return res;
     }
 
@@ -2644,11 +2680,7 @@ export class Interpreter {
     }
 
     /**
-     * Internal call logic. Reused for both internal calls and modifiers. Its responsible for
-     * pushing/popping internal stack frames and correctly setting the callee lexical scope and
-     * restoring the caller scope
-     *
-     * When target is `sol.FunctionDefinition` return the `Value[]`s returned by the function. For modifiers returns [].
+     * Wrapper around _execCall that just creates the scope for the callee context
      */
     _execCall(
         target: sol.FunctionDefinition | sol.ModifierInvocation | BuiltinFunction,
@@ -2656,9 +2688,6 @@ export class Interpreter {
         argTs: BaseInterpType[],
         state: State
     ): Value[] {
-        // Save scope
-        const savedScope = state.scope;
-        let savedCurModifier: sol.ModifierInvocation | undefined;
         let callee: sol.FunctionDefinition | sol.ModifierDefinition | BuiltinFunction;
 
         if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
@@ -2667,7 +2696,27 @@ export class Interpreter {
             callee = target.vModifier as sol.ModifierDefinition;
         }
 
-        state.scope = this.makeScope(callee, args, argTs, state);
+        const scope = this.makeScope(callee, args, argTs, state);
+        return this._execCallInt(target, scope, state);
+    }
+
+    /**
+     * Internal call logic. Reused for both internal calls and modifiers. Its responsible for
+     * pushing/popping internal stack frames and correctly setting the callee lexical scope and
+     * restoring the caller scope
+     *
+     * When target is `sol.FunctionDefinition` return the `Value[]`s returned by the function. For modifiers returns [].
+     */
+    _execCallInt(
+        target: sol.FunctionDefinition | sol.ModifierInvocation | BuiltinFunction,
+        calleeScope: BaseScope,
+        state: State
+    ): Value[] {
+        // Save scope
+        const savedScope = state.scope;
+        let savedCurModifier: sol.ModifierInvocation | undefined;
+
+        state.scope = calleeScope;
         this.nodes.push(target);
 
         if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
