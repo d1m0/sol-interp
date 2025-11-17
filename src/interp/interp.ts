@@ -150,7 +150,7 @@ import {
 } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
-import { astToRuntimeType, BaseInterpType } from "./types";
+import { AnyType, astToRuntimeType, BaseInterpType } from "./types";
 import { InterpVisitor } from "./visitors";
 import { castStringToBytes, decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 
@@ -1383,6 +1383,10 @@ export class Interpreter {
         const res = this.eval(expr, state);
 
         if (res instanceof Poison) {
+            if (res instanceof DecodingFailure) {
+                this.fail(NoPayloadError, `DecodingFailure`, expr);
+            }
+
             this.fail(InternalError, `Got poison`, expr);
         }
 
@@ -1553,6 +1557,10 @@ export class Interpreter {
         toType: rtt.BaseRuntimeType,
         state: State
     ): PrimitiveValue | undefined {
+        if (toType instanceof AnyType) {
+            return value;
+        }
+
         // fixed bytes -> bigger fixed bytes
         if (
             value instanceof Uint8Array &&
@@ -3137,7 +3145,9 @@ export class Interpreter {
             const v = sol.evalLiteral(expr);
             this.expect(typeof v === "bigint", ``);
             // This is hack to match the behavior of InferType.typeOf() for certain hex literals.
-            return expr.typeString.startsWith("address") ? new Address(bigIntToBytes(v)) : v;
+            return expr.typeString.startsWith("address")
+                ? new Address(setLengthLeft(bigIntToBytes(v), 20))
+                : v;
         }
 
         if (expr.kind === sol.LiteralKind.Bool) {

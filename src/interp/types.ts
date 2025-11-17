@@ -14,12 +14,15 @@ export class TypeType extends rtt.BaseRuntimeType {
     }
 }
 
-export class FunRefType extends rtt.BaseRuntimeType {
-    constructor(public funT: sol.FunctionType) {
+/**
+ * Internal-only type hack to pass certain values without coercion to builtins
+ */
+export class AnyType extends rtt.BaseRuntimeType {
+    constructor() {
         super();
     }
     pp(): string {
-        return `<fun ref of type ${this.funT.pp()}>`;
+        return `<any>`;
     }
 }
 
@@ -148,6 +151,12 @@ export function astToRuntimeType(
             rawT.mutability,
             retTs
         );
+    }
+
+    // Sometimes builtins can end up as implicit first args (e.g. (addr).call.gas(...))
+    // Since those are not actually used/checked, just use a dummy type
+    if (rawT instanceof sol.BuiltinFunctionType) {
+        return new AnyType();
     }
 
     return rtt.astToRuntimeType(rawT, infer, loc);

@@ -206,7 +206,7 @@ export class Runner {
                 to,
                 data,
                 gas: 0n,
-                value: 0n,
+                value: 1000n,
                 salt: undefined,
                 isStaticCall: false
             },
