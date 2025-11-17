@@ -1,6 +1,6 @@
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { BuiltinFunction, DefValue, Value } from "./value";
+import { BuiltinFunction, BuiltinStruct, DefValue, Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -13,8 +13,9 @@ import {
 } from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
-import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView } from "./view";
+import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
 import { defT, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
+import { astToRuntimeType, BaseInterpType } from "./types";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -87,7 +88,75 @@ export abstract class BaseScope {
     }
 }
 
-export type LocalsScopeNodeType =
+/**
+ * Base class for a Scope that stores data locally. Could be either Solidity stack locals (function args, returns, locals) or
+ * interpreter specific temporaries.
+ */
+abstract class BaseLocalsScope extends BaseScope {
+    protected defs = new Map<string, Value>();
+    protected readonly views: Array<BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>>;
+    protected readonly viewsMap: Map<string, BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>>;
+
+    constructor(
+        name: string,
+        defTypesMap: Map<string, rtt.BaseRuntimeType>,
+        state: State,
+        _next: BaseScope | undefined
+    ) {
+        super(name, defTypesMap, state, _next);
+
+        this.views = [...defTypesMap.entries()].map(([name, type]) =>
+            this.makeLocalView(name, type)
+        );
+        this.viewsMap = new Map(this.views.map((t) => [t.name, t]));
+    }
+
+    _lookup(name: string): Value | undefined {
+        return this.defs.get(name);
+    }
+
+    private makeLocalView(
+        name: string,
+        t: rtt.BaseRuntimeType
+    ): BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType> {
+        if (t instanceof rtt.PointerType) {
+            return new PointerLocalView(t, [this, name]);
+        }
+
+        if (t instanceof rtt.FixedBytesType) {
+            return new ArrayLikeLocalView(t, [this, name]);
+        }
+
+        return new PrimitiveLocalView(t, [this, name]);
+    }
+
+    _lookupLocation(name: string): View | undefined {
+        return this.viewsMap.get(name);
+    }
+
+    _set(name: string, val: Value): void {
+        this.defs.set(name, val);
+    }
+}
+
+export class TempsScope extends BaseLocalsScope {
+    constructor(tempTs: BaseInterpType[], state: State, next: BaseScope | undefined) {
+        const knownIds = new Map<string, rtt.BaseRuntimeType>(
+            tempTs.map((t, i) => [`<temp_${i}>`, t])
+        );
+        super(`<temp scope>`, knownIds, state, next);
+    }
+
+    get temps(): Array<BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>> {
+        return this.views;
+    }
+
+    get tempVals(): Value[] {
+        return this.temps.map((t) => this.defs.get(t.name) as Value);
+    }
+}
+
+type LocalsScopeNodeType =
     | sol.UncheckedBlock
     | sol.Block
     | sol.UncheckedBlock
@@ -103,113 +172,7 @@ export type LocalsScopeNodeType =
  * The relationship is fixed at construction, since we store a reference to the
  * underlying map. So if we push more scopes
  */
-export class LocalsScope extends BaseScope {
-    protected readonly defs: Map<string, Value>;
-
-    public static returnName(decl: sol.VariableDeclaration, idx: number): string {
-        return decl.name === "" ? `<ret_${idx}>` : decl.name;
-    }
-
-    private static detectIds(
-        node: LocalsScopeNodeType,
-        version: string
-    ): Map<string, rtt.BaseRuntimeType> {
-        const infer = new sol.InferType(version);
-        const res = new Map<string, rtt.BaseRuntimeType>();
-
-        if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
-            if (lt(version, "0.5.0")) {
-                // In Solidity 0.4.x all state vars have block-wide scope
-                for (const stmt of node.vStatements) {
-                    if (stmt instanceof sol.VariableDeclarationStatement) {
-                        for (const decl of stmt.vDeclarations) {
-                            res.set(
-                                decl.name,
-                                rtt.astToRuntimeType(
-                                    infer.variableDeclarationToTypeNode(decl),
-                                    infer,
-                                    sol.DataLocation.Memory
-                                )
-                            );
-                        }
-                    }
-                }
-            } else {
-                // Nothing to do
-            }
-        } else if (node instanceof sol.VariableDeclarationStatement) {
-            if (lt(version, "0.5.0") && !(node.parent instanceof sol.ForStatement)) {
-                // Nothing to do
-            } else {
-                // In solidity >= 0.5.0 each local variable has a scope starting at its declaration
-                // Also if this is the initialization stmt of a for loop, its its own scope
-                for (const decl of node.vDeclarations) {
-                    res.set(
-                        decl.name,
-                        rtt.astToRuntimeType(
-                            infer.variableDeclarationToTypeNode(decl),
-                            infer,
-                            sol.DataLocation.Memory
-                        )
-                    );
-                }
-            }
-        } else if (node instanceof sol.FunctionDefinition) {
-            for (const decl of node.vParameters.vParameters) {
-                res.set(
-                    decl.name,
-                    rtt.astToRuntimeType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        infer,
-                        undefined
-                    )
-                );
-            }
-
-            for (let i = 0; i < node.vReturnParameters.vParameters.length; i++) {
-                const decl = node.vReturnParameters.vParameters[i];
-                res.set(
-                    LocalsScope.returnName(decl, i),
-                    rtt.astToRuntimeType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        infer,
-                        undefined
-                    )
-                );
-            }
-        } else if (node instanceof sol.ModifierDefinition) {
-            for (const decl of node.vParameters.vParameters) {
-                res.set(
-                    decl.name,
-                    rtt.astToRuntimeType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        infer,
-                        undefined
-                    )
-                );
-            }
-        } else if (node instanceof sol.TryCatchClause) {
-            if (node.vParameters) {
-                for (const decl of node.vParameters.vParameters) {
-                    res.set(
-                        decl.name,
-                        rtt.astToRuntimeType(
-                            infer.variableDeclarationToTypeNode(decl),
-                            infer,
-                            undefined
-                        )
-                    );
-                }
-            }
-        } else {
-            for (let i = 0; i < node.type.argTs.length; i++) {
-                res.set(`arg_${i}`, node.type.argTs[i]);
-            }
-        }
-
-        return res;
-    }
-
+export class LocalsScope extends BaseLocalsScope {
     constructor(
         public readonly node: LocalsScopeNodeType,
         state: State,
@@ -234,32 +197,98 @@ export class LocalsScope extends BaseScope {
         }
 
         super(name, defTypesMap, state, _next);
-        this.defs = new Map();
     }
 
-    _lookup(name: string): Value | undefined {
-        return this.defs.get(name);
+    public static returnName(decl: sol.VariableDeclaration, idx: number): string {
+        return decl.name === "" ? `<ret_${idx}>` : decl.name;
     }
 
-    _lookupLocation(name: string): View | undefined {
-        const t = this.knownIds.get(name);
-        if (t === undefined) {
-            return undefined;
+    private static detectIds(
+        node: LocalsScopeNodeType,
+        version: string
+    ): Map<string, rtt.BaseRuntimeType> {
+        const infer = new sol.InferType(version);
+        const res = new Map<string, rtt.BaseRuntimeType>();
+
+        if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
+            if (lt(version, "0.5.0")) {
+                // In Solidity 0.4.x all state vars have block-wide scope
+                for (const stmt of node.vStatements) {
+                    if (stmt instanceof sol.VariableDeclarationStatement) {
+                        for (const decl of stmt.vDeclarations) {
+                            res.set(
+                                decl.name,
+                                astToRuntimeType(
+                                    infer.variableDeclarationToTypeNode(decl),
+                                    infer,
+                                    sol.DataLocation.Memory
+                                )
+                            );
+                        }
+                    }
+                }
+            } else {
+                // Nothing to do
+            }
+        } else if (node instanceof sol.VariableDeclarationStatement) {
+            if (lt(version, "0.5.0") && !(node.parent instanceof sol.ForStatement)) {
+                // Nothing to do
+            } else {
+                // In solidity >= 0.5.0 each local variable has a scope starting at its declaration
+                // Also if this is the initialization stmt of a for loop, its its own scope
+                for (const decl of node.vDeclarations) {
+                    res.set(
+                        decl.name,
+                        astToRuntimeType(
+                            infer.variableDeclarationToTypeNode(decl),
+                            infer,
+                            sol.DataLocation.Memory
+                        )
+                    );
+                }
+            }
+        } else if (node instanceof sol.FunctionDefinition) {
+            for (const decl of node.vParameters.vParameters) {
+                res.set(
+                    decl.name,
+                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
+            }
+
+            for (let i = 0; i < node.vReturnParameters.vParameters.length; i++) {
+                const decl = node.vReturnParameters.vParameters[i];
+                res.set(
+                    LocalsScope.returnName(decl, i),
+                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
+            }
+        } else if (node instanceof sol.ModifierDefinition) {
+            for (const decl of node.vParameters.vParameters) {
+                res.set(
+                    decl.name,
+                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                );
+            }
+        } else if (node instanceof sol.TryCatchClause) {
+            if (node.vParameters) {
+                for (const decl of node.vParameters.vParameters) {
+                    res.set(
+                        decl.name,
+                        astToRuntimeType(
+                            infer.variableDeclarationToTypeNode(decl),
+                            infer,
+                            undefined
+                        )
+                    );
+                }
+            }
+        } else {
+            for (let i = 0; i < node.type.argTs.length; i++) {
+                res.set(`arg_${i}`, node.type.argTs[i]);
+            }
         }
 
-        if (t instanceof rtt.PointerType) {
-            return new PointerLocalView(t, [this, name]);
-        }
-
-        if (t instanceof rtt.FixedBytesType) {
-            return new ArrayLikeLocalView(t, [this, name]);
-        }
-
-        return new PrimitiveLocalView(t, [this, name]);
-    }
-
-    _set(name: string, val: Value): void {
-        this.defs.set(name, val);
+        return res;
     }
 }
 
@@ -269,7 +298,7 @@ function defToType(decl: UnitDef, infer: sol.InferType): rtt.BaseRuntimeType {
     // for the type definitions and import defs
     if (decl instanceof sol.VariableDeclaration) {
         // @todo I think loc here should be determine based on the scope of the def?
-        return rtt.astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer);
+        return astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer);
     } else if (
         decl instanceof sol.ContractDefinition ||
         decl instanceof sol.FunctionDefinition ||
@@ -349,7 +378,7 @@ export class ContractScope extends BaseScope {
         for (const v of constVars) {
             defTypes.set(
                 v.name,
-                rtt.astToRuntimeType(
+                astToRuntimeType(
                     infer.variableDeclarationToTypeNode(v),
                     infer,
                     sol.DataLocation.Memory
@@ -419,7 +448,13 @@ export class ContractScope extends BaseScope {
     }
 
     _lookupLocation(name: string): View | undefined {
-        return this.fieldToView.get(name) as any;
+        const res = this.fieldToView.get(name);
+
+        if (res !== undefined) {
+            return res;
+        }
+
+        return this.constFieldToView.get(name);
     }
 
     // @todo is this method really necessary? Don't assignments to storage happen through Interpreter.assign?
@@ -537,7 +572,7 @@ export class GlobalScope extends BaseScope {
         for (const [name, decl] of declMap) {
             const type =
                 decl instanceof sol.VariableDeclaration
-                    ? rtt.astToRuntimeType(
+                    ? astToRuntimeType(
                           infer.variableDeclarationToTypeNode(decl),
                           infer,
                           sol.DataLocation.Memory
@@ -599,12 +634,15 @@ export class BuiltinsScope extends BaseScope {
     builtinsMap: Map<string, Value>;
 
     constructor(
-        builtins: Array<[string, rtt.BaseRuntimeType, Value]>,
+        public readonly builtins: BuiltinStruct,
         state: State,
         _next: BaseScope | undefined
     ) {
-        super(`<builtins>`, new Map(builtins.map((x) => [x[0], x[1]])), state, _next);
-        this.builtinsMap = new Map(builtins.map((x) => [x[0], x[2]]));
+        const builtinsFields: Array<[string, rtt.BaseRuntimeType, Value]> = builtins.fields.map(
+            ([name, val]) => [name, (val as BuiltinFunction | BuiltinStruct).type, val]
+        );
+        super(`<builtins>`, new Map(builtinsFields.map((x) => [x[0], x[1]])), state, _next);
+        this.builtinsMap = new Map(builtinsFields.map((x) => [x[0], x[2]]));
     }
 
     _lookup(name: string): Value | undefined {

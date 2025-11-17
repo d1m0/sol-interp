@@ -137,7 +137,11 @@ export function gatherConstants(
 
             let view: StringMemView | BytesMemView;
 
-            if (nd.kind === sol.LiteralKind.String || nd.kind === sol.LiteralKind.UnicodeString) {
+            // In Solidity <0.5 hex strings were still shown as LiteralKind.String, not HexString
+            if (
+                (nd.kind === sol.LiteralKind.String && nd.value !== null) ||
+                nd.kind === sol.LiteralKind.UnicodeString
+            ) {
                 view = PointerMemView.allocMemFor(
                     nd.value,
                     stringT,
@@ -193,7 +197,7 @@ export function gatherConstants(
         } else {
             sol.assert(isPrimitiveValue(val), `Unexpected constant value ${ppValue(val)}`);
             view = PointerMemView.allocMemFor(val, typ, state.memAllocator);
-            view.encode(val, state.memory, state.memAllocator);
+            interp.assign(view, val, state);
         }
 
         state.constantsMap.set(nd.id, view);

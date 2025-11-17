@@ -10,6 +10,7 @@ import {
 import {
     BuiltinFunction,
     BuiltinStruct,
+    BytesStorageLength,
     DefValue,
     ExternalCallDescription,
     LValue,
@@ -29,6 +30,8 @@ export function ppLValue(v: LValue): string {
         return v.pp();
     } else if (v === null) {
         return `null`;
+    } else if (v instanceof BytesStorageLength) {
+        return `${ppValue(v.view)}.length`;
     } else {
         return `[${v.map(ppLValue).join(", ")}]`;
     }
@@ -67,7 +70,7 @@ export function ppValue(v: Value): string {
 }
 
 function ppLVorRV(v: LValue | Value): string {
-    if (v instanceof View || v === null) {
+    if (v instanceof View || v === null || v instanceof BytesStorageLength) {
         return ppLValue(v);
     }
 

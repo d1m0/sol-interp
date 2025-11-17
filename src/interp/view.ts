@@ -15,7 +15,8 @@ import {
     PointerType,
     BaseCalldataView,
     BytesType,
-    Memory
+    Memory,
+    SingleByteCalldataView
 } from "sol-dbg";
 import { BaseScope } from "./scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
@@ -50,7 +51,7 @@ export abstract class BaseLocalView<
 
 export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, BaseRuntimeType> {}
 
-export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
+export class SingleByteLocalView extends BaseLocalView<Uint8Array, FixedBytesType> {
     constructor(
         loc: [BaseScope, string],
         private byteOffset: number
@@ -58,7 +59,7 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
         super(bytes1, loc);
     }
 
-    decode(): bigint | DecodingFailure {
+    decode(): Uint8Array | DecodingFailure {
         const [scope, name] = this.loc;
         const word = scope._lookup(name);
 
@@ -72,10 +73,10 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
             return new DecodingFailure(`OoB index ${this.byteOffset} in ${name} in ${scope.name}`);
         }
 
-        return BigInt(word[this.byteOffset]);
+        return word.slice(this.byteOffset, this.byteOffset + 1);
     }
 
-    encode(v: bigint): void {
+    encode(v: Uint8Array): void {
         const [scope, name] = this.loc;
         const word = scope._lookup(name);
 
@@ -89,11 +90,7 @@ export class SingleByteLocalView extends BaseLocalView<bigint, FixedBytesType> {
             throw new EncodingError(`OoB index ${this.byteOffset} in ${name} in ${scope.name}`);
         }
 
-        if (v < 0n || v >= 256) {
-            throw new EncodingError(`Value ${v} is not a byte`);
-        }
-
-        word[this.byteOffset] = Number(v);
+        word.set(v, this.byteOffset);
     }
 }
 
@@ -129,9 +126,27 @@ export class ArrayLikeLocalView
     }
 }
 
-export class MsgDataView extends BaseCalldataView<Uint8Array, BytesType> {
+/**
+ * A view to the entire msg.data. We cant just reuse a BytesCalldataView as that assumes a dynamic offset and length.
+ */
+export class MsgDataView
+    extends BaseCalldataView<Uint8Array, BytesType>
+    implements ArrayLikeView<Memory, SingleByteCalldataView>
+{
     constructor() {
         super(bytesT, 0n, 0n);
+    }
+
+    size(state: Memory): bigint {
+        return BigInt(state.length);
+    }
+
+    indexView(key: bigint, state: Memory): DecodingFailure | SingleByteCalldataView {
+        if (key > this.size(state)) {
+            return new DecodingFailure(`OoB access in MsgDataView at ${key}`);
+        }
+
+        return new SingleByteCalldataView(key, 0n);
     }
 
     decode(state: Memory): Uint8Array<ArrayBufferLike> | DecodingFailure {

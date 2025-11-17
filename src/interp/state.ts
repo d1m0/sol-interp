@@ -19,7 +19,7 @@ import { Allocator } from "sol-dbg";
 import { BuiltinFunction, BuiltinStruct } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { AccountInfo } from "./chain";
-import { assertBuiltin, revertBuiltin, requireBuiltin, makeMsgBuiltin, abi } from "./builtins";
+import { makeBuiltin, globalBuiltinStructDesc } from "./builtins";
 
 export interface CallResult {
     reverted: boolean;
@@ -168,18 +168,9 @@ export function makeStateWithConstants(
     );
 }
 
-export function makeBuiltinScope(state: State): BuiltinsScope {
-    const builtins: Array<BuiltinFunction | BuiltinStruct> = [
-        assertBuiltin,
-        abi,
-        revertBuiltin,
-        requireBuiltin,
-        makeMsgBuiltin(state)
-    ];
+export function makeBuiltinScope(state: State, compilerVersion: string): BuiltinsScope {
+    const builtinStruct = makeBuiltin(globalBuiltinStructDesc, compilerVersion);
+    assert(builtinStruct instanceof BuiltinStruct, ``);
 
-    return new BuiltinsScope(
-        builtins.map((b) => [b.name, b.type, b]),
-        state,
-        undefined
-    );
+    return new BuiltinsScope(builtinStruct, state, undefined);
 }

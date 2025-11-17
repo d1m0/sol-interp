@@ -83,7 +83,7 @@ export class TransactionSet {
         this.traceVisitor = new TraceVisitor();
         this.chain = new Chain(this._artifactManager);
         this.chain.addVisitor(this.traceVisitor);
-        this.chain.makeEOA(SENDER, 1000000n);
+        this.chain.makeEmptyAccount(SENDER, 1000000n);
     }
 
     encodeArgs(

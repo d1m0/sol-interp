@@ -21,11 +21,9 @@ import {
     MapStorageView,
     StringMemView,
     BytesMemView,
-    StringCalldataView,
     StringStorageView,
     BytesStorageView,
     MAX_ARR_DECODE_LIMIT,
-    BytesCalldataView,
     stackTop,
     ArtifactInfo,
     isPoison,
@@ -36,7 +34,6 @@ import * as rtt from "sol-dbg";
 import { WorldInterface, State, SolMessage, CallResult, makeBuiltinScope } from "./state";
 import {
     InternalError,
-    InterpError,
     NoScope,
     NotDefined,
     OOBError,
@@ -53,8 +50,12 @@ import {
     BaseTypeValue,
     BuiltinFunction,
     BuiltinStruct,
+    BytesStorageLength,
+    CurriedVal,
     DefValue,
     ExternalCallDescription,
+    ExternalCallTargetValue,
+    InternalCallTargetValue,
     isPrimitiveValue,
     LValue,
     match,
@@ -74,15 +75,29 @@ import {
     bytesToHex,
     concatBytes,
     equalsBytes,
-    hexToBytes
+    hexToBytes,
+    setLengthLeft,
+    setLengthRight
 } from "@ethereumjs/util";
-import { BaseScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
+    BaseScope,
+    BuiltinsScope,
+    ContractScope,
+    GlobalScope,
+    LocalsScope,
+    TempsScope
+} from "./scope";
+import {
+    bytes32,
+    bytesT,
+    bytesToIntOfType,
+    cdBytesT,
     changeLocTo,
     clampIntToType,
     decodeView,
     defT,
     deref,
+    getBytecodeInfo,
     getCodeContract,
     getCodeContractInfo,
     getContract,
@@ -95,6 +110,9 @@ import {
     getMsgSender,
     getStateStorage,
     getThis,
+    indexOfEnumOption,
+    indexView,
+    int256,
     isBaseOf,
     isDirectlyAssignable,
     isMethod,
@@ -108,7 +126,10 @@ import {
     printNode,
     removeLiteralTypes,
     setStateStorage,
-    solcValueToValue
+    solcValueToValue,
+    stringT,
+    typeOfView,
+    unwrapUnaryTypeTuples
 } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
@@ -116,13 +137,13 @@ import {
     ArrayLikeLocalView,
     isArrayLikeView,
     isPointerView,
-    PointerLocalView
+    PointerLocalView,
+    MsgDataView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
-    abiEncodeBuiltin,
-    addressBuiltinStruct,
-    externalCallableBuiltinStruct,
+    ADDRESS_BUILTIN_STRUCT_NAME,
+    EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
     popBuiltin,
     pushBuiltin,
     revertBuiltin
@@ -131,7 +152,7 @@ import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { astToRuntimeType, BaseInterpType } from "./types";
 import { InterpVisitor } from "./visitors";
-import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
+import { castStringToBytes, decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -216,24 +237,123 @@ export class Interpreter {
         return rtt.astToRuntimeType(this._infer.variableDeclarationToTypeNode(decl), this._infer);
     }
 
-    typeOf(e: sol.Expression): BaseInterpType {
-        const solT = removeLiteralTypes(this._infer.typeOf(e), e, this._infer);
-
-        // Detect global ref type constants and treat them as stored in memory
-        let loc: sol.DataLocation | undefined;
-
+    isConstant(e: sol.Expression): boolean {
         if (
             (e instanceof sol.Identifier || e instanceof sol.MemberAccess) &&
             e.vReferencedDeclaration instanceof sol.VariableDeclaration &&
             e.vReferencedDeclaration.mutability === sol.Mutability.Constant
         ) {
-            loc = sol.DataLocation.Memory;
+            return true;
         }
+
+        if (
+            e instanceof sol.FunctionCall &&
+            e.kind === sol.FunctionCallKind.TypeConversion &&
+            this.isConstant(e.vArguments[0])
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    typeOf(e: sol.Expression): BaseInterpType {
+        const solT = removeLiteralTypes(this._infer.typeOf(e), e, this._infer);
+
+        // Detect global ref type constants (strings, bytes) and treat them as stored in memory
+        const loc: sol.DataLocation | undefined = this.isConstant(e)
+            ? sol.DataLocation.Memory
+            : undefined;
 
         return this.astToRuntimeType(solT, loc);
     }
 
     ///*********************EXTERNAL FUNCTION CALLS************************************
+    private getCalldataArgsAndTypes(
+        entryPoint: sol.FunctionDefinition | sol.VariableDeclaration,
+        data: Uint8Array,
+        base?: bigint
+    ): [PrimitiveValue[], BaseInterpType[]] {
+        const contract = entryPoint.vScope;
+        this.expect(contract instanceof sol.ContractDefinition);
+
+        // Fallbacks are a special case with an (optional) single arg which is a MsgDataView
+        if (
+            entryPoint instanceof sol.FunctionDefinition &&
+            entryPoint.kind === sol.FunctionKind.Fallback
+        ) {
+            if (entryPoint.vParameters.vParameters.length === 0) {
+                return [[], []];
+            }
+
+            return [[new MsgDataView()], [cdBytesT]];
+        }
+
+        // Decode args
+        let calldataViews: Array<View<rtt.Memory>> = buildMsgViews(
+            entryPoint,
+            this._infer,
+            base
+        ).map((x) => x[1]);
+
+        // Skip selector
+        if (rtt.hasSelector(entryPoint)) {
+            calldataViews = calldataViews.slice(1);
+        }
+
+        let argTs: BaseInterpType[];
+        if (entryPoint instanceof sol.FunctionDefinition) {
+            const isLib = contract.kind === sol.ContractKind.Library;
+
+            // The arg values here are calldata pointers, which may differ from
+            // the actual arguments (i.e. they may be memory pointers).  The
+            // `Intepreter.assign` in `makeScope()` will handle the copying from
+            // calldata to memory.
+            argTs = entryPoint.vParameters.vParameters.map((argT) => {
+                const declT = this.varDeclToRuntimeType(argT);
+
+                if (
+                    isLib &&
+                    declT instanceof rtt.PointerType &&
+                    declT.location === sol.DataLocation.Storage
+                ) {
+                    return declT;
+                }
+
+                return rtt.specializeType(rtt.generalizeType(declT), sol.DataLocation.CallData);
+            });
+        } else {
+            argTs = getGetterArgAndReturnTs(entryPoint, this._infer)[0];
+        }
+
+        const calldataArgs: PrimitiveValue[] = calldataViews.map((view, i) => {
+            const argT = argTs[i];
+
+            if (argT instanceof rtt.PointerType && argT.location === sol.DataLocation.Storage) {
+                const v = view.decode(data);
+                sol.assert(typeof v === "bigint", `Expected bigint for struct pointer not ${v}`);
+                return rtt.makeStorageView(argT.toType, [v, 32]);
+            }
+
+            if (isValueType(argT)) {
+                return view.decode(data) as PrimitiveValue;
+            }
+
+            if (view instanceof PointerCalldataView) {
+                const innerView = view.toView(data);
+                this.expect(
+                    innerView instanceof BaseCalldataView,
+                    `Unexpected pointer calldata view`
+                );
+                return innerView;
+            }
+
+            sol.assert(false, `Unexpected calldata arg ${ppValue(view)}`);
+        });
+
+        return [calldataArgs, argTs];
+    }
+
     /**
      * Entry point to initialize a new contract. Note that the msg.data is the complete msg.data
      * including the creation bytecode.
@@ -284,15 +404,10 @@ export class Interpreter {
                 const baseArgMap = this.evalBaseConstructorArgs(mdc.ast, state);
 
                 if (mdc.ast.vConstructor) {
-                    const calldataArgs: Value[] = buildMsgViews(
+                    const [calldataArgs, argTs] = this.getCalldataArgsAndTypes(
                         mdc.ast.vConstructor,
-                        this._infer,
+                        msg.data,
                         BigInt(mdc.bytecode.bytecode.length)
-                    ).map((x) => x[1]);
-
-                    const interp = this;
-                    const argTs = mdc.ast.vConstructor.vParameters.vParameters.map((decl) =>
-                        interp.varDeclToRuntimeType(decl)
                     );
                     baseArgMap.set(mdc.ast.vConstructor, [calldataArgs, argTs]);
                 }
@@ -381,115 +496,57 @@ export class Interpreter {
             return new NoPayloadError(codeInfo.ast);
         }
 
-        // Decode args
-        let calldataViews: Array<View<rtt.Memory>> = buildMsgViews(entryPoint, this._infer).map(
-            (x) => x[1]
-        );
+        // Decode Arguments
+        const [calldataArgs, argTs] = this.getCalldataArgsAndTypes(entryPoint, getMsg(state));
+        let res: Value[];
+        let resTs: rtt.BaseRuntimeType[];
 
-        // Skip selector
-        if (rtt.hasSelector(entryPoint)) {
-            calldataViews = calldataViews.slice(1);
-        }
-
-        let argTs: BaseInterpType[];
-        if (entryPoint instanceof sol.FunctionDefinition) {
-            const isLib =
-                (codeInfo.ast as sol.ContractDefinition).kind === sol.ContractKind.Library;
-
-            // The arg values here are calldata pointers, which may differ from
-            // the actual arguments (i.e. they may be memory pointers).  The
-            // `Intepreter.assign` in `makeScope()` will handle the copying from
-            // calldata to memory.
-            argTs = entryPoint.vParameters.vParameters.map((argT) => {
-                const declT = this.varDeclToRuntimeType(argT);
-
-                if (
-                    isLib &&
-                    declT instanceof rtt.PointerType &&
-                    declT.location === sol.DataLocation.Storage
-                ) {
-                    return declT;
-                }
-
-                return rtt.specializeType(rtt.generalizeType(declT), sol.DataLocation.CallData);
-            });
-        } else if (entryPoint instanceof sol.VariableDeclaration) {
-            argTs = getGetterArgAndReturnTs(entryPoint, this._infer)[0];
-        } else {
-            nyi("public getters");
-        }
-
-        const calldataArgs: PrimitiveValue[] = calldataViews.map((view, i) => {
-            const argT = argTs[i];
-
-            if (argT instanceof rtt.PointerType && argT.location === sol.DataLocation.Storage) {
-                const v = decodeView(view, state);
-                sol.assert(typeof v === "bigint", `Expected bigint for struct pointer not ${v}`);
-                return rtt.makeStorageView(argT.toType, [v, 32]);
-            }
-
-            if (isValueType(argT)) {
-                return decodeView(view, state) as PrimitiveValue;
-            }
-
-            if (view instanceof PointerCalldataView) {
-                const innerView = view.toView(getMsg(state));
-                this.expect(innerView instanceof BaseCalldataView, ``);
-                return innerView;
-            }
-
-            sol.assert(false, `Unexpected calldata arg ${ppValue(view)}`);
-        });
-
-        let resBytecode: Uint8Array;
-
-        if (entryPoint instanceof sol.FunctionDefinition) {
-            let res: Value[];
-
-            try {
+        // Execute actual call
+        try {
+            if (entryPoint instanceof sol.FunctionDefinition) {
                 res = this.callInternal(entryPoint, calldataArgs, argTs, state);
-            } catch (e) {
-                if (e instanceof RuntimeError) {
-                    return e;
-                }
-
-                throw e;
-            }
-
-            // Encode returns
-            const resTs = entryPoint.vReturnParameters.vParameters.map((retT) =>
-                this.varDeclToRuntimeType(retT)
-            );
-
-            resBytecode = encode(res, resTs, state);
-        } else if (entryPoint instanceof sol.VariableDeclaration) {
-            let res: Value[];
-
-            try {
+                resTs = entryPoint.vReturnParameters.vParameters.map((retT) =>
+                    this.varDeclToRuntimeType(retT)
+                );
+            } else {
                 res = this.callGetter(entryPoint, calldataArgs, argTs, state);
-            } catch (e) {
-                if (e instanceof RuntimeError) {
-                    return e;
-                }
-
-                throw e;
+                resTs = getGetterArgAndReturnTs(entryPoint, this._infer)[1];
+            }
+        } catch (e) {
+            if (e instanceof RuntimeError) {
+                return e;
             }
 
-            // Encode returns
-            const resTs = getGetterArgAndReturnTs(entryPoint, this._infer)[1];
-            resBytecode = encode(res, resTs, state);
+            throw e;
+        }
+
+        let resData: Uint8Array;
+
+        if (
+            entryPoint instanceof sol.FunctionDefinition &&
+            entryPoint.kind === sol.FunctionKind.Fallback
+        ) {
+            // Fallback functions return data without it being encoded
+            if (res.length == 1) {
+                this.expect(res[0] instanceof View && res[0].type instanceof rtt.BytesType);
+                resData = decodeView(res[0], state) as Uint8Array;
+            } else {
+                this.expect(res.length === 0);
+                resData = new Uint8Array();
+            }
         } else {
-            nyi(`public getter`);
+            // Encode returns
+            resData = encode(res, resTs, state);
         }
 
         for (const v of this.visitors) {
-            v.return(this, state, resBytecode);
+            v.return(this, state, resData);
         }
 
         // If we succeed update the world on our new state
         this.world.updateAccount(state.account);
 
-        return resBytecode;
+        return resData;
     }
 
     private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
@@ -530,7 +587,7 @@ export class Interpreter {
     private initializeStateVar(v: sol.VariableDeclaration, s: State): void {
         this.expect(v.stateVariable && v.vScope instanceof sol.ContractDefinition);
         this.nodes.push(v);
-        if (v.vValue === undefined) {
+        if (v.vValue === undefined || v.mutability === sol.Mutability.Constant) {
             return;
         }
 
@@ -643,6 +700,7 @@ export class Interpreter {
         const storage = getStateStorage(state);
         let stateVarView:
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
+            | BaseMemoryView<BaseValue, rtt.BaseRuntimeType>
             | DecodingFailure
             | undefined = scope.lookupLocation(callee.name) as
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
@@ -708,6 +766,7 @@ export class Interpreter {
 
     /**
      * Make an internal call to `callee` with arguments `args` in state `state`.
+     * @todo - delete. No longer neccessary
      * @param callee
      * @param args
      * @param state
@@ -785,12 +844,10 @@ export class Interpreter {
             changeLocTo(self.varDeclToRuntimeType(d), sol.DataLocation.Memory)
         );
         const argVs = stmt.errorCall.vArguments.map((arg) => this.eval(arg, state));
-        const [dataView] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
-        this.expect(
-            dataView instanceof BytesMemView,
-            `Expected encoded data not ${ppValue(dataView)}`
-        );
-        const argData = dataView.decode(state.memory);
+        const ts = this.pushTempScope(argTs, state);
+        this.assign(ts.temps, argVs, state);
+        const argData = encode(ts.tempVals, argTs, state);
+        this.popScope(state);
         this.expect(argData instanceof Uint8Array);
         const data = concatBytes(selector, argData);
         const msg = `${errorDef.name}(${argVs.map(ppValue).join(", ")})`;
@@ -831,11 +888,8 @@ export class Interpreter {
                 return [];
             }
 
-            const memBytesView = rtt.PointerMemView.allocMemFor(
-                data,
-                memBytesT,
-                state.memAllocator
-            );
+            const memBytesView = rtt.PointerMemView.allocMemFor(data, bytesT, state.memAllocator);
+
             memBytesView.encode(data, state.memory, state.memAllocator);
 
             return [memBytesView];
@@ -845,12 +899,11 @@ export class Interpreter {
     }
 
     private execTryStatement(stmt: sol.TryStatement, state: State): ControlFlow {
-        const callee = this.evalNP(stmt.vExternalCall.vExpression, state);
-        this.expect(
-            callee instanceof NewCall ||
-                callee instanceof rtt.ExternalFunRef ||
-                callee instanceof ExternalCallDescription
+        const callee = this.coerceToExternallyCallable(
+            this.evalNP(stmt.vExternalCall.vExpression, state),
+            state
         );
+        this.expect(callee !== undefined);
         const res = this._evalMsgCall(stmt.vExternalCall, liftExtCalRef(callee), state);
 
         const actualCallee = callee instanceof ExternalCallDescription ? callee.target : callee;
@@ -899,7 +952,7 @@ export class Interpreter {
             return this.execTryCatchClause(lowLevelClauses[0], vals, state);
         }
 
-        this.runtimeError(RuntimeError, state, res.data);
+        this.runtimeError(RuntimeError, state, "", res.data);
     }
 
     private execTryCatchClause(
@@ -1024,8 +1077,8 @@ export class Interpreter {
 
         if (stmt.vExpression) {
             const retVal = this.evalNP(stmt.vExpression, state);
-            retVals =
-                stmt.vExpression instanceof sol.TupleExpression ? (retVal as Value[]) : [retVal];
+            const retExprT = this.typeOf(stmt.vExpression);
+            retVals = retExprT instanceof rtt.TupleType ? (retVal as Value[]) : [retVal];
         } else {
             retVals = [];
         }
@@ -1038,15 +1091,16 @@ export class Interpreter {
         );
 
         sol.assert(
-            fun !== undefined &&
-                (retVals.length === fun.vReturnParameters.vParameters.length ||
-                    retVals.length === 0),
+            retVals.length === fun.vReturnParameters.vParameters.length || retVals.length === 0,
             `Mismatch in number of ret vals and formal returns`
         );
 
         for (let i = 0; i < retVals.length; i++) {
-            const retName = LocalsScope.returnName(fun?.vReturnParameters.vParameters[i], i);
-            state.scope.set(retName, retVals[i]);
+            const ret = frame.scope._lookupLocation(
+                LocalsScope.returnName(fun?.vReturnParameters.vParameters[i], i)
+            );
+            this.expect(ret !== undefined);
+            this.assign(ret, retVals[i], state);
         }
 
         return ControlFlow.Return;
@@ -1250,6 +1304,8 @@ export class Interpreter {
             res = this.evalTupleExpression(expr, state);
         } else if (expr instanceof sol.UnaryOperation) {
             res = this.evalUnaryOperation(expr, state);
+        } else if (expr instanceof sol.ElementaryTypeNameExpression) {
+            res = none;
         } else {
             nyi(`evalExpression(${expr.constructor.name})`);
         }
@@ -1390,6 +1446,13 @@ export class Interpreter {
                 );
 
                 res = fieldView;
+            } else if (baseLV instanceof rtt.ArrayStorageView && expr.memberName === "length") {
+                // Assinging to storage array lengths changes their length
+                // @todo (dimo) do we zero-out elements when we truncate the length?
+                // @todo (dimo) support assinging to bytes.length
+                res = rtt.makeStorageView(rtt.uint256, [baseLV.key, baseLV.endOffsetInWord]);
+            } else if (baseLV instanceof rtt.BytesStorageView && expr.memberName === "length") {
+                res = new BytesStorageLength(baseLV);
             } else {
                 nyi(`evalLV(${printNode(expr)}): ${ppLValue(baseLV)}`);
             }
@@ -1404,6 +1467,199 @@ export class Interpreter {
         this.nodes.pop();
 
         return res;
+    }
+
+    private coerceToInternallyCallable(v: Value): InternalCallTargetValue | undefined {
+        if (v instanceof rtt.InternalFunRef || v instanceof CurriedVal) {
+            return v;
+        }
+
+        if (v instanceof DefValue && v.def instanceof sol.FunctionDefinition) {
+            return new rtt.InternalFunRef(v.def);
+        }
+
+        return undefined;
+    }
+
+    private coerceToExternallyCallable(
+        v: Value,
+        state: State
+    ): ExternalCallTargetValue | undefined {
+        if (
+            v instanceof rtt.ExternalFunRef ||
+            v instanceof ExternalCallDescription ||
+            v instanceof NewCall
+        ) {
+            return v;
+        }
+
+        if (
+            v instanceof DefValue &&
+            v.def instanceof sol.FunctionDefinition &&
+            (v.def.visibility === sol.FunctionVisibility.External ||
+                v.def.visibility === sol.FunctionVisibility.Public) &&
+            v.def.vScope instanceof sol.ContractDefinition &&
+            v.def.vScope.kind === sol.ContractKind.Library
+        ) {
+            const addr = getLibraryLinkedAddress(v.def.vScope, state);
+
+            if (addr) {
+                const selector = hexToBytes(`0x${this._infer.signatureHash(v.def)}`);
+                return new rtt.ExternalFunRef(addr, selector);
+            }
+        }
+
+        return undefined;
+    }
+
+    private implicitCoercionImpl(
+        value: rtt.PrimitiveValue,
+        toType: rtt.BaseRuntimeType,
+        state: State
+    ): PrimitiveValue | undefined {
+        // fixed bytes -> bigger fixed bytes
+        if (
+            value instanceof Uint8Array &&
+            toType instanceof rtt.FixedBytesType &&
+            value.length < toType.numBytes
+        ) {
+            return setLengthRight(value, toType.numBytes);
+        }
+
+        // fixed bytes -> smaller fixed bytes not allowed implicitly
+        if (
+            value instanceof Uint8Array &&
+            toType instanceof rtt.FixedBytesType &&
+            value.length > toType.numBytes
+        ) {
+            return undefined;
+        }
+
+        // No Coercion
+        if (
+            (typeof value === "bigint" && toType instanceof rtt.IntType) ||
+            (typeof value === "boolean" && toType instanceof rtt.BoolType) ||
+            (value instanceof Uint8Array && toType instanceof rtt.FixedBytesType) ||
+            (value instanceof Address && toType instanceof rtt.AddressType) ||
+            ((value instanceof rtt.InternalFunRef ||
+                value instanceof rtt.ExternalFunRef ||
+                value instanceof NewCall ||
+                value instanceof ExternalCallDescription) &&
+                toType instanceof rtt.FunctionType) ||
+            (value instanceof View && isDirectlyAssignable(toType, typeOfView(value))) ||
+            value instanceof TypeTuple ||
+            value instanceof Poison // Local/return variables are initialized to None at scope creation
+        ) {
+            return value;
+        }
+
+        // string -> bytes cast in memory/storage
+        if (
+            value instanceof View &&
+            value.type instanceof rtt.StringType &&
+            toType instanceof rtt.PointerType &&
+            toType.toType instanceof rtt.BytesType
+        ) {
+            this.expect(
+                value instanceof StringMemView ||
+                    value instanceof rtt.StringCalldataView ||
+                    value instanceof rtt.StringSliceCalldataView
+            );
+            return castStringToBytes(value);
+        }
+
+        // bytes -> string cast in memory
+        if (
+            value instanceof View &&
+            value.type instanceof rtt.BytesType &&
+            toType instanceof rtt.PointerType &&
+            toType.toType instanceof rtt.StringType
+        ) {
+            if (value instanceof BytesMemView) {
+                return new StringMemView(stringT, value.offset);
+            }
+        }
+
+        // Int literals to fixed byte
+        if (typeof value === "bigint" && toType instanceof rtt.FixedBytesType) {
+            const view = makeMemoryView(value < 0n ? int256 : rtt.uint256, 0n);
+            view.encode(value, scratchWord, undefined as unknown as any);
+
+            return scratchWord.slice(32 - toType.numBytes);
+        }
+
+        // ints to address
+        if (typeof value === "bigint" && toType instanceof rtt.AddressType) {
+            return new Address(setLengthLeft(bigIntToBytes(value), 20));
+        }
+
+        // bytes memory literals to fixed bytes
+        if (value instanceof BytesMemView && toType instanceof rtt.FixedBytesType) {
+            const t = decodeView(value, state) as Uint8Array;
+            if (t.length > toType.numBytes) {
+                return undefined;
+            }
+
+            return setLengthRight(t, toType.numBytes);
+        }
+
+        // string memory literals to fixed bytes
+        if (value instanceof StringMemView && toType instanceof rtt.FixedBytesType) {
+            const t = decodeView(castStringToBytes(value), state) as Uint8Array;
+            if (t.length > toType.numBytes) {
+                return undefined;
+            }
+
+            return setLengthRight(t, toType.numBytes);
+        }
+
+        return undefined;
+    }
+
+    private implicitCoercion(
+        rvalue: rtt.PrimitiveValue,
+        lvType: rtt.BaseRuntimeType,
+        state: State
+    ): PrimitiveValue {
+        const res = this.implicitCoercionImpl(rvalue, lvType, state);
+        this.expect(
+            res !== undefined,
+            `NYI Implicit coercion from ${ppValue(rvalue)} to type ${lvType.pp()}`
+        );
+        return res;
+    }
+
+    /**
+     * We handle assignments to storage arrays separately as they are not as strictly typed, and may modify the length
+     * We implement them as a loop assigning each individual elements, which allows implicit coercions in the element type.
+     */
+    private assignToStorageArray(lvalue: rtt.ArrayStorageView, rvalue: Value, state: State): void {
+        this.expect(
+            rvalue instanceof View &&
+                isArrayLikeView(rvalue) &&
+                rvalue.type instanceof rtt.ArrayType
+        );
+        this.expect(lvalue.type.size === undefined || lvalue.type.size === rvalue.type.size);
+
+        const rvalueLen = length(rvalue, state);
+
+        // @todo dimo if we need to delete the previous contents we should do this here
+        if (lvalue.type.size === undefined) {
+            const lenView = new rtt.IntStorageView(rtt.uint256, [
+                lvalue.key,
+                lvalue.endOffsetInWord
+            ]);
+            setStateStorage(state, lenView.encode(rvalueLen, getStateStorage(state)));
+        }
+
+        for (let i = 0n; i < rvalueLen; i++) {
+            const stor = getStateStorage(state);
+            const elLV = lvalue.indexView(i, stor);
+            const elRV = this.lvToValue(indexView(rvalue, i, state), state);
+
+            this.expect(!(elLV instanceof Poison || elRV instanceof Poison));
+            this.assign(elLV, elRV, state);
+        }
     }
 
     public assign(lvalue: LValue, rvalue: Value, state: State): void {
@@ -1432,6 +1688,31 @@ export class Interpreter {
             `Unexpected rvalue ${ppValue(rvalue)} in assignment to ${ppLValue(lvalue)}`
         );
 
+        // Special case - assignments to storage arrays are more permissive. The types of LValue and RValue
+        // don't have to exactly match both the array size, and the element type. The only requirements are:
+        //  - if LValue is a sized array then RValue must be a sized array of the same size
+        //  - the element type of RValue has to be coercible to the element type of LValue
+        if (
+            lvalue instanceof rtt.PointerStorageView &&
+            lvalue.type.toType instanceof rtt.ArrayType
+        ) {
+            this.assignToStorageArray(lvalue.toView() as rtt.ArrayStorageView, rvalue, state);
+            return;
+        }
+
+        // Special case - assigning to bytes length in storage requires decoding and re-encoding
+        // due to the compressed way length is handled in storage
+        if (lvalue instanceof BytesStorageLength) {
+            rvalue = this.implicitCoercion(rvalue, rtt.uint256, state) as bigint;
+
+            let bytes = decodeView(lvalue.view, state) as Uint8Array;
+            bytes = setLengthRight(bytes, bigIntToNum(rvalue));
+            setStateStorage(state, lvalue.view.encode(bytes, getStateStorage(state)));
+            return;
+        }
+
+        rvalue = this.implicitCoercion(rvalue, lvalue.type, state);
+
         // The following ref-type assignments result in a copy of the underlying complex value
         // - storage-to-storage
         // - memory-to-storage
@@ -1450,7 +1731,7 @@ export class Interpreter {
         ) {
             // Types should be equal modulo location
             this.expect(
-                isDirectlyAssignable(lvalue.type, rvalue.type),
+                isDirectlyAssignable(lvalue.type, typeOfView(rvalue)),
                 `Mismatching types in copying ref assignment (modulo location): ${lvalue.type.pp()} and ${rvalue.type.pp()} `
             );
 
@@ -1488,7 +1769,7 @@ export class Interpreter {
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
                 !(lvalue.type instanceof sol.PointerType) ||
-                    isPoison(rvalue) ||
+                    isPoison(rvalue as rtt.PrimitiveValue) ||
                     (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp()),
                 `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
             );
@@ -1511,12 +1792,15 @@ export class Interpreter {
             const op = expr.operator.slice(0, -1);
             const lVal = this.lvToValue(lv, state);
             const lType = this.typeOf(expr.vLeftHandSide);
+            const rType = this.typeOf(expr.vRightHandSide);
             // @todo Need to detect userdefined function manually here! The AST doesn't give us a this like a BinaryOperation would
 
             rvalue = this.computeBinary(
                 lVal,
+                lType,
                 op,
                 rvalue,
+                rType,
                 lType,
                 undefined,
                 this.isUnchecked(expr),
@@ -1547,6 +1831,7 @@ export class Interpreter {
         return clampedVal;
     }
 
+    /*
     private coerceIntLiteralsToBytes(left: Value, right: Value): [Value, Value] {
         if (typeof left === typeof right) {
             return [left, right];
@@ -1559,17 +1844,54 @@ export class Interpreter {
         }
 
         if (left instanceof Uint8Array && typeof right === "bigint") {
-            return [left, bigIntToBytes(right)];
+            right = bigIntToBytes(right);
+            const len = left.length > right.length ? left.length : right.length;
+
+            left = setLengthLeft(left, len);
+            right = setLengthLeft(right, len);
+
+            return [left, right];
         }
 
         this.fail(InterpError, `Unexpected values ${ppValue(left)} and ${ppValue(right)}`);
     }
+        */
+
+    private coerceToSameType(
+        left: PrimitiveValue,
+        lType: BaseInterpType,
+        right: PrimitiveValue,
+        rType: BaseInterpType,
+        state: State
+    ): [PrimitiveValue, PrimitiveValue] {
+        if (lType.pp() == rType.pp()) {
+            return [left, right];
+        }
+
+        const castRigth = this.implicitCoercionImpl(right, lType, state);
+
+        if (castRigth !== undefined) {
+            return [left, castRigth];
+        }
+
+        const castLeft = this.implicitCoercionImpl(left, rType, state);
+
+        if (castLeft !== undefined) {
+            return [castLeft, right];
+        }
+
+        nyi(
+            `Cannot cast ${ppValue(left)} of type ${lType.pp()} and ${ppValue(right)} of type ${rType.pp()} to same type`
+        );
+    }
 
     private computeBinary(
         left: Value,
+        lType: BaseInterpType,
         operator: string,
         right: Value,
-        type: BaseInterpType,
+        rType: BaseInterpType,
+        expType: BaseInterpType,
         userFunction: sol.FunctionDefinition | undefined,
         unchecked: boolean,
         state: State
@@ -1579,8 +1901,11 @@ export class Interpreter {
             nyi("User-defined operators");
         }
 
+        this.expect(isPrimitiveValue(left) && isPrimitiveValue(right));
+
         if (sol.BINARY_OPERATOR_GROUPS.Logical.includes(operator)) {
             this.expect(typeof left === "boolean" && typeof right === "boolean");
+
             if (operator === "&&") {
                 return left && right;
             }
@@ -1595,7 +1920,7 @@ export class Interpreter {
         if (sol.BINARY_OPERATOR_GROUPS.Equality.includes(operator)) {
             let isEqual: boolean;
 
-            [left, right] = this.coerceIntLiteralsToBytes(left, right);
+            [left, right] = this.coerceToSameType(left, lType, right, rType, state);
 
             if (typeof left === "boolean" && typeof right === "boolean") {
                 isEqual = left === right;
@@ -1607,7 +1932,7 @@ export class Interpreter {
                 isEqual = left.equals(right);
             } else {
                 nyi(
-                    `${left}(${left.constructor.name}) ${operator} ${right}(${right.constructor.name})`
+                    `${left}(${left.constructor.name}) <${lType.pp()}> ${operator} ${right}(${right.constructor.name}) <${rType.pp()}>`
                 );
             }
 
@@ -1623,7 +1948,18 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Comparison.includes(operator)) {
-            let [sleft, sright]: [any, any] = this.coerceIntLiteralsToBytes(left, right);
+            let [sleft, sright]: [any, any] = this.coerceToSameType(
+                left,
+                lType,
+                right,
+                rType,
+                state
+            );
+
+            if (sleft instanceof Address && sright instanceof Address) {
+                sleft = sleft.toString();
+                sright = sright.toString();
+            }
 
             if (sleft instanceof Uint8Array && sright instanceof Uint8Array) {
                 // Perform lexicographical comparison
@@ -1679,7 +2015,7 @@ export class Interpreter {
                 nyi(`Unknown arithmetic operator ${operator}`);
             }
 
-            return this.clamp(res, type, unchecked, state);
+            return this.clamp(res, expType, unchecked, state);
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Bitwise.includes(operator)) {
@@ -1693,8 +2029,6 @@ export class Interpreter {
                 this.expect(left instanceof Uint8Array);
                 nyi(`Bitshift of fixed bytes`);
             }
-
-            [left, right] = this.coerceIntLiteralsToBytes(left, right);
 
             if (typeof left === "bigint" && typeof right === "bigint") {
                 if (operator === "|") {
@@ -1730,8 +2064,10 @@ export class Interpreter {
 
         return this.computeBinary(
             lVal,
+            this.typeOf(expr.vLeftExpression),
             expr.operator,
             rVal,
+            this.typeOf(expr.vRightExpression),
             this.typeOf(expr),
             expr.vUserFunction,
             this.isUnchecked(expr),
@@ -1793,19 +2129,38 @@ export class Interpreter {
         const fromT = this.typeOf(expr.vArguments[0]);
         const fromV = this.evalNP(expr.vArguments[0], state);
 
+        if (fromT.pp() === toT.pp()) {
+            return fromV;
+        }
+
+        // This is also a 'no-cast' case
+        if (
+            fromT instanceof rtt.PointerType &&
+            fromT.location === sol.DataLocation.Memory &&
+            fromT.toType.pp() == toT.pp()
+        ) {
+            this.expect(fromV instanceof BaseMemoryView);
+            return fromV;
+        }
+
         // int -> fixed bytes
         if (fromT instanceof rtt.IntType && toT instanceof rtt.FixedBytesType) {
             this.expect(typeof fromV === "bigint", `Expected a bigint`);
-            this.expect(
-                fromT.numBits / 8 === toT.numBytes,
-                `Unexpected cast from ${fromT.pp()} to ${toT.pp()}`
-            );
-
             scratchWord.fill(0);
             const view = new IntMemView(fromT, 0n);
             view.encode(fromV, scratchWord);
 
             return scratchWord.slice(32 - toT.numBytes, 32);
+        }
+
+        // fixed bytes -> int
+        if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.IntType) {
+            this.expect(fromV instanceof Uint8Array, `Expected bytes`);
+
+            return bytesToIntOfType(
+                fromV.slice(fromT.numBytes - toT.numBits / 8, fromT.numBytes),
+                toT
+            );
         }
 
         // string ptr -> bytes
@@ -1815,21 +2170,14 @@ export class Interpreter {
             toT instanceof rtt.BytesType
         ) {
             this.expect(
-                fromV instanceof View && fromV.type instanceof rtt.StringType,
+                fromV instanceof StringMemView ||
+                    fromV instanceof rtt.StringCalldataView ||
+                    fromV instanceof rtt.StringSliceCalldataView ||
+                    fromV instanceof StringStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            if (fromV instanceof StringMemView) {
-                return new BytesMemView(new rtt.BytesType(), fromV.offset);
-            } else if (fromV instanceof StringCalldataView) {
-                return new BytesCalldataView(new rtt.BytesType(), fromV.offset, fromV.base);
-            } else {
-                this.expect(fromV instanceof StringStorageView);
-                return new BytesStorageView(new rtt.BytesType(), [
-                    fromV.key,
-                    fromV.endOffsetInWord
-                ]);
-            }
+            return castStringToBytes(fromV);
         }
 
         // string literals -> fixed bytes
@@ -1839,38 +2187,59 @@ export class Interpreter {
             toT instanceof rtt.FixedBytesType
         ) {
             this.expect(
-                fromV instanceof View && fromV.type instanceof rtt.StringType,
+                fromV instanceof StringMemView ||
+                    fromV instanceof rtt.StringCalldataView ||
+                    fromV instanceof rtt.StringStorageView ||
+                    fromV instanceof rtt.StringSliceCalldataView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            let bytesView: BytesCalldataView | BytesMemView | BytesStorageView;
-
-            if (fromV instanceof StringMemView) {
-                bytesView = new BytesMemView(new rtt.BytesType(), fromV.offset);
-            } else if (fromV instanceof StringCalldataView) {
-                bytesView = new BytesCalldataView(new rtt.BytesType(), fromV.offset, fromV.base);
-            } else {
-                this.expect(fromV instanceof StringStorageView);
-                bytesView = new BytesStorageView(new rtt.BytesType(), [
-                    fromV.key,
-                    fromV.endOffsetInWord
-                ]);
-            }
-
+            const bytesView:
+                | rtt.BytesCalldataView
+                | BytesMemView
+                | BytesStorageView
+                | rtt.BytesSliceCalldataView = castStringToBytes(fromV);
             const bts = decodeView(bytesView, state);
             this.expect(bts instanceof Uint8Array && bts.length === toT.numBytes);
             return bts;
         }
 
+        // int -> int
         if (fromT instanceof rtt.IntType && toT instanceof rtt.IntType) {
             this.expect(typeof fromV === "bigint");
             return clampIntToType(fromV, toT);
         }
 
-        if (fromT.pp() === toT.pp()) {
-            return fromV;
+        // fixed bytes -> address
+        if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.AddressType) {
+            this.expect(fromV instanceof Uint8Array);
+            const addr = new Uint8Array(20);
+            const off = fromT.numBytes - 20;
+            addr.set(fromV.slice(off >= 0 ? off : 0));
+            return new Address(addr);
         }
 
+        // address -> fixed bytes
+        if (
+            fromT instanceof rtt.AddressType &&
+            toT instanceof rtt.FixedBytesType &&
+            toT.numBytes >= 20
+        ) {
+            this.expect(fromV instanceof Address);
+            const res = new Uint8Array(toT.numBytes);
+            res.set(fromV.bytes, toT.numBytes - 20);
+            return res;
+        }
+
+        // int (literal) -> address
+        if (fromT instanceof rtt.IntType && toT instanceof rtt.AddressType) {
+            this.expect(typeof fromV === "bigint");
+            const addr = new Uint8Array(20);
+            rtt.encodeBigintInBigEndianBuf(fromV, addr, fromT.numBits / 8);
+            return new Address(addr);
+        }
+
+        // library -> address
         if (
             fromT instanceof rtt.TypeType &&
             fromT.rawT instanceof sol.UserDefinedType &&
@@ -1878,7 +2247,22 @@ export class Interpreter {
             fromT.rawT.definition.kind === sol.ContractKind.Library &&
             toT instanceof rtt.AddressType
         ) {
-            return getLibraryLinkedAddress(fromT.rawT.definition, state);
+            const addr = getLibraryLinkedAddress(fromT.rawT.definition, state);
+            this.expect(
+                addr !== undefined,
+                `Missing link reference for library ${fromT.rawT.definition.name}`
+            );
+            return addr;
+        }
+
+        // fixed bytes -> fixed bytes
+        if (fromT instanceof rtt.FixedBytesType && toT instanceof rtt.FixedBytesType) {
+            this.expect(fromV instanceof Uint8Array);
+            if (fromT.numBytes < toT.numBytes) {
+                return setLengthLeft(fromV, toT.numBytes);
+            }
+
+            return fromV.slice(0, toT.numBytes);
         }
 
         nyi(`evalTypeConversion ${fromT.pp()} -> ${toT.pp()}`);
@@ -2052,6 +2436,17 @@ export class Interpreter {
         return res;
     }
 
+    private pushTempScope(tempTs: rtt.BaseRuntimeType[], state: State): TempsScope {
+        const newScope = new TempsScope(tempTs, state, state.scope);
+
+        for (const lv of newScope.temps) {
+            newScope.set(lv.name, none);
+        }
+
+        state.scope = newScope;
+        return newScope;
+    }
+
     private _evalMsgCall(
         expr: sol.FunctionCall,
         callee: ExternalCallDescription,
@@ -2080,13 +2475,11 @@ export class Interpreter {
 
             // Next compute the msg data
             const argVs = expr.vArguments.map((arg) => this.eval(arg, state));
-            const [dataView] = this._execCall(abiEncodeBuiltin, argVs, argTs, state);
-            this.expect(
-                dataView instanceof BytesMemView,
-                `Expected encoded data not ${ppValue(dataView)}`
-            );
+            const ts = this.pushTempScope(argTs, state);
+            this.assign(ts.temps, argVs, state);
+            const argData = encode(ts.tempVals, argTs, state);
+            this.popScope(state);
 
-            const argData = dataView.decode(state.memory);
             this.expect(argData instanceof Uint8Array);
             data = concatBytes(selector, argData);
 
@@ -2107,36 +2500,47 @@ export class Interpreter {
                 );
             }
 
-            const [dataView] = this._execCall(abiEncodeBuiltin, args, argTs, state);
-            this.expect(
-                dataView instanceof BytesMemView,
-                `Expected encoded data not ${ppValue(dataView)}`
-            );
-            const argData = dataView.decode(state.memory);
+            const ts = this.pushTempScope(argTs, state);
+            this.assign(ts.temps, args, state);
+            const argData = encode(ts.tempVals, argTs, state);
+            this.popScope(state);
+
             this.expect(argData instanceof Uint8Array, ``);
 
             const newContractInfo = this.artifactManager.getContractInfo(contract);
             this.expect(newContractInfo !== undefined);
 
-            const creationBytecode = newContractInfo.bytecode.bytecode;
+            // We need to fill in all the link references of the newly deployed contract from the current contract's refs
+            const [curBytecodeInfo, curBytecode] = getBytecodeInfo(state);
+            const linkMap = decodeLinkMap(curBytecodeInfo, curBytecode);
+            const creationBytecode = this.artifactManager.link(newContractInfo.bytecode, linkMap);
+
             data = concatBytes(creationBytecode, argData);
             isLibCall = false;
         } else {
             const args = expr.vArguments.map((arg) => this.eval(arg, state));
-            this.expect(args.length === 1, `Unexpected arguments to *call builtin`);
 
             if (callee.callKind === "send" || callee.callKind === "transfer") {
-                this.expect(typeof args[0] === "bigint", `Unexpected arguments to *call builtin`);
+                this.expect(
+                    args.length === 1 && typeof args[0] === "bigint",
+                    `Unexpected arguments to *call builtin`
+                );
                 data = new Uint8Array();
                 isLibCall = false;
                 value = args[0];
                 gas = 2300n;
             } else {
-                this.expect(
-                    args[0] instanceof BytesMemView,
-                    `Unexpected arguments to *call builtin`
-                );
-                data = decodeView(args[0], state) as Uint8Array;
+                this.expect(args.length <= 1, `Unexpected arguments to *call builtin`);
+
+                if (args.length === 1) {
+                    this.expect(args[0] instanceof View, `Unexpected arguments to *call builtin`);
+                    const dataView = this.implicitCoercion(args[0], memBytesT, state);
+                    this.expect(dataView instanceof View && dataView.type instanceof rtt.BytesType);
+                    data = decodeView(dataView, state) as Uint8Array;
+                } else {
+                    data = new Uint8Array();
+                }
+
                 isLibCall = callee.callKind === "delegatecall";
             }
         }
@@ -2175,7 +2579,7 @@ export class Interpreter {
             retTs.push(...getterRetT);
         }
 
-        return decode(data, retTs, state);
+        return this.assertNotPoison(state, decode(data, retTs, state));
     }
 
     evalExternalCall(expr: sol.FunctionCall, callee: ExternalCallDescription, state: State): Value {
@@ -2196,7 +2600,12 @@ export class Interpreter {
                 return !res.reverted;
             }
 
-            const encodedData = PointerMemView.allocMemFor(res.data, memBytesT, state.memAllocator);
+            // *call builtins returns just bool for Solidity <0.5.0
+            if (lt(getCodeContractInfo(state).artifact.compilerVersion, "0.5.0")) {
+                return !res.reverted;
+            }
+
+            const encodedData = PointerMemView.allocMemFor(res.data, bytesT, state.memAllocator);
             encodedData.encode(res.data, state.memory, state.memAllocator);
 
             return [!res.reverted, encodedData];
@@ -2290,7 +2699,10 @@ export class Interpreter {
             res = target.vReturnParameters.vParameters.map((ret, i) => {
                 const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
                 if (res === undefined) {
-                    this.fail(NotDefined, ``);
+                    this.fail(
+                        NotDefined,
+                        `Missing value for return ${LocalsScope.returnName(ret, i)}`
+                    );
                 }
                 return res;
             });
@@ -2321,19 +2733,19 @@ export class Interpreter {
         return res;
     }
 
-    evalInternalCall(expr: sol.FunctionCall, callee: rtt.InternalFunRef, state: State): Value {
-        const def = callee.fun;
-        const contract = getContract(state);
-        const resolvedCalleeDef = isMethod(def) ? sol.resolve(contract, def, this._infer) : def;
-
-        this.expect(
-            resolvedCalleeDef !== undefined,
-            `Couldn't resolve callee ${def.name} in contract ${contract.name}`
-        );
-
+    evalInternalCall(expr: sol.FunctionCall, callee: InternalCallTargetValue, state: State): Value {
         const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
         const argTs = expr.vArguments.map((arg) => this.typeOf(arg));
-        const results = this._execCall(resolvedCalleeDef, argVals, argTs, state);
+        let fun: sol.FunctionDefinition;
+
+        if (callee instanceof CurriedVal) {
+            fun = callee.target.fun;
+            argVals.unshift(...callee.args);
+            argTs.unshift(...callee.argTs);
+        } else {
+            fun = callee.fun;
+        }
+        const results = this._execCall(fun, argVals, argTs, state);
 
         if (results.length === 0) {
             return none;
@@ -2371,7 +2783,7 @@ export class Interpreter {
             const res = this._evalMsgCall(expr, liftExtCalRef(callee), state);
 
             if (res.reverted) {
-                this.runtimeError(RuntimeError, state, res.data);
+                this.runtimeError(RuntimeError, state, "Contract creation reverted", res.data);
             }
 
             this.expect(res.newContract !== undefined);
@@ -2431,7 +2843,11 @@ export class Interpreter {
 
         // @todo The order of operations here may not match whats implemented!!!
         for (const [name, optExpr] of expr.vOptionsMap) {
-            const optV = this.evalNP(optExpr, state);
+            let optV = this.evalNP(optExpr, state);
+            this.expect(isPrimitiveValue(optV));
+            const expectedT = name === "salt" ? bytes32 : rtt.uint256;
+
+            optV = this.implicitCoercion(optV, expectedT, state) as NonPoisonValue;
 
             if (name === "value") {
                 this.expect(typeof optV === "bigint");
@@ -2464,10 +2880,11 @@ export class Interpreter {
 
         if (expr.kind === sol.FunctionCallKind.TypeConversion) {
             this.expect(
-                callee instanceof TypeValue,
+                callee instanceof BaseTypeValue,
                 `Type conversion expects a type as its callee`
             );
-            return this.evalTypeConversion(expr, callee.type, state);
+            callee = unwrapUnaryTypeTuples(callee);
+            return this.evalTypeConversion(expr, (callee as TypeValue).type, state);
         }
 
         if (expr.kind === sol.FunctionCallKind.StructConstructorCall) {
@@ -2493,22 +2910,29 @@ export class Interpreter {
         }
 
         // External calls
-        if (callee instanceof rtt.ExternalFunRef || callee instanceof ExternalCallDescription) {
-            return this.evalExternalCall(expr, liftExtCalRef(callee), state);
+        const extCallee = this.coerceToExternallyCallable(callee, state);
+        if (extCallee !== undefined) {
+            return this.evalExternalCall(expr, liftExtCalRef(extCallee), state);
         }
 
         // Internal calls
-        if (callee instanceof rtt.InternalFunRef) {
-            return this.evalInternalCall(expr, callee, state);
-        }
-
-        console.error(callee);
-        nyi(`Call to ${ppValue(callee)} ${callee.constructor.name}`);
+        const intCallee = this.coerceToInternallyCallable(callee);
+        this.expect(intCallee !== undefined, `Unknown callee ${ppValue(callee)}`);
+        return this.evalInternalCall(expr, intCallee, state);
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
         if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "this") {
             return getThis(state);
+        }
+
+        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "super") {
+            const contract = getCodeContract(state);
+            this.expect(
+                contract.vLinearizedBaseContracts.length > 1,
+                `Unexpected call to super() in contract with no bases`
+            );
+            return new DefValue(contract.vLinearizedBaseContracts[1]);
         }
 
         // contract name
@@ -2517,7 +2941,19 @@ export class Interpreter {
         }
 
         if (expr.vReferencedDeclaration instanceof sol.FunctionDefinition) {
-            return new rtt.InternalFunRef(expr.vReferencedDeclaration);
+            const contract = getCodeContract(state);
+            let def: any = expr.vReferencedDeclaration;
+
+            def =
+                isMethod(def) && def.visibility !== sol.FunctionVisibility.External
+                    ? sol.resolve(contract, def, this._infer)
+                    : def;
+            this.expect(
+                def instanceof sol.FunctionDefinition,
+                `Unexpected resolution of ${expr.name} to ${def}`
+            );
+
+            return new rtt.InternalFunRef(def);
         }
 
         // named SourceUnit import
@@ -2604,7 +3040,47 @@ export class Interpreter {
     }
 
     evalIndexRangeAccess(expr: sol.IndexRangeAccess, state: State): Value {
-        nyi(`evalIndexRangeAccess(${printNode(expr)}, ${state})`);
+        const base = this.evalNP(expr.vBaseExpression, state);
+        const start =
+            expr.vStartExpression !== undefined ? this.evalNP(expr.vStartExpression, state) : 0n;
+        let end = expr.vEndExpression !== undefined ? this.evalNP(expr.vEndExpression, state) : -1n;
+
+        this.expect(typeof start === "bigint" && typeof end === "bigint");
+        this.expect(
+            base instanceof rtt.BytesCalldataView ||
+                base instanceof rtt.StringCalldataView ||
+                base instanceof rtt.ArrayCalldataView ||
+                base instanceof MsgDataView
+        );
+
+        const cd = getMsg(state);
+        const indexableView =
+            base instanceof rtt.StringCalldataView
+                ? new rtt.BytesCalldataView(bytesT, base.offset, base.base)
+                : base;
+        const actualLen = indexableView.size(cd);
+        this.expect(typeof actualLen === "bigint");
+
+        // If end range is ommitted assume the length
+        end = end < 0n ? actualLen : end;
+
+        const len = end - start;
+
+        if (start < 0 || end < start || end > actualLen) {
+            this.runtimeError(NoPayloadError, state);
+        }
+
+        const rangeOffset = indexableView.indexView(start, cd);
+        this.expect(rangeOffset instanceof BaseCalldataView);
+        const startOffset = rangeOffset.offset + rangeOffset.base;
+
+        if (base instanceof rtt.BytesCalldataView) {
+            return new rtt.BytesSliceCalldataView(startOffset, len);
+        } else if (base instanceof rtt.StringCalldataView || base instanceof MsgDataView) {
+            return new rtt.StringSliceCalldataView(startOffset, len);
+        } else {
+            return new rtt.ArraySliceCalldataView(base.type, startOffset, len);
+        }
     }
 
     evalLiteral(expr: sol.Literal, state: State): Value {
@@ -2650,52 +3126,77 @@ export class Interpreter {
         return val;
     }
 
+    private getBuiltin(state: State, ...path: string[]): Value {
+        let s = state.scope;
+
+        // @todo: stupid. fix
+        while (s !== undefined && !(s instanceof BuiltinsScope)) {
+            s = s._next;
+        }
+
+        this.expect(s !== undefined, `No builtin scope`);
+
+        let res: Value | undefined = s.builtins;
+
+        for (const id of path) {
+            this.expect(res instanceof BuiltinStruct);
+            res = res.getField(id);
+        }
+
+        this.expect(res instanceof BuiltinStruct || res instanceof BuiltinFunction, ``);
+
+        return res;
+    }
+
+    private getBuiltinStruct(state: State, ...path: string[]): BuiltinStruct {
+        const res = this.getBuiltin(state, ...path);
+        this.expect(res instanceof BuiltinStruct);
+        return res;
+    }
+
     evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
         let baseVal = this.evalNP(expr.vExpression, state);
 
         if (baseVal instanceof Address) {
-            // Builtin
+            // Builtin field of address
             if (expr.vReferencedDeclaration === undefined) {
-                const res = addressBuiltinStruct.getFieldForVersion(
-                    expr.memberName,
-                    this.artifact.compilerVersion
+                const addressBuiltinStruct = this.getBuiltinStruct(
+                    state,
+                    ADDRESS_BUILTIN_STRUCT_NAME
                 );
+                const res = addressBuiltinStruct.getField(expr.memberName);
+
                 this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
 
                 return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
             }
 
-            const solT = this._infer.typeOf(expr.vExpression);
+            const def = expr.vReferencedDeclaration;
 
+            // Reference to an external function or public state var on a contract
             if (
-                solT instanceof sol.UserDefinedType &&
-                solT.definition instanceof sol.ContractDefinition
+                def instanceof sol.FunctionDefinition ||
+                (def instanceof sol.VariableDeclaration &&
+                    def.visibility === sol.StateVariableVisibility.Public)
             ) {
-                const def = expr.vReferencedDeclaration;
-                if (
-                    def instanceof sol.FunctionDefinition ||
-                    (def instanceof sol.VariableDeclaration &&
-                        def.visibility === sol.StateVariableVisibility.Public)
-                ) {
-                    const selector = hexToBytes(`0x${this._infer.signatureHash(def)}`);
+                const selector = hexToBytes(`0x${this._infer.signatureHash(def)}`);
 
-                    return new rtt.ExternalFunRef(baseVal, selector);
-                }
+                return new rtt.ExternalFunRef(baseVal, selector);
             }
         }
 
-        if (
-            baseVal instanceof rtt.ExternalFunRef ||
-            baseVal instanceof ExternalCallDescription ||
-            baseVal instanceof NewCall
-        ) {
-            const res = externalCallableBuiltinStruct.getFieldForVersion(
-                expr.memberName,
-                this.artifact.compilerVersion
+        // Check if this is a reference to an external callable builtin (e.g. .value(), .gas(), ...)
+        const extCallableV = this.coerceToExternallyCallable(baseVal, state);
+        if (extCallableV !== undefined) {
+            const externalCallableBuiltinStruct = this.getBuiltinStruct(
+                state,
+                EXTERNAL_CALL_CALLABLE_FIELDS_NAME
             );
-            this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
+            const res = externalCallableBuiltinStruct.getField(expr.memberName);
 
-            return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
+            if (res) {
+                return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
+            }
         }
 
         if (isPointerView(baseVal)) {
@@ -2716,7 +3217,7 @@ export class Interpreter {
         }
 
         if (baseVal instanceof BuiltinStruct) {
-            const res = baseVal.getFieldForVersion(expr.memberName, this.artifact.compilerVersion);
+            const res = baseVal.getField(expr.memberName);
             this.expect(res !== undefined, `Unknown field ${expr.memberName}`);
             return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
         }
@@ -2725,66 +3226,53 @@ export class Interpreter {
             return length(baseVal, state);
         }
 
+        if (baseVal instanceof Uint8Array && expr.memberName === "length") {
+            return BigInt(baseVal.length);
+        }
+
         if (baseVal instanceof DefValue) {
-            // @todo need to check the expr.memberName here!
+            // Handle Event/Error/Function definition selectors
             if (
-                baseVal.def instanceof sol.EventDefinition ||
-                baseVal.def instanceof sol.ErrorDefinition
+                (baseVal.def instanceof sol.EventDefinition ||
+                    baseVal.def instanceof sol.ErrorDefinition ||
+                    baseVal.def instanceof sol.FunctionDefinition) &&
+                expr.memberName === "selector"
             ) {
                 return hexToBytes(`0x${this._infer.signatureHash(baseVal.def)}`);
             }
 
-            // Lib.Fun where Fun is external is an external fun ref
-            if (
-                baseVal.def instanceof sol.ContractDefinition &&
-                baseVal.def.kind === sol.ContractKind.Library &&
-                expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
-                expr.vReferencedDeclaration.visibility === sol.FunctionVisibility.External
-            ) {
-                const addr = getLibraryLinkedAddress(baseVal.def, state);
-                const selector = hexToBytes(
-                    `0x${this._infer.signatureHash(expr.vReferencedDeclaration)}`
-                );
-                return new rtt.ExternalFunRef(addr, selector);
-            }
-
-            // Contract.Fun where Fun is NOT external is an internal fun ref
-            if (
-                baseVal.def instanceof sol.ContractDefinition &&
-                expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
-                expr.vReferencedDeclaration.visibility !== sol.FunctionVisibility.External
-            ) {
-                return new rtt.InternalFunRef(expr.vReferencedDeclaration);
-            }
-
-            // BaseContract.stateVariable
-            if (
-                baseVal.def instanceof sol.SourceUnit ||
-                (baseVal.def instanceof sol.ContractDefinition &&
-                    isBaseOf(baseVal.def, getCodeContract(state)))
-            ) {
-                const scope = this.makeStaticScope(baseVal.def, state);
-                const res = scope.lookup(expr.memberName);
-                this.expect(
-                    res !== undefined,
-                    `Couldnt find ${expr.memberName} in ${ppValue(baseVal)}`
-                );
-
-                return res;
+            // EnumDef.Option -> the number of the option
+            if (baseVal.def instanceof sol.EnumDefinition) {
+                const res = indexOfEnumOption(baseVal.def, expr.memberName);
+                this.expect(res !== undefined);
+                return BigInt(res);
             }
 
             // - source unit definitions/constants
             // - contract constants. We need to tweak how we built scope here
-            if (
-                baseVal.def instanceof sol.SourceUnit ||
-                (baseVal.def instanceof sol.ContractDefinition &&
-                    expr.vReferencedDeclaration instanceof sol.VariableDeclaration &&
-                    expr.vReferencedDeclaration.mutability === sol.Mutability.Constant)
-            ) {
-                const scope =
-                    baseVal.def instanceof sol.SourceUnit
-                        ? new GlobalScope(baseVal.def, state, this._infer, undefined)
-                        : new ContractScope(baseVal.def, this._infer, state, undefined);
+            // - base state vars called with the base notation Base.Var
+            if (expr.vReferencedDeclaration instanceof sol.VariableDeclaration) {
+                let scope: BaseScope;
+
+                if (expr.vReferencedDeclaration.mutability === sol.Mutability.Constant) {
+                    // Contract or Global scope constant vars
+                    this.expect(
+                        baseVal.def instanceof sol.SourceUnit ||
+                            baseVal.def instanceof sol.ContractDefinition
+                    );
+                    scope =
+                        baseVal.def instanceof sol.SourceUnit
+                            ? new GlobalScope(baseVal.def, state, this._infer, undefined)
+                            : new ContractScope(baseVal.def, this._infer, state, undefined);
+                } else {
+                    // Base contract state var
+                    this.expect(
+                        baseVal.def instanceof sol.ContractDefinition &&
+                            isBaseOf(baseVal.def, getCodeContract(state))
+                    );
+                    scope = this.makeStaticScope(baseVal.def, state);
+                }
+
                 const res = scope.lookup(expr.memberName);
                 this.expect(
                     res !== undefined,
@@ -2801,6 +3289,47 @@ export class Interpreter {
         ) {
             const res = expr.memberName === "push" ? pushBuiltin : popBuiltin;
             return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
+        }
+
+        /**
+         * Using-for member access. Note that we disambiguate `val.foo()` and `Lib.foo(val)`
+         * using the second part of the condition.
+         *
+         * @todo - this check maybe weak. Here we assume that any member-access
+         * to a function, that is not a) `Scope.FunName` b) a builtin and c) a
+         * contract method call, must be a call to a function where the base val is an
+         * implicit first arg. Is this actually true?
+         */
+        if (
+            expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
+            !(
+                baseVal instanceof DefValue &&
+                (baseVal.def instanceof sol.ContractDefinition ||
+                    baseVal.def instanceof sol.SourceUnit)
+            )
+        ) {
+            return new CurriedVal(
+                [baseVal],
+                [this.typeOf(expr.vExpression)],
+                new rtt.InternalFunRef(expr.vReferencedDeclaration)
+            );
+        }
+
+        /**
+         * Finally check if this is a reference to a definition
+         */
+        if (
+            expr.vReferencedDeclaration instanceof sol.ImportDirective ||
+            expr.vReferencedDeclaration instanceof sol.SourceUnit ||
+            expr.vReferencedDeclaration instanceof sol.ContractDefinition ||
+            expr.vReferencedDeclaration instanceof sol.FunctionDefinition ||
+            expr.vReferencedDeclaration instanceof sol.EventDefinition ||
+            expr.vReferencedDeclaration instanceof sol.EnumDefinition ||
+            expr.vReferencedDeclaration instanceof sol.ErrorDefinition ||
+            expr.vReferencedDeclaration instanceof sol.StructDefinition ||
+            expr.vReferencedDeclaration instanceof sol.UserDefinedValueTypeDefinition
+        ) {
+            return new DefValue(expr.vReferencedDeclaration);
         }
 
         nyi(`Member access of ${expr.memberName} in ${ppValue(baseVal)}`);
@@ -2960,7 +3489,7 @@ export class Interpreter {
         const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
 
         if (nd instanceof BuiltinFunction) {
-            return makeBuiltinScope(state);
+            return makeBuiltinScope(state, this.compilerVersion);
         }
 
         while (nd !== undefined) {
@@ -2983,7 +3512,7 @@ export class Interpreter {
         }
 
         scopeNodes.reverse();
-        let scope: BaseScope = makeBuiltinScope(state);
+        let scope: BaseScope = makeBuiltinScope(state, this.compilerVersion);
 
         for (const nd of scopeNodes) {
             if (nd instanceof sol.SourceUnit) {
@@ -3050,5 +3579,31 @@ export class Interpreter {
         }
 
         return res;
+    }
+
+    /**
+     * Check that none of the passed in values are Poison. If any of them is poison throw a runtime exception
+     */
+    public assertNotPoison(state: State, vals: Value[]): Value[] {
+        for (const v of vals) {
+            if (
+                v instanceof ExternalCallDescription ||
+                v instanceof NewCall ||
+                v instanceof CurriedVal
+            ) {
+                continue;
+            }
+
+            if (v instanceof Array) {
+                this.assertNotPoison(state, v);
+                continue;
+            }
+
+            if (isPoison(v)) {
+                this.runtimeError(NoPayloadError, state);
+            }
+        }
+
+        return vals;
     }
 }

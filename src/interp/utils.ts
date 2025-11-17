@@ -19,7 +19,15 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { ExternalCallDescription, NewCall, none, Value } from "./value";
+import {
+    BaseTypeValue,
+    ExternalCallDescription,
+    NewCall,
+    none,
+    TypeTuple,
+    TypeValue,
+    Value
+} from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { ArrayLikeLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
@@ -123,8 +131,8 @@ export function getContract(state: State): sol.ContractDefinition {
 }
 
 /**
- * Get the `BytecodeInfo` and actual bytecode for the currently running context.
- * This handles delegate calls and distinguishing between bytecode and deployed bytecode
+ * Get the `BytecodeInfo` and actual running bytecode for the currently context.
+ * This handles delegate calls, contract constructors (bytecode) and normal execution (deployed bytecode)
  */
 export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     if (state.codeAccount) {
@@ -136,27 +144,28 @@ export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     const info = state.account.contract;
     sol.assert(info !== undefined, ``);
 
-    return state.msg.to.equals(rtt.ZERO_ADDRESS)
-        ? [info.bytecode, state.account.bytecode]
-        : [info.deployedBytecode, state.account.deployedBytecode];
+    if (state.msg.to.equals(rtt.ZERO_ADDRESS)) {
+        const creationBytecode = getMsg(state).slice(0, info.bytecode.bytecode.length);
+        return [info.bytecode, creationBytecode];
+    }
+
+    return [info.deployedBytecode, state.account.deployedBytecode];
 }
 
 /**
  * Given a library `ContractDefinition` and the current `State` get the linked address
  * for that library.
  */
-export function getLibraryLinkedAddress(lib: sol.ContractDefinition, state: State): Address {
+export function getLibraryLinkedAddress(
+    lib: sol.ContractDefinition,
+    state: State
+): Address | undefined {
     sol.assert(lib.kind === sol.ContractKind.Library, ``);
     const libId = `${lib.vScope.sourceEntryKey}:${lib.name}`;
     const [bytecodeInfo, bytecode] = getBytecodeInfo(state);
-    const ranges = bytecodeInfo.linkReferences.get(libId);
-
-    sol.assert(ranges !== undefined && ranges.length > 0, `Ranges missing for ${libId}: ${ranges}`);
-
     const linkMap = decodeLinkMap(bytecodeInfo, bytecode);
     const addr = linkMap.get(libId);
 
-    sol.assert(addr !== undefined, `No linked address found for ${libId}`);
     return addr;
 }
 
@@ -297,7 +306,12 @@ export function indexView<T extends rtt.StateArea>(
 
         if (v instanceof rtt.ArrayMemView || v instanceof rtt.BytesMemView) {
             res = v.indexView(key, state.memory);
-        } else if (v instanceof rtt.ArrayCalldataView || v instanceof rtt.BytesCalldataView) {
+        } else if (
+            v instanceof rtt.ArrayCalldataView ||
+            v instanceof rtt.BytesCalldataView ||
+            v instanceof rtt.ArraySliceCalldataView ||
+            v instanceof rtt.BytesSliceCalldataView
+        ) {
             res = v.indexView(key, getMsg(state));
         } else if (v instanceof rtt.ArrayStorageView || v instanceof rtt.BytesStorageView) {
             res = v.indexView(key, getStateStorage(state));
@@ -364,6 +378,26 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
 }
 
 /**
+ * The type of a "view" value is a Pointer to the underlying view type
+ * @param v
+ */
+export function typeOfView(v: rtt.View): rtt.BaseRuntimeType {
+    let loc: sol.DataLocation;
+
+    if (v instanceof BaseMemoryView) {
+        loc = sol.DataLocation.Memory;
+    } else if (v instanceof BaseStorageView) {
+        loc = sol.DataLocation.Storage;
+    } else if (v instanceof BaseCalldataView) {
+        loc = sol.DataLocation.CallData;
+    } else {
+        nyi(`View type ${v.constructor.name}`);
+    }
+
+    return new rtt.PointerType(v.type, loc);
+}
+
+/**
  * Returns true IFF a value of `rType` is directly assignable to an LValue of `lvType`.
  * @param lvType
  * @param rType
@@ -397,7 +431,7 @@ export function isDirectlyAssignable(
             );
         }
 
-        return typesEqualModuloLocation(lvType.toType, rType);
+        return typesEqualModuloLocation(lvType, rType);
     }
 
     // Primitive LValue type
@@ -606,7 +640,9 @@ export function removeLiteralTypes(
     }
 
     if (t instanceof sol.StringLiteralType) {
-        return sol.types.stringMemory;
+        return t.isHex || (e instanceof sol.Literal && e.value === null)
+            ? sol.types.bytesMemory
+            : sol.types.stringMemory;
     }
 
     // Tuples
@@ -647,12 +683,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -692,6 +728,7 @@ export const addressT = new rtt.AddressType();
 export const memStringT = new rtt.PointerType(stringT, sol.DataLocation.Memory);
 export const bytesT = new rtt.BytesType();
 export const memBytesT = new rtt.PointerType(bytesT, sol.DataLocation.Memory);
+export const cdBytesT = new rtt.PointerType(bytesT, sol.DataLocation.CallData);
 export const bytes1 = new rtt.FixedBytesType(1);
 export const defT = new DefType();
 export const typeT = new TypeType();
@@ -723,8 +760,77 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
+}
+
+export function indexOfEnumOption(
+    enumDef: sol.EnumDefinition,
+    optionName: string
+): number | undefined {
+    for (let i = 0; i < enumDef.vMembers.length; i++) {
+        if (enumDef.vMembers[i].name == optionName) {
+            return i;
+        }
+    }
+
+    return undefined;
+}
+
+export function unwrapUnaryTypeTuples(t: BaseTypeValue): TypeValue {
+    while (t instanceof TypeTuple && t.elements.length === 1) {
+        t = t.elements[0];
+    }
+
+    return t as TypeValue;
+}
+
+export function bytesToIntOfType(
+    bytes: Uint8Array,
+    type: rtt.IntType
+): bigint | rtt.DecodingFailure {
+    let res = rtt.bigEndianBufToBigint(bytes);
+
+    // Convert signed negative 2's complement values
+    if (type.signed && (res & (BigInt(1) << BigInt(type.numBits - 1))) !== BigInt(0)) {
+        // Mask out any 1's above the number's size
+        res = res & ((BigInt(1) << BigInt(type.numBits)) - BigInt(1));
+        res = -((BigInt(1) << BigInt(type.numBits)) - res);
+    }
+
+    if (!rtt.fits(res, type)) {
+        return new rtt.DecodingFailure(
+            `Decoded value ${res} doesn't fit in expected type ${type.pp()}`
+        );
+    }
+    return res;
+}
+
+/**
+ * Get the using for directives that are in scope for a given contract or source unit
+ * @param scope
+ */
+export function getUsingForDirectives(
+    scope: sol.ContractDefinition | sol.SourceUnit,
+    impoted = false
+): Iterable<sol.UsingForDirective> {
+    const res: sol.UsingForDirective[] = [];
+
+    if (scope instanceof sol.ContractDefinition) {
+        for (const base of scope.vLinearizedBaseContracts) {
+            res.push(...base.vUsingForDirectives);
+        }
+
+        scope = scope.vScope;
+    }
+
+    // For imported units we only consider global directives. For the current unit consider all directives
+    res.push(...scope.vUsingForDirectives.filter((directive) => !impoted || directive.isGlobal));
+
+    for (const imp of scope.vImportDirectives) {
+        res.push(...getUsingForDirectives(imp.vSourceUnit, true));
+    }
+    return res;
 }

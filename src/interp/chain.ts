@@ -1,4 +1,4 @@
-import { ContractInfo, Storage, nyi, ZERO_ADDRESS, ImmMap } from "sol-dbg";
+import { ContractInfo, Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
 import { CallResult, makeStateForAccount, SolMessage, WorldInterface } from "./state";
 import { Interpreter } from "./interp";
 import { ArtifactManager } from "./artifactManager";
@@ -51,8 +51,9 @@ export class Chain implements WorldInterface {
         return this.execMsg(msg);
     }
 
-    staticcall(): CallResult {
-        throw new Error("Method not implemented.");
+    staticcall(msg: SolMessage): CallResult {
+        msg.isStaticCall = true;
+        return this.call(msg);
     }
 
     delegatecall(msg: SolMessage): CallResult {
@@ -97,7 +98,7 @@ export class Chain implements WorldInterface {
     }
 
     // Make an externally owned account
-    makeEOA(address: Address, initialBalance: bigint): void {
+    makeEmptyAccount(address: Address, initialBalance: bigint): void {
         // If no such account exists create a new EoA
         const newAccount: AccountInfo = {
             address,
@@ -127,10 +128,11 @@ export class Chain implements WorldInterface {
     private getAccountForMessage(msg: SolMessage): AccountInfo {
         // Normal call
         if (!msg.to.equals(ZERO_ADDRESS)) {
-            const account = this.getAccount(msg.to);
+            let account = this.getAccount(msg.to);
 
             if (account === undefined) {
-                nyi(`calling a missing account`);
+                this.makeEmptyAccount(msg.to, 0n);
+                account = this.getAccount(msg.to) as AccountInfo;
             }
 
             return account;
@@ -171,7 +173,14 @@ export class Chain implements WorldInterface {
         const toAccount = this.getAccountForMessage(msg);
 
         const contract = toAccount.contract;
-        this.expect(contract !== undefined, `Not an EoA`);
+
+        // Calls to contracts with no code succeed.
+        if (contract === undefined) {
+            return {
+                reverted: false,
+                data: new Uint8Array()
+            };
+        }
 
         const valueSendingAccount =
             delegatingAccount !== undefined ? delegatingAccount : fromAccount;
@@ -206,6 +215,7 @@ export class Chain implements WorldInterface {
             delegatingAccount ? toAccount : undefined,
             msg.isStaticCall
         );
+
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);
 

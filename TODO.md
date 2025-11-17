@@ -231,51 +231,62 @@
 215    - add balance handling
 216    - add test with balance
 217    - add code_in_constructor.sol test
-218     - add abi.decode family
+218    - add abi.decode family
+219    - add abi.encode family
+220    - implement and test address.call/address.staticcall
+221 - implement address.delegatecall
+222 - test contract creation from delegate context creates the same address as from the source contract
+223 - fix memberAccess to not reply on scopes
+224 - consider if I want to add a static call flag as well? How would we check that?
+225 - test with delegate call with matching layout
+226 - add test with external calls
+227 - finish throw test
+228 - refactor builtins to a simpler model with version descriptors
+229 - get debugging to work with new binary
+230 - implement abi.encodePacked 
+231 - keccak256
 
-- add abi.encode family
+- add a new polymorpic TVar type TMovedTo(N, Location) saying that it matches any type, but it moves it to the given location.
+Use this type for abi.encode. Can we also use it for push?
+- on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?
+- is "foo".length byte length or uncode code points?
+- test remaining sol2maruir tests to determine readiness level
+- address.callcode
+- implement block builtins
+    - store block in state
 
-    - implement and test address.call/address.staticcall
-- implement abi.encodePacked 
+- implement gasleft/block.gas
+- implement tx builtins
+    - store tx info in state
 
+- implement math builtins 
+- implement selfdestruct
+- implement type(Contract), type(Interface), type(IntType)
+    - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
+- cli for playing
+- implement emit
+- implement storage for immutable state vars
+- implement computing the correct final deployed bytecode in the face of immutables
+- do a pass over contract scopes
 
 Issue: ContractScope seems wrong
     - defs not included from base contracts
     - functions should be internalFunRefs
-    - we have 2 views to a contract scope - internal and external. Internal - when accessing a field from code inside a contract or its inheriting contract and external when accessing ContractName.Field. To fix this, I don't think I should use scopes when resolving member accesses of ContractName.field
-
-    - implement address.delegatecall/address.callcode
-    - finish throw test
-    - test builtins
-    - implement emit
-    - implement storage for immutable state vars
-    - implement computing the correct final deployed bytecode in the face of immutables
-    - test contract creation from delegate context creates the same address as from the source contract
-    - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
+    - need an "immutable" var space somewhere in the state
 
 Constructors:
     - add a test with an abstract constructor taking storage pointers
     - add test with difference in initializing order depending on old codegen or new codegen
 
-- clean test run
-- consider if I want to add a static call flag as well? How would we check that?
 - try and add a test where we call a contract function during constant initialization (maybe library routine?)
-- test with delegate call with matching layout
 - test with delegate call with mismatched layout
 - test with delegate call where the call fails
 - test with nested delegate call
 - test with nested delegate call where the nested call fails
 
 - add test with order of operations for old and new style gas/value/salt passing
-- add test with external calls
 - add test with external calls where an inner one fails (should propagate up)
-- test with non-constant expression for size in abi.decode array type
 - gatherDefs across ContractScope and UnitScope can be unified. Unneccessary code duplication. Maybe a base DefScope? With an interface that both implement?
-
-    - plan staticcall()
-        - add a static flag to state?
-    - plan delegatecall()
-        - is there a way to test it without assembly?
 
 - make bugs for:
     - polymorphism doesnt work well for decode
@@ -284,9 +295,7 @@ Constructors:
 - maybe move constants cache to Chain from Artifact? Though logically it feels like it fits better there....
 - Interp.makeState duplicates logic in Chain
 - add unit test with empty constructors and calling
-- add abi.encodeCall test with failure in type checking
 
-- builtins (nyi for anything needing external call state)
 - migrate builtin tests
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
@@ -295,16 +304,12 @@ Constructors:
     - add remaining named defs to global and struct scopes
     - update member access to handle Enum.Option
 
-- add test notes from other branch
 - add BaseWorld class that has an ArtifactManager
-
-- need an "immutable" var space somewhere in the state
 - make an exhaustive test for coercions from old code
 
 // ---------------
 - test virtual function resolves to public getter
 - more coercions
-- cli for playing
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos
