@@ -51,6 +51,7 @@ import {
     BuiltinFunction,
     BuiltinStruct,
     BytesStorageLength,
+    CurriedVal,
     DefValue,
     ExternalCallDescription,
     ExternalCallTargetValue,
@@ -765,6 +766,7 @@ export class Interpreter {
 
     /**
      * Make an internal call to `callee` with arguments `args` in state `state`.
+     * @todo - delete. No longer neccessary
      * @param callee
      * @param args
      * @param state
@@ -1468,7 +1470,7 @@ export class Interpreter {
     }
 
     private coerceToInternallyCallable(v: Value): InternalCallTargetValue | undefined {
-        if (v instanceof rtt.InternalFunRef) {
+        if (v instanceof rtt.InternalFunRef || v instanceof CurriedVal) {
             return v;
         }
 
@@ -2731,10 +2733,19 @@ export class Interpreter {
         return res;
     }
 
-    evalInternalCall(expr: sol.FunctionCall, callee: rtt.InternalFunRef, state: State): Value {
+    evalInternalCall(expr: sol.FunctionCall, callee: InternalCallTargetValue, state: State): Value {
         const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
         const argTs = expr.vArguments.map((arg) => this.typeOf(arg));
-        const results = this._execCall(callee.fun, argVals, argTs, state);
+        let fun: sol.FunctionDefinition;
+
+        if (callee instanceof CurriedVal) {
+            fun = callee.target.fun;
+            argVals.unshift(...callee.args);
+            argTs.unshift(...callee.argTs);
+        } else {
+            fun = callee.fun;
+        }
+        const results = this._execCall(fun, argVals, argTs, state);
 
         if (results.length === 0) {
             return none;
@@ -3280,6 +3291,33 @@ export class Interpreter {
             return this.evalBuiltinMemberAccess(expr, res, baseVal, state);
         }
 
+        /**
+         * Using-for member access. Note that we disambiguate `val.foo()` and `Lib.foo(val)`
+         * using the second part of the condition.
+         *
+         * @todo - this check maybe weak. Here we assume that any member-access
+         * to a function, that is not a) `Scope.FunName` b) a builtin and c) a
+         * contract method call, must be a call to a function where the base val is an
+         * implicit first arg. Is this actually true?
+         */
+        if (
+            expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
+            !(
+                baseVal instanceof DefValue &&
+                (baseVal.def instanceof sol.ContractDefinition ||
+                    baseVal.def instanceof sol.SourceUnit)
+            )
+        ) {
+            return new CurriedVal(
+                [baseVal],
+                [this.typeOf(expr.vExpression)],
+                new rtt.InternalFunRef(expr.vReferencedDeclaration)
+            );
+        }
+
+        /**
+         * Finally check if this is a reference to a definition
+         */
         if (
             expr.vReferencedDeclaration instanceof sol.ImportDirective ||
             expr.vReferencedDeclaration instanceof sol.SourceUnit ||
@@ -3548,7 +3586,11 @@ export class Interpreter {
      */
     public assertNotPoison(state: State, vals: Value[]): Value[] {
         for (const v of vals) {
-            if (v instanceof ExternalCallDescription || v instanceof NewCall) {
+            if (
+                v instanceof ExternalCallDescription ||
+                v instanceof NewCall ||
+                v instanceof CurriedVal
+            ) {
                 continue;
             }
 

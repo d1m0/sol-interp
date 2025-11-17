@@ -15,7 +15,7 @@ import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
 import { defT, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
-import { BaseInterpType } from "./types";
+import { astToRuntimeType, BaseInterpType } from "./types";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -218,7 +218,7 @@ export class LocalsScope extends BaseLocalsScope {
                         for (const decl of stmt.vDeclarations) {
                             res.set(
                                 decl.name,
-                                rtt.astToRuntimeType(
+                                astToRuntimeType(
                                     infer.variableDeclarationToTypeNode(decl),
                                     infer,
                                     sol.DataLocation.Memory
@@ -239,7 +239,7 @@ export class LocalsScope extends BaseLocalsScope {
                 for (const decl of node.vDeclarations) {
                     res.set(
                         decl.name,
-                        rtt.astToRuntimeType(
+                        astToRuntimeType(
                             infer.variableDeclarationToTypeNode(decl),
                             infer,
                             sol.DataLocation.Memory
@@ -251,11 +251,7 @@ export class LocalsScope extends BaseLocalsScope {
             for (const decl of node.vParameters.vParameters) {
                 res.set(
                     decl.name,
-                    rtt.astToRuntimeType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        infer,
-                        undefined
-                    )
+                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
                 );
             }
 
@@ -263,22 +259,14 @@ export class LocalsScope extends BaseLocalsScope {
                 const decl = node.vReturnParameters.vParameters[i];
                 res.set(
                     LocalsScope.returnName(decl, i),
-                    rtt.astToRuntimeType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        infer,
-                        undefined
-                    )
+                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
                 );
             }
         } else if (node instanceof sol.ModifierDefinition) {
             for (const decl of node.vParameters.vParameters) {
                 res.set(
                     decl.name,
-                    rtt.astToRuntimeType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        infer,
-                        undefined
-                    )
+                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
                 );
             }
         } else if (node instanceof sol.TryCatchClause) {
@@ -286,7 +274,7 @@ export class LocalsScope extends BaseLocalsScope {
                 for (const decl of node.vParameters.vParameters) {
                     res.set(
                         decl.name,
-                        rtt.astToRuntimeType(
+                        astToRuntimeType(
                             infer.variableDeclarationToTypeNode(decl),
                             infer,
                             undefined
@@ -310,7 +298,7 @@ function defToType(decl: UnitDef, infer: sol.InferType): rtt.BaseRuntimeType {
     // for the type definitions and import defs
     if (decl instanceof sol.VariableDeclaration) {
         // @todo I think loc here should be determine based on the scope of the def?
-        return rtt.astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer);
+        return astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer);
     } else if (
         decl instanceof sol.ContractDefinition ||
         decl instanceof sol.FunctionDefinition ||
@@ -390,7 +378,7 @@ export class ContractScope extends BaseScope {
         for (const v of constVars) {
             defTypes.set(
                 v.name,
-                rtt.astToRuntimeType(
+                astToRuntimeType(
                     infer.variableDeclarationToTypeNode(v),
                     infer,
                     sol.DataLocation.Memory
@@ -584,7 +572,7 @@ export class GlobalScope extends BaseScope {
         for (const [name, decl] of declMap) {
             const type =
                 decl instanceof sol.VariableDeclaration
-                    ? rtt.astToRuntimeType(
+                    ? astToRuntimeType(
                           infer.variableDeclarationToTypeNode(decl),
                           infer,
                           sol.DataLocation.Memory

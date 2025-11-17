@@ -15,6 +15,7 @@ import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
 import { concretize, substitute } from "./polymorphic";
+import { BaseInterpType } from "./types";
 
 export abstract class BaseInterpValue implements sol.PPAble {
     abstract pp(): string;
@@ -257,6 +258,16 @@ export class ExternalCallDescription {
     ) {}
 }
 
+export class CurriedVal {
+    constructor(
+        public readonly args: Value[],
+        public readonly argTs: BaseInterpType[],
+        public readonly target: InternalFunRef
+    ) {
+        sol.assert(args.length === argTs.length, `Expected same number of args and types`);
+    }
+}
+
 export const none = new NoneValue();
 
 export type Value =
@@ -268,9 +279,13 @@ export type Value =
     | TypeTuple
     | ExternalCallDescription
     | NewCall
-    | Value[];
+    | Value[]
+    | CurriedVal;
 
-// @todo migrate to sol-dbg
+/**
+ * Primitive values are those that can be persisted in memory,storage,calldata or in a local varibale
+ * @todo migrate to sol-dbg
+ */
 type NonPoisonPrimitiveValue =
     | bigint // int/uint/enum
     | boolean // bool
@@ -279,7 +294,7 @@ type NonPoisonPrimitiveValue =
     | FunctionValue // function types
     | Slice // array slices
     | View<any, BaseValue, any, rtt.BaseRuntimeType> // Pointer Values
-    | TypeValue // Type Values and TypeTuples are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
+    | TypeValue // Type Values, TypeTuples, NewCall and ExternallCallDescription are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
     | TypeTuple
     | NewCall
     | ExternalCallDescription;
@@ -289,13 +304,14 @@ export type NonPoisonValue =
     | BuiltinFunction
     | BuiltinStruct
     | DefValue
+    | CurriedVal
     | Value[];
 
 // Values that represent possible external call targets. Must determine at least an address and a selector
 export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDescription;
 
 // Values that represent possible internal call targets. Currently just InteranalFunRef
-export type InternalCallTargetValue = InternalFunRef;
+export type InternalCallTargetValue = InternalFunRef | CurriedVal;
 
 export class BytesStorageLength {
     constructor(public readonly view: rtt.BytesStorageView) {}

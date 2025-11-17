@@ -807,3 +807,30 @@ export function bytesToIntOfType(
     }
     return res;
 }
+
+/**
+ * Get the using for directives that are in scope for a given contract or source unit
+ * @param scope
+ */
+export function getUsingForDirectives(
+    scope: sol.ContractDefinition | sol.SourceUnit,
+    impoted = false
+): Iterable<sol.UsingForDirective> {
+    const res: sol.UsingForDirective[] = [];
+
+    if (scope instanceof sol.ContractDefinition) {
+        for (const base of scope.vLinearizedBaseContracts) {
+            res.push(...base.vUsingForDirectives);
+        }
+
+        scope = scope.vScope;
+    }
+
+    // For imported units we only consider global directives. For the current unit consider all directives
+    res.push(...scope.vUsingForDirectives.filter((directive) => !impoted || directive.isGlobal));
+
+    for (const imp of scope.vImportDirectives) {
+        res.push(...getUsingForDirectives(imp.vSourceUnit, true));
+    }
+    return res;
+}
