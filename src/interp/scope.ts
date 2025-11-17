@@ -13,7 +13,7 @@ import {
 } from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
-import { ArrayLikeLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
+import { FixedBytesLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
 import { defT, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
 import { astToRuntimeType, BaseInterpType } from "./types";
 
@@ -124,7 +124,7 @@ abstract class BaseLocalsScope extends BaseScope {
         }
 
         if (t instanceof rtt.FixedBytesType) {
-            return new ArrayLikeLocalView(t, [this, name]);
+            return new FixedBytesLocalView(t, [this, name]);
         }
 
         return new PrimitiveLocalView(t, [this, name]);

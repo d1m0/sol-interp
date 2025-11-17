@@ -29,7 +29,7 @@ import {
     Value
 } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
-import { ArrayLikeLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
+import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, DefType, TypeType } from "./types";
 import { Address } from "@ethereumjs/util";
@@ -282,7 +282,7 @@ export function length<T extends rtt.StateArea>(
         res = v.size(state.memory);
     } else if (rtt.isArrayLikeCalldataView(v)) {
         res = v.size(getMsg(state));
-    } else if (v instanceof ArrayLikeLocalView) {
+    } else if (v instanceof FixedBytesLocalView) {
         res = v.size();
     } else {
         nyi(`getSize(${v})`);

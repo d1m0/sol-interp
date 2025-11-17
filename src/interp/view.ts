@@ -109,7 +109,7 @@ export class PointerLocalView
     }
 }
 
-export class ArrayLikeLocalView
+export class FixedBytesLocalView
     extends BaseLocalView<Uint8Array, FixedBytesType>
     implements ArrayLikeView<any, SingleByteLocalView>
 {
@@ -118,7 +118,7 @@ export class ArrayLikeLocalView
     }
 
     indexView(key: bigint): DecodingFailure | SingleByteLocalView {
-        if (key < 0n || key > this.type.numBytes) {
+        if (key < 0n || key >= this.type.numBytes) {
             return new DecodingFailure(`OoB access`);
         }
 
@@ -163,6 +163,6 @@ export function isArrayLikeView(v: any): v is ArrayLikeView<any, View> {
         isArrayLikeMemView(v) ||
         isArrayLikeCalldataView(v) ||
         isArrayLikeStorageView(v) ||
-        v instanceof ArrayLikeLocalView
+        v instanceof FixedBytesLocalView
     );
 }

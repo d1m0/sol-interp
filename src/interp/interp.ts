@@ -134,7 +134,7 @@ import {
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
 import {
     BaseLocalView,
-    ArrayLikeLocalView,
+    FixedBytesLocalView,
     isArrayLikeView,
     isPointerView,
     PointerLocalView,
@@ -1407,7 +1407,7 @@ export class Interpreter {
                     idxView = baseLV.indexView(indexVal, getMsg(state));
                 } else if (isArrayLikeStorageView(baseLV)) {
                     idxView = baseLV.indexView(indexVal, getStateStorage(state));
-                } else if (baseLV instanceof ArrayLikeLocalView) {
+                } else if (baseLV instanceof FixedBytesLocalView) {
                     idxView = baseLV.indexView(indexVal);
                 } else {
                     nyi(`Unkown ArrayLikeView ${baseLV.constructor.name}`);
@@ -3019,7 +3019,7 @@ export class Interpreter {
                 this.runtimeError(OOBError, state);
             }
 
-            res = BigInt(baseVal[Number(indexVal)]);
+            res = baseVal.slice(Number(indexVal), Number(indexVal + 1n));
         } else if (baseVal instanceof MapStorageView) {
             const key =
                 indexVal instanceof View
