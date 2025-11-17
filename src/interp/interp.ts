@@ -21,7 +21,6 @@ import {
     MapStorageView,
     StringMemView,
     BytesMemView,
-    StringStorageView,
     BytesStorageView,
     MAX_ARR_DECODE_LIMIT,
     stackTop,
@@ -152,7 +151,11 @@ import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { AnyType, astToRuntimeType, BaseInterpType } from "./types";
 import { InterpVisitor } from "./visitors";
-import { castStringToBytes, decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
+import {
+    castBytesToString,
+    castStringToBytes,
+    decodeLinkMap
+} from "sol-dbg/dist/debug/decoding/utils";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -2214,14 +2217,31 @@ export class Interpreter {
             toT instanceof rtt.BytesType
         ) {
             this.expect(
-                fromV instanceof StringMemView ||
+                fromV instanceof rtt.StringMemView ||
                     fromV instanceof rtt.StringCalldataView ||
                     fromV instanceof rtt.StringSliceCalldataView ||
-                    fromV instanceof StringStorageView,
+                    fromV instanceof rtt.StringStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
             return castStringToBytes(fromV);
+        }
+
+        // bytes ptr -> strings
+        if (
+            fromT instanceof rtt.PointerType &&
+            fromT.toType instanceof rtt.BytesType &&
+            toT instanceof rtt.StringType
+        ) {
+            this.expect(
+                fromV instanceof rtt.BytesMemView ||
+                    fromV instanceof rtt.BytesCalldataView ||
+                    fromV instanceof rtt.BytesSliceCalldataView ||
+                    fromV instanceof rtt.BytesStorageView,
+                `Expected string pointer not ${ppValue(fromV)}`
+            );
+
+            return castBytesToString(fromV);
         }
 
         // string literals -> fixed bytes
@@ -2275,12 +2295,22 @@ export class Interpreter {
             return res;
         }
 
-        // int (literal) -> address
+        // int -> address
         if (fromT instanceof rtt.IntType && toT instanceof rtt.AddressType) {
             this.expect(typeof fromV === "bigint");
-            const addr = new Uint8Array(20);
-            rtt.encodeBigintInBigEndianBuf(fromV, addr, fromT.numBits / 8);
-            return new Address(addr);
+            scratchWord.fill(0);
+            const fromView = new IntMemView(fromT, 0n);
+            fromView.encode(fromV, scratchWord);
+            return new Address(scratchWord.slice(12));
+        }
+
+        // address -> int
+        if (fromT instanceof rtt.AddressType && toT instanceof rtt.IntType && toT.numBits >= 160) {
+            this.expect(fromV instanceof Address);
+            const bytes = setLengthLeft(fromV.bytes, 32);
+            // Need to use an IntMemView here as in <0.5.0 you could cast an address to a signed integer
+            const view = new IntMemView(toT, 0n);
+            return view.decode(bytes);
         }
 
         // library -> address
