@@ -14,8 +14,8 @@ import {
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { FixedBytesLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
-import { defT, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
-import { astToRuntimeType, BaseInterpType } from "./types";
+import { getStateStorage, isValueType, panic, setStateStorage } from "./utils";
+import { BaseInterpType, typeIdToRuntimeType } from "./types";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -207,10 +207,10 @@ export class LocalsScope extends BaseLocalsScope {
         node: LocalsScopeNodeType,
         version: string
     ): Map<string, rtt.BaseRuntimeType> {
-        const infer = new sol.InferType(version);
         const res = new Map<string, rtt.BaseRuntimeType>();
 
         if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
+            const ctx = node.requiredContext;
             if (lt(version, "0.5.0")) {
                 // In Solidity 0.4.x all state vars have block-wide scope
                 for (const stmt of node.vStatements) {
@@ -218,9 +218,9 @@ export class LocalsScope extends BaseLocalsScope {
                         for (const decl of stmt.vDeclarations) {
                             res.set(
                                 decl.name,
-                                astToRuntimeType(
-                                    infer.variableDeclarationToTypeNode(decl),
-                                    infer,
+                                typeIdToRuntimeType(
+                                    sol.typeOf(decl),
+                                    ctx,
                                     sol.DataLocation.Memory
                                 )
                             );
@@ -231,6 +231,8 @@ export class LocalsScope extends BaseLocalsScope {
                 // Nothing to do
             }
         } else if (node instanceof sol.VariableDeclarationStatement) {
+            const ctx = node.requiredContext;
+
             if (lt(version, "0.5.0") && !(node.parent instanceof sol.ForStatement)) {
                 // Nothing to do
             } else {
@@ -239,19 +241,21 @@ export class LocalsScope extends BaseLocalsScope {
                 for (const decl of node.vDeclarations) {
                     res.set(
                         decl.name,
-                        astToRuntimeType(
-                            infer.variableDeclarationToTypeNode(decl),
-                            infer,
+                        typeIdToRuntimeType(
+                            sol.typeOf(decl),
+                            ctx,
                             sol.DataLocation.Memory
                         )
                     );
                 }
             }
         } else if (node instanceof sol.FunctionDefinition) {
+            const ctx = node.requiredContext;
+
             for (const decl of node.vParameters.vParameters) {
                 res.set(
                     decl.name,
-                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                    typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined)
                 );
             }
 
@@ -259,32 +263,36 @@ export class LocalsScope extends BaseLocalsScope {
                 const decl = node.vReturnParameters.vParameters[i];
                 res.set(
                     LocalsScope.returnName(decl, i),
-                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                    typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined)
                 );
             }
         } else if (node instanceof sol.ModifierDefinition) {
+            const ctx = node.requiredContext;
+
             for (const decl of node.vParameters.vParameters) {
                 res.set(
                     decl.name,
-                    astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer, undefined)
+                    typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined)
                 );
             }
         } else if (node instanceof sol.TryCatchClause) {
+            const ctx = node.requiredContext;
+
             if (node.vParameters) {
                 for (const decl of node.vParameters.vParameters) {
                     res.set(
                         decl.name,
-                        astToRuntimeType(
-                            infer.variableDeclarationToTypeNode(decl),
-                            infer,
+                        typeIdToRuntimeType(
+                            sol.typeOf(decl),
+                            ctx,
                             undefined
                         )
                     );
                 }
             }
         } else {
-            for (let i = 0; i < node.type.argTs.length; i++) {
-                res.set(`arg_${i}`, node.type.argTs[i]);
+            for (let i = 0; i < node.type.solType.parameters.length; i++) {
+                res.set(`arg_${i}`, node.type.solType.parameters[i]);
             }
         }
 
@@ -293,12 +301,13 @@ export class LocalsScope extends BaseLocalsScope {
 }
 
 // @todo should I move this inside the global/contract scope classes?
-function defToType(decl: UnitDef, infer: sol.InferType): rtt.BaseRuntimeType {
+function defToType(decl: UnitDef): rtt.BaseRuntimeType {
+    const ctx = decl.requiredContext;
     // @todo - this ugly struct is temporary until I decide if I need separate types
     // for the type definitions and import defs
     if (decl instanceof sol.VariableDeclaration) {
         // @todo I think loc here should be determine based on the scope of the def?
-        return astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer);
+        return typeIdToRuntimeType(sol.typeOf(decl), ctx);
     } else if (
         decl instanceof sol.ContractDefinition ||
         decl instanceof sol.FunctionDefinition ||
@@ -364,11 +373,11 @@ export class ContractScope extends BaseScope {
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
-        infer: sol.InferType,
         state: State,
         _next: BaseScope | undefined
     ) {
-        const [layoutType] = getContractLayoutType(contract, infer);
+        const ctx = contract.requiredContext;
+        const [layoutType] = getContractLayoutType(contract);
         const defTypes = new Map<string, rtt.BaseRuntimeType>(layoutType.fields);
 
         const constVars = contract.vStateVariables.filter(
@@ -378,9 +387,9 @@ export class ContractScope extends BaseScope {
         for (const v of constVars) {
             defTypes.set(
                 v.name,
-                astToRuntimeType(
-                    infer.variableDeclarationToTypeNode(v),
-                    infer,
+                typeIdToRuntimeType(
+                    sol.typeOf(v),
+                    ctx,
                     sol.DataLocation.Memory
                 )
             );
@@ -393,7 +402,7 @@ export class ContractScope extends BaseScope {
                 continue;
             }
 
-            defTypes.set(name, defToType(def, infer));
+            defTypes.set(name, defToType(def));
         }
 
         super(`<contract ${contract.name}>`, defTypes, state, _next);
@@ -563,21 +572,17 @@ export class GlobalScope extends BaseScope {
     constructor(
         public readonly unit: sol.SourceUnit,
         state: State,
-        infer: sol.InferType,
         _next: BaseScope | undefined
     ) {
+        const ctx = unit.requiredContext;
         const defMap = new Map<string, rtt.BaseRuntimeType>();
         const declMap = GlobalScope.gatherDefs(unit);
 
         for (const [name, decl] of declMap) {
             const type =
                 decl instanceof sol.VariableDeclaration
-                    ? astToRuntimeType(
-                          infer.variableDeclarationToTypeNode(decl),
-                          infer,
-                          sol.DataLocation.Memory
-                      )
-                    : defToType(decl, infer);
+                    ? typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
+                    : defToType(decl);
             defMap.set(name, type);
         }
 

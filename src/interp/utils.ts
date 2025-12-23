@@ -20,18 +20,15 @@ import {
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import {
-    BaseTypeValue,
     ExternalCallDescription,
     NewCall,
     none,
-    TypeTuple,
-    TypeValue,
     Value
 } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
-import { BaseInterpType, DefType, TypeType } from "./types";
+import { BaseInterpType, typeIdToRuntimeType } from "./types";
 import { Address } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
@@ -667,13 +664,13 @@ export function removeLiteralTypes(
 
 export function getGetterArgAndReturnTs(
     getter: sol.VariableDeclaration,
-    infer: sol.InferType
 ): [BaseInterpType[], BaseInterpType[]] {
-    const [solArgTs, solRetT] = infer.getterArgsAndReturn(getter);
+    const ctx = getter.requiredContext;
+    const [solArgTs, solRetT] = sol.getterArgsAndReturn(getter);
     const argTs: BaseInterpType[] = solArgTs.map((solT) =>
-        rtt.astToRuntimeType(solT, infer, sol.DataLocation.CallData)
+        typeIdToRuntimeType(solT, ctx, sol.DataLocation.CallData)
     );
-    const retT = rtt.astToRuntimeType(solRetT, infer, sol.DataLocation.CallData);
+    const retT = typeIdToRuntimeType(solRetT, ctx, sol.DataLocation.CallData);
     return [argTs, retT instanceof rtt.TupleType ? retT.elementTypes : [retT]];
 }
 
@@ -730,8 +727,6 @@ export const bytesT = new rtt.BytesType();
 export const memBytesT = new rtt.PointerType(bytesT, sol.DataLocation.Memory);
 export const cdBytesT = new rtt.PointerType(bytesT, sol.DataLocation.CallData);
 export const bytes1 = new rtt.FixedBytesType(1);
-export const defT = new DefType();
-export const typeT = new TypeType();
 
 /**
  * Return true IFF baseContract is a base (or the same contract) of childContract
@@ -777,14 +772,6 @@ export function indexOfEnumOption(
     }
 
     return undefined;
-}
-
-export function unwrapUnaryTypeTuples(t: BaseTypeValue): TypeValue {
-    while (t instanceof TypeTuple && t.elements.length === 1) {
-        t = t.elements[0];
-    }
-
-    return t as TypeValue;
 }
 
 export function bytesToIntOfType(

@@ -192,9 +192,7 @@ export class NoneValue extends Poison {
     }
 }
 
-export abstract class BaseTypeValue extends BaseInterpValue {}
-
-export class TypeValue extends BaseTypeValue {
+export class TypeValue extends BaseInterpValue {
     constructor(public readonly type: rtt.BaseRuntimeType) {
         super();
     }
@@ -203,33 +201,12 @@ export class TypeValue extends BaseTypeValue {
     }
 }
 
-export class TypeTuple extends BaseTypeValue {
-    constructor(public readonly elements: BaseTypeValue[]) {
-        super();
-    }
-    pp(): string {
-        return `<typename ${this.elements.map((e) => e.pp()).join(", ")}>`;
-    }
-}
-
-export function typeValueToType(t: BaseTypeValue): rtt.BaseRuntimeType {
-    if (t instanceof TypeValue) {
-        return t.type;
-    }
-
-    if (t instanceof TypeTuple) {
-        return new rtt.TupleType(t.elements.map(typeValueToType));
-    }
-
-    nyi(`typeValueToType(${t.constructor.name})`);
-}
-
 /**
  * Primtiive value used to denote the result of a `new T` expression.
  * (Note that this is different from `new T(...)`)
  */
 export class NewCall {
-    constructor(public readonly type: sol.TypeNode) {}
+    constructor(public readonly type: sol.TypeIdentifier) {}
 }
 
 /**

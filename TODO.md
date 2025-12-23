@@ -246,6 +246,31 @@
 230 - implement abi.encodePacked 
 231 - keccak256
 
+Goals:
+    - convert to using TypeIdentifiers everywhere
+    - convert string runtime values to uint8array
+
+Stages:
+- remove all references of infer and typenode
+- fix type errors
+    - make sure & fix LocalScopes.detectIds
+- restore infer just for resolving
+- remove string from Value
+- fix type errors
+- get to clean test run
+- remove resolving dependency
+- finally kill infer
+- do a pass cleaning up old code
+- do a pass over coverage
+- do a pass over refactor
+
+Pitfalls:
+    - wrapping and unrwapping TypeTypeId for decode(), type(), type conversion, struct constructor, new callee
+    - cleanup member access for builtin structs and the such
+    - cleanup builtin function calls
+    - concretize
+
+
 - add a new polymorpic TVar type TMovedTo(N, Location) saying that it matches any type, but it moves it to the given location.
 Use this type for abi.encode. Can we also use it for push?
 - on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?

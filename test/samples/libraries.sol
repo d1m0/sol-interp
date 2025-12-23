@@ -46,8 +46,9 @@ contract Foo {
         assert(a[oldLen] == 13);
 
         Lib.push(a, 14, true);
-        assert(a.length == oldLen + 2);
+        assert(a.length == oldLen + 3);
         assert(a[oldLen + 1] == 14);
+        assert(a[oldLen + 2] == 14);
     }
 
     function main() public {

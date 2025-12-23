@@ -8,8 +8,6 @@ import {
     isExternalCallTarget,
     NewCall,
     none,
-    TypeTuple,
-    typeValueToType,
     Value
 } from "./value";
 import { State } from "./state";
