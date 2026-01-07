@@ -1,4 +1,4 @@
-import { Value, ImmMap, astToRuntimeType } from "sol-dbg";
+import { Value, ImmMap, typeIdToRuntimeType } from "sol-dbg";
 import { Chain } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
@@ -102,7 +102,7 @@ describe("Simple function call tests", () => {
             );
 
             const abiRetTs = fun.vReturnParameters.vParameters.map((decl) =>
-                toABIEncodedType(astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer))
+                toABIEncodedType(typeIdToRuntimeType(sol.typeOf(decl), fun.requiredContext))
             );
 
             const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT));

@@ -14,7 +14,6 @@ import * as rtt from "sol-dbg";
 import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
-import { concretize, substitute } from "./polymorphic";
 import { BaseInterpType } from "./types";
 
 export abstract class BaseInterpValue implements sol.PPAble {
@@ -25,15 +24,12 @@ export class BuiltinFunction extends BaseInterpValue {
     constructor(
         public readonly name: string,
         public readonly type: rtt.FunctionType,
+
         protected readonly _call: (
             interp: Interpreter,
             state: State,
             self: BuiltinFunction
         ) => Value[],
-        // Any curried arguments. E.g. `arr` in `arr.push(...)`
-        public readonly curriedArgs: Value[] = [],
-        // The types of any curried arguments. E.g. type of `arr` in `arr.push(...)`
-        protected readonly curriedArgTs: rtt.BaseRuntimeType[] = [],
         // Flag specifying if this builtin expects an implicit first argument. E.g. `arr` in `arr.push(...)`
         public readonly implicitFirstArg = false,
         // Flag specifying if this builtin corresponds to a non-function field. E.g. `(address).balance`
@@ -49,8 +45,6 @@ export class BuiltinFunction extends BaseInterpValue {
             newName,
             this.type,
             this._call,
-            this.curriedArgs,
-            this.curriedArgTs,
             this.implicitFirstArg,
             this.isField
         );
@@ -60,45 +54,8 @@ export class BuiltinFunction extends BaseInterpValue {
         return `<builtin fun ${this.type.pp()}>`;
     }
 
-    concretize(argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
-        const [concreteFormalArgs, subst] = concretize(this.type.argTs, [
-            ...this.curriedArgTs,
-            ...argTs
-        ]);
-        const concreteFormalRets = this.type.retTs.map((retT) => substitute(retT, subst));
-
-        const concreteT = new rtt.FunctionType(
-            concreteFormalArgs,
-            this.type.external,
-            this.type.mutability,
-            concreteFormalRets
-        );
-
-        return new BuiltinFunction(
-            this.name,
-            concreteT,
-            this._call,
-            this.curriedArgs,
-            this.curriedArgTs,
-            this.implicitFirstArg,
-            this.isField
-        );
-    }
-
-    curry(args: Value[], argTs: rtt.BaseRuntimeType[]): BuiltinFunction {
-        return new BuiltinFunction(
-            this.name,
-            this.type,
-            this._call,
-            [...this.curriedArgs, ...args],
-            [...this.curriedArgTs, ...argTs],
-            this.implicitFirstArg,
-            this.isField
-        );
-    }
-
-    call(interp: Interpreter, state: State, concretizedBuiltin: BuiltinFunction): Value[] {
-        return this._call(interp, state, concretizedBuiltin);
+    call(interp: Interpreter, state: State): Value[] {
+        return this._call(interp, state, this);
     }
 
     getArgs(numArgs: number, state: State): Value[] {
@@ -239,7 +196,7 @@ export class CurriedVal {
     constructor(
         public readonly args: Value[],
         public readonly argTs: BaseInterpType[],
-        public readonly target: InternalFunRef
+        public readonly target: InternalFunRef | BuiltinFunction
     ) {
         sol.assert(args.length === argTs.length, `Expected same number of args and types`);
     }
@@ -253,7 +210,6 @@ export type Value =
     | BuiltinStruct
     | DefValue
     | TypeValue
-    | TypeTuple
     | ExternalCallDescription
     | NewCall
     | Value[]
@@ -272,7 +228,6 @@ type NonPoisonPrimitiveValue =
     | Slice // array slices
     | View<any, BaseValue, any, rtt.BaseRuntimeType> // Pointer Values
     | TypeValue // Type Values, TypeTuples, NewCall and ExternallCallDescription are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
-    | TypeTuple
     | NewCall
     | ExternalCallDescription;
 
@@ -312,7 +267,7 @@ export function isPrimitiveValue(v: any): v is PrimitiveValue {
         v instanceof Slice ||
         v instanceof View ||
         v instanceof Poison ||
-        v instanceof BaseTypeValue ||
+        v instanceof TypeValue ||
         v instanceof ExternalCallDescription ||
         v instanceof NewCall
     );

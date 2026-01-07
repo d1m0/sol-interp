@@ -19,12 +19,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import {
-    ExternalCallDescription,
-    NewCall,
-    none,
-    Value
-} from "./value";
+import { ExternalCallDescription, NewCall, none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
@@ -69,16 +64,24 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
                 zeroValue = [];
 
                 for (let i = 0; i < len; i++) {
-                    zeroValue.push(makeZeroValue(t.toType.elementT, state));
+                    if (t.toType.elementT instanceof rtt.MappingType) {
+                        zeroValue.push(new Map());
+                    } else {
+                        zeroValue.push(makeZeroValue(t.toType.elementT, state));
+                    }
                 }
             } else if (t.toType instanceof rtt.BytesType) {
                 zeroValue = new Uint8Array();
             } else if (t.toType instanceof rtt.StringType) {
                 zeroValue = "";
             } else if (t.toType instanceof rtt.StructType) {
-                const fieldVals: Array<[string, PrimitiveValue]> = [];
+                const fieldVals: Array<[string, BaseValue]> = [];
                 for (const [fieldName, fieldT] of t.toType.fields) {
-                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
+                    if (fieldT instanceof rtt.MappingType) {
+                        fieldVals.push([fieldName, new Map()]);
+                    } else {
+                        fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
+                    }
                 }
                 zeroValue = new Struct(fieldVals);
             } else {
@@ -663,7 +666,7 @@ export function removeLiteralTypes(
 }
 
 export function getGetterArgAndReturnTs(
-    getter: sol.VariableDeclaration,
+    getter: sol.VariableDeclaration
 ): [BaseInterpType[], BaseInterpType[]] {
     const ctx = getter.requiredContext;
     const [solArgTs, solRetT] = sol.getterArgsAndReturn(getter);

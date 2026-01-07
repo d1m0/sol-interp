@@ -19,6 +19,7 @@ import { makeNoContractState } from "./state";
 import { isPrimitiveValue, NoneValue } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { ppValue } from "./pp";
+import { typeIdToRuntimeType } from "./types";
 
 type DepGraph = Map<sol.VariableDeclaration, Set<sol.VariableDeclaration>>;
 
@@ -118,7 +119,6 @@ export function gatherConstants(
     artifactManager: ArtifactManager,
     artifact: ArtifactInfo
 ): [Map<number, BaseMemoryView<Value, rtt.BaseRuntimeType>>, Memory] {
-    const version = artifact.compilerVersion;
     const state = makeNoContractState();
 
     // First gather and encode the string constants
@@ -172,14 +172,8 @@ export function gatherConstants(
     }
 
     // Next walk over the constant variable declarations in topoligcal order and evaluate them
-    const infer = new sol.InferType(version);
-
     for (const nd of sortedNodes) {
-        const typ = rtt.astToRuntimeType(
-            infer.variableDeclarationToTypeNode(nd),
-            infer,
-            sol.DataLocation.Memory
-        );
+        const typ = typeIdToRuntimeType(sol.typeOf(nd), artifact.ctx, sol.DataLocation.Memory);
 
         state.account.contract = artifactManager.getContractInfo(nd);
 

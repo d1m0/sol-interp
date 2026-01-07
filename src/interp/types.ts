@@ -9,13 +9,13 @@ export class WrappedType extends rtt.BaseRuntimeType {
     }
 
     pp(): string {
-        return `<${this.innerT.pp()}>`
+        return `<${this.innerT.pp()}>`;
     }
 }
 
 export class ArraySliceType extends rtt.BaseRuntimeType {
     pp(): string {
-        return `<slice ${this.innerT.pp()}>`
+        return `<slice ${this.innerT.pp()}>`;
     }
     constructor(public readonly innerT: rtt.PointerType) {
         super();
@@ -23,12 +23,15 @@ export class ArraySliceType extends rtt.BaseRuntimeType {
 }
 
 export class RationalNumberType extends rtt.BaseRuntimeType {
-    constructor(public readonly numerator: bigint, public readonly denominator: bigint) {
+    constructor(
+        public readonly numerator: bigint,
+        public readonly denominator: bigint
+    ) {
         super();
     }
 
     pp(): string {
-        return `<rational ${this.numerator}/${this.denominator}>`
+        return `<rational ${this.numerator}/${this.denominator}>`;
     }
 
     isInt(): boolean {
@@ -36,7 +39,7 @@ export class RationalNumberType extends rtt.BaseRuntimeType {
     }
 
     asInt(): bigint {
-        sol.assert(this.denominator === 1n, ``)
+        sol.assert(this.denominator === 1n, ``);
         return this.numerator;
     }
 }
@@ -67,9 +70,7 @@ export function typeIdToRuntimeType(
     }
 
     if (rawT instanceof sol.TupleTypeId) {
-        return new rtt.TupleType(
-            rawT.components.map((elT) =>typeIdToRuntimeType(elT, ctx, loc))
-        );
+        return new rtt.TupleType(rawT.components.map((elT) => typeIdToRuntimeType(elT, ctx, loc)));
     }
 
     if (rawT instanceof sol.PointerTypeId) {
@@ -93,8 +94,12 @@ export function typeIdToRuntimeType(
     // ArraySliceTypeId
     if (rawT instanceof sol.ArraySliceTypeId) {
         const innerT = typeIdToRuntimeType(rawT.toType, ctx, loc);
-        sol.assert(innerT instanceof rtt.PointerType, `Expected a pointer in a slice type not {0}`, innerT);
-        return new ArraySliceType(innerT)
+        sol.assert(
+            innerT instanceof rtt.PointerType,
+            `Expected a pointer in a slice type not {0}`,
+            innerT
+        );
+        return new ArraySliceType(innerT);
     }
 
     // Handle primitive cases not handled in sol-dbg
@@ -105,7 +110,7 @@ export function typeIdToRuntimeType(
 
     // RationalNumTypeId
     if (rawT instanceof sol.RationalNumTypeId) {
-        return new RationalNumberType(rawT.numerator, rawT.denominator)
+        return new RationalNumberType(rawT.numerator, rawT.denominator);
     }
 
     // BuiltinStructTypeId
@@ -118,8 +123,8 @@ export function typeIdToRuntimeType(
         rawT instanceof sol.BuiltinStructTypeId ||
         rawT instanceof sol.ErrorTypeId ||
         rawT instanceof sol.MetaTypeTypeId ||
-        rawT instanceof sol.ModuleTypeId||
-        rawT instanceof sol.SuperTypeId||
+        rawT instanceof sol.ModuleTypeId ||
+        rawT instanceof sol.SuperTypeId ||
         rawT instanceof sol.TypeTypeId
     ) {
         return new WrappedType(rawT);
@@ -128,7 +133,7 @@ export function typeIdToRuntimeType(
     // These ones shouldn't appear in the interepter
     // ModifierTypeId
     if (rawT instanceof sol.ModifierTypeId) {
-        sol.assert(false, `Unexpected type ${rawT.pp()}`)
+        sol.assert(false, `Unexpected type ${rawT.pp()}`);
     }
 
     // Rest is handled by sol-dbg
