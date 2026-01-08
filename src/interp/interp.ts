@@ -1782,9 +1782,9 @@ export class Interpreter {
             lvalue.encode(rvalue, state.memory, state.memAllocator);
         } else if (lvalue instanceof BaseLocalView) {
             this.expect(
-                !(lvalue.type instanceof sol.PointerType) ||
+                !(lvalue.type instanceof rtt.PointerType) ||
                 isPoison(rvalue as rtt.PrimitiveValue) ||
-                (rvalue instanceof View && lvalue.type.to.pp() === rvalue.type.pp()),
+                (rvalue instanceof View && lvalue.type.toType.pp() === rvalue.type.pp()),
                 `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
             );
             lvalue.encode(rvalue);
@@ -3167,10 +3167,8 @@ export class Interpreter {
         if (expr.kind === sol.LiteralKind.Number) {
             const v = sol.evalLiteral(expr);
             this.expect(typeof v === "bigint", ``);
-            // This is hack to match the behavior of InferType.typeOf() for certain hex literals.
-            return expr.typeString.startsWith("address")
-                ? new Address(setLengthLeft(bigIntToBytes(v), 20))
-                : v;
+            const type = this.typeOf(expr);
+            return type instanceof rtt.AddressType ? new Address(setLengthLeft(bigIntToBytes(v), 20)) : v;
         }
 
         if (expr.kind === sol.LiteralKind.Bool) {

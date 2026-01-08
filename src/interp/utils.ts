@@ -325,7 +325,7 @@ export function indexView<T extends rtt.StateArea>(
 }
 
 // @todo move to solc-typed-ast
-// @todo dimo: Is it sufficient here to say !(type instancesof sol.PointerType) ?
+// @todo dimo: I think this has missing cases ?
 export function isValueType(type: rtt.BaseRuntimeType): boolean {
     return (
         type instanceof rtt.IntType ||
@@ -624,45 +624,6 @@ export function clampIntToType(val: bigint, type: rtt.IntType): bigint {
     const size = max - min + 1n;
 
     return val < min ? ((val - max) % size) + max : ((val - min) % size) + min;
-}
-
-export function removeLiteralTypes(
-    t: sol.TypeNode,
-    e: sol.Expression,
-    infer: sol.InferType
-): sol.TypeNode {
-    if (t instanceof sol.IntLiteralType) {
-        const v = sol.evalConstantExpr(e, infer);
-        sol.assert(typeof v === "bigint", ``);
-        const smallestT = sol.smallestFittingType(v);
-        sol.assert(smallestT !== undefined, ``);
-        return smallestT;
-    }
-
-    if (t instanceof sol.StringLiteralType) {
-        return t.isHex || (e instanceof sol.Literal && e.value === null)
-            ? sol.types.bytesMemory
-            : sol.types.stringMemory;
-    }
-
-    // Tuples
-    if (t instanceof sol.TupleType && e instanceof sol.TupleExpression) {
-        const elTs: Array<sol.TypeNode | null> = [];
-
-        for (let i = 0; i < t.elements.length; i++) {
-            let elT = t.elements[i];
-
-            if (elT instanceof sol.IntLiteralType) {
-                elT = removeLiteralTypes(elT, e.vOriginalComponents[i] as sol.Expression, infer);
-            }
-
-            elTs.push(elT);
-        }
-
-        return new sol.TupleType(elTs);
-    }
-
-    return t;
 }
 
 export function getGetterArgAndReturnTs(

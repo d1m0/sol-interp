@@ -341,7 +341,6 @@ function getEncodeTypes(state: State): BaseInterpType[] {
 
 export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
-    //new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = getEncodeTypes(state);
@@ -352,7 +351,6 @@ export const abiEncodeBuiltin = new BuiltinFunction(
 
 export const abiEncodePackedBuiltin = new BuiltinFunction(
     "encodePacked",
-    //new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = getEncodeTypes(state);
@@ -363,7 +361,6 @@ export const abiEncodePackedBuiltin = new BuiltinFunction(
 
 export const abiEncodeWithSelectorBuiltin = new BuiltinFunction(
     "encodeWithSelector",
-    //new rtt.FunctionType([rtt.bytes4, new TRest()], false, sol.FunctionStateMutability.Pure, [ memBytesT ]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = getEncodeTypes(state);
@@ -377,7 +374,6 @@ export const abiEncodeWithSelectorBuiltin = new BuiltinFunction(
 
 export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
     "encodeWithSignature",
-    //new rtt.FunctionType([memStringT, new TRest()], false,sol.FunctionStateMutability.Pure, [ memBytesT ]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = getEncodeTypes(state);
@@ -394,7 +390,6 @@ export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
 
 export const abiEncodeCallBuiltin = new BuiltinFunction(
     "encodeCall",
-    //new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const scope = state.scope as BuiltinScope;
@@ -408,7 +403,6 @@ export const abiEncodeCallBuiltin = new BuiltinFunction(
 
 export const abiDecodeBuitin = new BuiltinFunction(
     "decode",
-    //new rtt.FunctionType( [memBytesT, new rtt.TupleType([new TRest()])], false,sol.FunctionStateMutability.Pure, [new TRest()] ),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const args = self.getArgs(2, state);
@@ -433,7 +427,6 @@ export const abiDecodeBuitin = new BuiltinFunction(
 
 export const revertBuiltin = new BuiltinFunction(
     "revert",
-    //new rtt.FunctionType([new TOptional(memStringT)], false, sol.FunctionStateMutability.Pure, []),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const scope = state.scope as BuiltinScope;
@@ -453,7 +446,6 @@ export const revertBuiltin = new BuiltinFunction(
 
 export const requireBuiltin = new BuiltinFunction(
     "require",
-    //new rtt.FunctionType( [rtt.bool, new TOptional(memStringT)], false, sol.FunctionStateMutability.Pure, [] ),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const scope = state.scope as BuiltinScope;
@@ -489,7 +481,6 @@ export const requireBuiltin = new BuiltinFunction(
 
 export const addressBalanceBuiltin = new BuiltinFunction(
     "balance",
-    //new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [uint256]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const addr = self.getArgs(1, state)[0];
@@ -504,7 +495,6 @@ export const addressBalanceBuiltin = new BuiltinFunction(
 
 export const addressCodeBuiltin = new BuiltinFunction(
     "code",
-    //new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const addr = self.getArgs(1, state)[0];
@@ -525,7 +515,6 @@ export const addressCodeBuiltin = new BuiltinFunction(
 
 export const addressCodehashBuiltin = new BuiltinFunction(
     "codehash",
-    //new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [bytes32]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const addr = self.getArgs(1, state)[0];
@@ -542,7 +531,6 @@ export const addressCodehashBuiltin = new BuiltinFunction(
 
 export const addressTransfer = new BuiltinFunction(
     "transfer",
-    //new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, []),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [addr] = self.getArgs(1, state);
@@ -558,7 +546,6 @@ export const addressTransfer = new BuiltinFunction(
 
 export const addressSend = new BuiltinFunction(
     "send",
-    //new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [rtt.bool]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [addr] = self.getArgs(1, state);
@@ -575,7 +562,6 @@ export const addressSend = new BuiltinFunction(
 
 export const addressCall = new BuiltinFunction(
     "call",
-    //new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [rtt.bool, memBytesT ]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [addr] = self.getArgs(1, state);
@@ -598,7 +584,6 @@ export const addressCall = new BuiltinFunction(
 
 export const addressDelegatecall = new BuiltinFunction(
     "delegatecall",
-    //new rtt.FunctionType([addressT], false, sol.FunctionStateMutability.Pure, [    rtt.bool, memBytesT ]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [addr] = self.getArgs(1, state);
@@ -623,7 +608,6 @@ export const addressStaticcall = addressCall.alias("staticcall");
 
 export const valueBuiltin = new BuiltinFunction(
     "value",
-    //new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [target, value] = self.getArgs(2, state);
@@ -641,7 +625,6 @@ export const valueBuiltin = new BuiltinFunction(
 
 export const gasBuiltin = new BuiltinFunction(
     "gas",
-    //new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [callable, gas] = self.getArgs(2, state);
@@ -659,7 +642,6 @@ export const gasBuiltin = new BuiltinFunction(
 
 export const saltBuiltin = new BuiltinFunction(
     "salt",
-    //new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [new TRest()]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [target, salt] = self.getArgs(2, state);
@@ -712,7 +694,6 @@ function getAddress(v: ExternalCallTargetValue): Address {
 
 const selectorBuiltin = new BuiltinFunction(
     "selector",
-    //new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [rtt.bytes4]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [target] = self.getArgs(1, state);
@@ -727,7 +708,6 @@ const selectorBuiltin = new BuiltinFunction(
 
 const addressBuiltin = new BuiltinFunction(
     "address",
-    //new rtt.FunctionType([new TRest()], true, sol.FunctionStateMutability.Pure, [addressT]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [target] = self.getArgs(1, state);
@@ -743,7 +723,6 @@ const addressBuiltin = new BuiltinFunction(
 // Msg struct builtins
 const msgDataBuiltin = new BuiltinFunction(
     "data",
-    //new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
     dummyFunT,
     (): Value[] => {
         return [new MsgDataView()];
@@ -755,7 +734,6 @@ const msgDataBuiltin = new BuiltinFunction(
 
 const msgValueBuiltin = new BuiltinFunction(
     "value",
-    //new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [uint256]),
     dummyFunT,
     (interp: Interpreter, state: State): Value[] => {
         return [state.msg.value];
@@ -767,7 +745,6 @@ const msgValueBuiltin = new BuiltinFunction(
 
 const msgSenderBuiltin = new BuiltinFunction(
     "sender",
-    //new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State): Value[] => {
         return [getMsgSender(state)];
@@ -779,7 +756,6 @@ const msgSenderBuiltin = new BuiltinFunction(
 
 const msgSigBuiltin = new BuiltinFunction(
     "sig",
-    //new rtt.FunctionType([], false, sol.FunctionStateMutability.Pure, [cdBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State): Value[] => {
         return [getSig(state)];
@@ -837,7 +813,6 @@ const abiBuiltinStructDesc: BuiltinDescriptor = [
 
 const keccak256v04Builtin = new BuiltinFunction(
     "keccak256",
-    //new rtt.FunctionType([new TRest()], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const scope = state.scope as BuiltinScope;
@@ -853,7 +828,6 @@ const keccak256v04Builtin = new BuiltinFunction(
 
 const keccak256v05Builtin = new BuiltinFunction(
     "keccak256",
-    //new rtt.FunctionType([memBytesT], false, sol.FunctionStateMutability.Pure, [memBytesT]),
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const [data] = self.getArgs(1, state);

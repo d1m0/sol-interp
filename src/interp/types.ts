@@ -81,9 +81,12 @@ export function typeIdToRuntimeType(
         return new rtt.PointerType(toT, ptrLoc);
     }
 
-    if (rawT instanceof sol.UserDefinedType && rawT.definition instanceof sol.StructDefinition) {
+    if (rawT instanceof sol.StructTypeId) {
         sol.assert(loc !== undefined, `Missing location in struct expansion {0}`, rawT);
-        const fields: Array<[string, BaseInterpType]> = rawT.definition.vMembers.map((decl) => [
+        const def = ctx.locate(rawT.id);
+        sol.assert(def instanceof sol.StructDefinition, ``);
+
+        const fields: Array<[string, BaseInterpType]> = def.vMembers.map((decl) => [
             decl.name,
             typeIdToRuntimeType(sol.changeLocationTo(sol.typeOf(decl), loc), ctx, loc)
         ]);

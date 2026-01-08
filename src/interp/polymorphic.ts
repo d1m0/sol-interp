@@ -1,7 +1,7 @@
-import { assert, DataLocation } from "solc-typed-ast";
+import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 
-export abstract class BasePolyType extends rtt.BaseRuntimeType {}
+export abstract class BasePolyType extends rtt.BaseRuntimeType { }
 
 export class BaseTVar extends BasePolyType {
     constructor(public readonly name: string) {
@@ -14,7 +14,7 @@ export class BaseTVar extends BasePolyType {
 }
 
 // Single type var
-export class TVar extends BaseTVar {}
+export class TVar extends BaseTVar { }
 
 export class TUnion extends BaseTVar {
     private static ctr: number = 0;
@@ -191,8 +191,8 @@ export function unify(t1: rtt.BaseRuntimeType, t2: rtt.BaseRuntimeType, subst: T
         // As a hack we consider DataLocation.Default to be a * for locations
         if (
             t1.location !== t2.location &&
-            t1.location !== DataLocation.Default &&
-            t2.location !== DataLocation.Default
+            t1.location !== sol.DataLocation.Default &&
+            t2.location !== sol.DataLocation.Default
         ) {
             return false;
         }
@@ -209,7 +209,7 @@ export function unify(t1: rtt.BaseRuntimeType, t2: rtt.BaseRuntimeType, subst: T
         }
 
         // Pacify typescript
-        assert(t1 instanceof rtt.TupleType && t2 instanceof rtt.TupleType, ``);
+        sol.assert(t1 instanceof rtt.TupleType && t2 instanceof rtt.TupleType, ``);
 
         for (let i = 0; i < t1.elementTypes.length; i++) {
             const t1El = t1.elementTypes[i];
@@ -287,7 +287,7 @@ export function concretize(
 
         if (formalT instanceof TRest) {
             res.push(...concreteTypes.slice(i));
-            assert(
+            sol.assert(
                 i === formalTypes.length - 1,
                 `Unexpected TRest not in the last position in concretize`
             );
@@ -303,11 +303,11 @@ export function concretize(
         }
 
         let substitutedT = substitute(formalT, subst);
-        assert(i < concreteTypes.length, `Fewer concrete types than formal`);
+        sol.assert(i < concreteTypes.length, `Fewer concrete types than formal`);
         const concreteT = concreteTypes[i];
 
         if (isPolymorphic(substitutedT)) {
-            assert(
+            sol.assert(
                 unify(substitutedT, concreteT, subst),
                 `Couldn't unify {0} and {1}`,
                 substitutedT,
