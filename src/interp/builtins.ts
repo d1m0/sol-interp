@@ -170,7 +170,7 @@ export const pushBuiltin = new BuiltinFunction(
         interp.expect(args.length > 0 && args.length <= 2);
 
         const arr = args[0];
-        interp.expect(arr instanceof ArrayStorageView || arr instanceof BytesStorageView);
+        interp.expect(arr instanceof ArrayStorageView || arr instanceof BytesStorageView, `Expected array not ${ppValue(arr)}`);
 
         const elT = arr instanceof ArrayStorageView ? arr.type.elementT : bytes1;
 
@@ -272,6 +272,15 @@ function encodeImpl(
 ): Value {
     let encBytes: Uint8Array;
 
+    // Replace RationalNumTypes with appropriate int type
+    paramTs = paramTs.map((t) => {
+        if (t instanceof RationalNumberType) {
+            return t.numerator < 0 ? int256 : uint256
+        }
+
+        return t;
+    })
+
     if (paramTs.length === 0) {
         encBytes = new Uint8Array();
     } else {
@@ -288,8 +297,20 @@ function encodeImpl(
     return res;
 }
 
-function encodePackedImpl(paramTs: rtt.BaseRuntimeType[], args: Value[], state: State): Value {
+function encodePackedImpl(paramTs: rtt.BaseRuntimeType[], args: Value[], state: State, ctx: sol.ASTContext): Value {
     let encBytes: Uint8Array;
+
+    // Replace RationalNumTypes with appropriate int type
+    paramTs = paramTs.map((t) => {
+        if (t instanceof RationalNumberType) {
+            sol.assert(t.isInt(), ``);
+            const intT = sol.smallestFittingType(t.numerator);
+            sol.assert(intT !== undefined, ``)
+            return rtt.typeIdToRuntimeType(intT, ctx)
+        }
+
+        return t;
+    })
 
     if (paramTs.length === 0) {
         encBytes = new Uint8Array();
@@ -336,7 +357,7 @@ export const abiEncodePackedBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = getEncodeTypes(state);
         const args = self.getArgs(paramTs.length, state);
-        return [encodePackedImpl(paramTs, args, state)];
+        return [encodePackedImpl(paramTs, args, state, interp.ctx)];
     }
 );
 
@@ -347,8 +368,10 @@ export const abiEncodeWithSelectorBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const paramTs = getEncodeTypes(state);
         const args = self.getArgs(paramTs.length, state);
-        interp.expect(args.length >= 1 && args[0] instanceof Uint8Array);
-        return [encodeImpl(paramTs.slice(1), args.slice(1), state, args[0])];
+        interp.expect(args.length >= 1, `Unexpected args to encodeWithSelector ${ppValue(args)}`);
+        const selector = castTo(args[0], rtt.bytes4, state, interp);
+        interp.expect(selector instanceof Uint8Array);
+        return [encodeImpl(paramTs.slice(1), args.slice(1), state, selector)];
     }
 );
 
@@ -447,10 +470,20 @@ export const requireBuiltin = new BuiltinFunction(
         }
 
         const msgArg = args[1];
-        interp.expect(msgArg instanceof rtt.BytesMemView);
-        const msg = msgArg.decode(state.memory);
-        interp.expect(msg instanceof Uint8Array);
-        throw new ErrorError(interp.curNode, bytesToUtf8(msg));
+        interp.expect(msgArg instanceof rtt.BytesMemView || msgArg instanceof rtt.StringMemView);
+        let msg: string;
+
+        if (msgArg instanceof BytesMemView) {
+            const bs = msgArg.decode(state.memory);
+            interp.expect(bs instanceof Uint8Array);
+            msg = bytesToUtf8(bs)
+        } else {
+            const t = msgArg.decode(state.memory);
+            interp.expect(typeof t === "string");
+            msg = t
+        }
+
+        throw new ErrorError(interp.curNode, msg);
     }
 );
 

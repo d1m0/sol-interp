@@ -114,7 +114,7 @@ export class TransactionSet {
     ): Uint8Array {
         const argBytes = this.encodeArgs(args, fun);
 
-        return concatBytes(hexToBytes(`0x${bytesToHex(sol.signatureHash(fun))}`), argBytes);
+        return concatBytes(sol.signatureHash(fun), argBytes);
     }
 
     encodeCreateArgs(args: BaseValue[], contract: ContractInfo): Uint8Array {
@@ -145,7 +145,7 @@ export class TransactionSet {
             );
             abiRetTs = retTs.map(toABIEncodedType);
         } else {
-            retTs = getGetterArgAndReturnTs(fun)[1];
+            retTs = getGetterArgAndReturnTs(fun)[1]
             abiRetTs = retTs.map(toABIEncodedType);
         }
 
