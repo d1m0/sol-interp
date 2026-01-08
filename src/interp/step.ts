@@ -3,7 +3,7 @@ import { LValue, Value } from "./value";
 import { CallResult, SolMessage } from "./state";
 import { RuntimeError } from "./exceptions";
 
-export abstract class BaseStep { }
+export abstract class BaseStep {}
 
 export type Trace = BaseStep[];
 

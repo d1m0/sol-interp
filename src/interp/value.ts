@@ -130,8 +130,8 @@ export class DefValue extends BaseInterpValue {
             this.def instanceof sol.SourceUnit
                 ? this.def.sourceEntryKey
                 : this.def instanceof sol.ImportDirective
-                    ? this.def.unitAlias
-                    : this.def.name;
+                  ? this.def.unitAlias
+                  : this.def.name;
         return `<${this.def.constructor.name} ${name}>`;
     }
 }
@@ -163,7 +163,7 @@ export class TypeValue extends BaseInterpValue {
  * (Note that this is different from `new T(...)`)
  */
 export class NewCall {
-    constructor(public readonly type: sol.TypeIdentifier) { }
+    constructor(public readonly type: sol.TypeIdentifier) {}
 }
 
 /**
@@ -189,7 +189,7 @@ export class ExternalCallDescription {
             | "transfer"
             | "solidity_call"
             | "contract_deployment"
-    ) { }
+    ) {}
 }
 
 export class CurriedVal {
@@ -246,7 +246,7 @@ export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDes
 export type InternalCallTargetValue = InternalFunRef | CurriedVal;
 
 export class BytesStorageLength {
-    constructor(public readonly view: rtt.BytesStorageView) { }
+    constructor(public readonly view: rtt.BytesStorageView) {}
 }
 
 export type LValue =
@@ -298,30 +298,30 @@ export type ValueTypeConstructors =
 
 export type TypeConstructorToValueType<V extends ValueTypeConstructors> =
     V extends BigIntConstructor
-    ? bigint
-    : V extends BooleanConstructor
-    ? boolean
-    : V extends Uint8ArrayConstructor
-    ? Uint8Array
-    : V extends AddressConstructor
-    ? Address
-    : V extends ExternalFunRefConstructor
-    ? ExternalFunRef
-    : V extends InternalFunRefConstructor
-    ? InternalFunRef
-    : V extends SliceConstructor
-    ? Slice
-    : V extends ViewConstructor
-    ? View
-    : V extends PoisonConstructor
-    ? Poison
-    : V extends BuiltinFunctionConstructor
-    ? BuiltinFunction
-    : V extends BuiltinStructConstructor
-    ? BuiltinStruct
-    : V extends ArrayConstructor
-    ? Value[]
-    : never;
+        ? bigint
+        : V extends BooleanConstructor
+          ? boolean
+          : V extends Uint8ArrayConstructor
+            ? Uint8Array
+            : V extends AddressConstructor
+              ? Address
+              : V extends ExternalFunRefConstructor
+                ? ExternalFunRef
+                : V extends InternalFunRefConstructor
+                  ? InternalFunRef
+                  : V extends SliceConstructor
+                    ? Slice
+                    : V extends ViewConstructor
+                      ? View
+                      : V extends PoisonConstructor
+                        ? Poison
+                        : V extends BuiltinFunctionConstructor
+                          ? BuiltinFunction
+                          : V extends BuiltinStructConstructor
+                            ? BuiltinStruct
+                            : V extends ArrayConstructor
+                              ? Value[]
+                              : never;
 
 export function match<T extends ValueTypeConstructors>(
     v: Value,

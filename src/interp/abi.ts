@@ -283,16 +283,19 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
         return val.bytes;
     } else if (type instanceof rtt.PointerType) {
         if (type.toType instanceof rtt.BytesType) {
-            sol.assert(val instanceof View && val.type instanceof rtt.BytesType, `Unexpected value ${ppValue(val)}`);
+            sol.assert(
+                val instanceof View && val.type instanceof rtt.BytesType,
+                `Unexpected value ${ppValue(val)}`
+            );
             const bytes = decodeView(val, state);
             sol.assert(bytes instanceof Uint8Array, ``);
             return bytes;
         } else if (type.toType instanceof rtt.StringType) {
             sol.assert(
                 val instanceof rtt.StringMemView ||
-                val instanceof rtt.StringStorageView ||
-                val instanceof rtt.StringCalldataView ||
-                val instanceof rtt.StringSliceCalldataView,
+                    val instanceof rtt.StringStorageView ||
+                    val instanceof rtt.StringCalldataView ||
+                    val instanceof rtt.StringSliceCalldataView,
                 ``
             );
             // cast to string type

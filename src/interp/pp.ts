@@ -66,7 +66,7 @@ export function ppValue(v: Value): string {
     } else if (v instanceof NewCall) {
         return `<new call to ${v.type.pp()}>`;
     } else if (v instanceof CurriedVal) {
-        return `<curried ${ppValue(v.target)} with args [${v.args.map(ppValue).join(",")}] of types [${v.argTs.map(t => t.pp()).join(",")}]>`
+        return `<curried ${ppValue(v.target)} with args [${v.args.map(ppValue).join(",")}] of types [${v.argTs.map((t) => t.pp()).join(",")}]>`;
     } else {
         return `${v}`;
     }

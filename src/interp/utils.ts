@@ -24,7 +24,7 @@ import { CallResult, State, WorldInterface } from "./state";
 import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
-import { Address, } from "@ethereumjs/util";
+import { Address } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
@@ -420,8 +420,8 @@ export function bytesBitwiseNot(a: Uint8Array): Uint8Array {
 
 /**
  * Return the location of a given view
- * @param v 
- * @returns 
+ * @param v
+ * @returns
  */
 export function locationOfView(v: rtt.View): sol.DataLocation {
     if (v instanceof BaseMemoryView) {
@@ -692,12 +692,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -767,8 +767,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }

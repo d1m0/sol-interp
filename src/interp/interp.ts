@@ -355,8 +355,8 @@ export class Interpreter {
         // If there are arguments to be passed, then the target MDC must have a constructor
         this.expect(
             msg.data.length === mdc.bytecode.bytecode.length ||
-            (mdc.ast.vConstructor !== undefined &&
-                mdc.ast.vConstructor.vParameters.vParameters.length > 0)
+                (mdc.ast.vConstructor !== undefined &&
+                    mdc.ast.vConstructor.vParameters.vParameters.length > 0)
         );
 
         try {
@@ -725,9 +725,7 @@ export class Interpreter {
                 stateVarView = stateVarView.innerView.indexView(arg, storage);
                 this.expect(!(stateVarView instanceof DecodingFailure), `Failed indexing`);
             } else {
-                this.expect(
-                    stateVarView instanceof MapStorageView
-                );
+                this.expect(stateVarView instanceof MapStorageView);
                 stateVarView = stateVarView.indexView(arg);
                 this.expect(!(stateVarView instanceof DecodingFailure), `Failed indexing`);
             }
@@ -735,7 +733,7 @@ export class Interpreter {
 
         let returnViews =
             stateVarView instanceof PointerStorageView &&
-                stateVarView.innerView instanceof StructStorageView
+            stateVarView.innerView instanceof StructStorageView
                 ? stateVarView.innerView.fieldViews.map(([, fv]) => fv)
                 : [stateVarView];
 
@@ -753,7 +751,10 @@ export class Interpreter {
         const returnVals: Value[] = returnViews.map((v) => {
             if (isValueType(v.type)) {
                 const t = decodeView(v, state);
-                this.expect(isPrimitiveValue(t), `Expected a primitive value not: ${t}, ${t.constructor.name}`);
+                this.expect(
+                    isPrimitiveValue(t),
+                    `Expected a primitive value not: ${t}, ${t.constructor.name}`
+                );
                 return t;
             }
 
@@ -925,7 +926,7 @@ export class Interpreter {
                 const target = stmt.vExternalCall.vReferencedDeclaration;
                 this.expect(
                     target instanceof sol.FunctionDefinition ||
-                    target instanceof sol.VariableDeclaration,
+                        target instanceof sol.VariableDeclaration,
                     `NYI external call target`
                 );
                 vals = this.getValuesFromReturnedCalldata(res.data, target, state);
@@ -1569,8 +1570,8 @@ export class Interpreter {
         ) {
             this.expect(
                 value instanceof StringMemView ||
-                value instanceof rtt.StringCalldataView ||
-                value instanceof rtt.StringSliceCalldataView
+                    value instanceof rtt.StringCalldataView ||
+                    value instanceof rtt.StringSliceCalldataView
             );
             return castStringToBytes(value);
         }
@@ -1636,7 +1637,12 @@ export class Interpreter {
         lvType: rtt.BaseRuntimeType,
         state: State
     ): rtt.PrimitiveValue {
-        if (typeof rvalue === "bigint" && lvType instanceof RationalNumberType && rvalue === lvType.numerator && lvType.denominator === 1n) {
+        if (
+            typeof rvalue === "bigint" &&
+            lvType instanceof RationalNumberType &&
+            rvalue === lvType.numerator &&
+            lvType.denominator === 1n
+        ) {
             return rvalue;
         }
 
@@ -1655,8 +1661,8 @@ export class Interpreter {
     private assignToStorageArray(lvalue: rtt.ArrayStorageView, rvalue: Value, state: State): void {
         this.expect(
             rvalue instanceof View &&
-            isArrayLikeView(rvalue) &&
-            rvalue.type instanceof rtt.ArrayType
+                isArrayLikeView(rvalue) &&
+                rvalue.type instanceof rtt.ArrayType
         );
         this.expect(lvalue.type.size === undefined || lvalue.type.size === rvalue.type.size);
 
@@ -1748,7 +1754,11 @@ export class Interpreter {
             // - calldata-to-memory
             // - calldata-to-storage
             // - storage/memory/calldata-to-stack pointer in different location
-            const isCopy = lvalueLoc !== rvalueLoc || (lvalueLoc === sol.DataLocation.Storage && rvalueLoc === sol.DataLocation.Storage && !(lvalue instanceof PointerLocalView));
+            const isCopy =
+                lvalueLoc !== rvalueLoc ||
+                (lvalueLoc === sol.DataLocation.Storage &&
+                    rvalueLoc === sol.DataLocation.Storage &&
+                    !(lvalue instanceof PointerLocalView));
 
             if (isCopy) {
                 // Types should be equal modulo location
@@ -1780,14 +1790,14 @@ export class Interpreter {
                 } else {
                     this.expect(
                         lvalue instanceof PointerLocalView &&
-                        lvalue.type.toType.pp() === rvalue.type.pp(),
+                            lvalue.type.toType.pp() === rvalue.type.pp(),
                         `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
                     );
                     lvalue.encode(rvalue);
                 }
             }
         } else if (rvalue instanceof rtt.Slice) {
-            nyi('Assignment of slices');
+            nyi("Assignment of slices");
         } else {
             // Primitive value assignment
             if (lvalue instanceof BaseStorageView) {
@@ -1891,8 +1901,13 @@ export class Interpreter {
             return [left, right];
         }
 
-        if (lType instanceof RationalNumberType && rType instanceof RationalNumberType && typeof left === "bigint" && typeof right === "bigint") {
-            return [left, right]
+        if (
+            lType instanceof RationalNumberType &&
+            rType instanceof RationalNumberType &&
+            typeof left === "bigint" &&
+            typeof right === "bigint"
+        ) {
+            return [left, right];
         }
 
         const castRigth = this.implicitCoercionImpl(right, lType, state);
@@ -1996,7 +2011,7 @@ export class Interpreter {
 
             this.expect(
                 (typeof sleft === "bigint" && typeof sright === "bigint") ||
-                (typeof sleft === "string" && typeof sright === "string")
+                    (typeof sleft === "string" && typeof sright === "string")
             );
 
             if (operator === "<") {
@@ -2065,23 +2080,21 @@ export class Interpreter {
                 } else if (operator === "&") {
                     return left & right;
                 } else {
-                    this.expect(operator === "^", `Unknown bitwise operator ${operator}`)
+                    this.expect(operator === "^", `Unknown bitwise operator ${operator}`);
                     return left ^ right;
                 }
             }
 
             if (left instanceof Uint8Array && right instanceof Uint8Array) {
-
                 if (operator === "|") {
                     return bytesBitwiseOr(left, right);
                 } else if (operator === "&") {
                     return bytesBitwiseAnd(left, right);
                 } else {
-                    this.expect(operator === "^")
+                    this.expect(operator === "^");
                     return bytesBitwiseXor(left, right);
                 }
             }
-
 
             nyi(`Bitwise ${operator} on fixed bytes ${ppValue(left)} and ${ppValue(right)}`);
         }
@@ -2194,9 +2207,9 @@ export class Interpreter {
         ) {
             this.expect(
                 fromV instanceof rtt.StringMemView ||
-                fromV instanceof rtt.StringCalldataView ||
-                fromV instanceof rtt.StringSliceCalldataView ||
-                fromV instanceof rtt.StringStorageView,
+                    fromV instanceof rtt.StringCalldataView ||
+                    fromV instanceof rtt.StringSliceCalldataView ||
+                    fromV instanceof rtt.StringStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -2212,9 +2225,9 @@ export class Interpreter {
         ) {
             this.expect(
                 fromV instanceof rtt.BytesMemView ||
-                fromV instanceof rtt.BytesCalldataView ||
-                fromV instanceof rtt.BytesSliceCalldataView ||
-                fromV instanceof rtt.BytesStorageView,
+                    fromV instanceof rtt.BytesCalldataView ||
+                    fromV instanceof rtt.BytesSliceCalldataView ||
+                    fromV instanceof rtt.BytesStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -2229,9 +2242,9 @@ export class Interpreter {
         ) {
             this.expect(
                 fromV instanceof StringMemView ||
-                fromV instanceof rtt.StringCalldataView ||
-                fromV instanceof rtt.StringStorageView ||
-                fromV instanceof rtt.StringSliceCalldataView,
+                    fromV instanceof rtt.StringCalldataView ||
+                    fromV instanceof rtt.StringStorageView ||
+                    fromV instanceof rtt.StringSliceCalldataView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -2306,7 +2319,10 @@ export class Interpreter {
             toT instanceof rtt.AddressType
         ) {
             const contractDef = this.ctx.locate(fromT.innerT.actualT.id);
-            if (contractDef instanceof sol.ContractDefinition && contractDef.kind === sol.ContractKind.Library) {
+            if (
+                contractDef instanceof sol.ContractDefinition &&
+                contractDef.kind === sol.ContractKind.Library
+            ) {
                 const addr = getLibraryLinkedAddress(contractDef, state);
                 this.expect(
                     addr !== undefined,
@@ -2700,7 +2716,7 @@ export class Interpreter {
         } else {
             this.expect(
                 astTarget instanceof sol.FunctionDefinition ||
-                astTarget instanceof sol.VariableDeclaration,
+                    astTarget instanceof sol.VariableDeclaration,
                 `NYI External call target`
             );
 
@@ -2735,7 +2751,12 @@ export class Interpreter {
      * Wrapper around _execCallInt that just creates the scope for the callee context
      */
     _execCall(
-        callee: sol.FunctionDefinition | sol.ModifierInvocation | BuiltinFunction | CurriedVal | rtt.InternalFunRef,
+        callee:
+            | sol.FunctionDefinition
+            | sol.ModifierInvocation
+            | BuiltinFunction
+            | CurriedVal
+            | rtt.InternalFunRef,
         args: Value[],
         argTs: BaseInterpType[],
         state: State
@@ -2899,8 +2920,8 @@ export class Interpreter {
             (newT instanceof rtt.ArrayType ||
                 newT instanceof rtt.BytesType ||
                 newT instanceof rtt.StringType) &&
-            args.length === 1 &&
-            typeof args[0] === "bigint",
+                args.length === 1 &&
+                typeof args[0] === "bigint",
             `Expected an array type with a single length argument not ${newT.pp()} with ${args}`
         );
 
@@ -2933,9 +2954,9 @@ export class Interpreter {
         const base = this.evalNP(expr.vExpression, state);
         this.expect(
             base instanceof rtt.ExternalFunRef ||
-            base instanceof Address ||
-            base instanceof NewCall ||
-            base instanceof ExternalCallDescription
+                base instanceof Address ||
+                base instanceof NewCall ||
+                base instanceof ExternalCallDescription
         );
 
         const res = liftExtCalRef(base);
@@ -2988,8 +3009,8 @@ export class Interpreter {
         if (expr.kind === sol.FunctionCallKind.StructConstructorCall) {
             this.expect(
                 callee instanceof TypeValue &&
-                callee.type instanceof rtt.PointerType &&
-                callee.type.toType instanceof rtt.StructType,
+                    callee.type instanceof rtt.PointerType &&
+                    callee.type.toType instanceof rtt.StructType,
                 `Struct constructors expect a struct type as its callee not ${ppValue(callee)}`
             );
 
@@ -3151,9 +3172,9 @@ export class Interpreter {
         this.expect(typeof start === "bigint" && typeof end === "bigint");
         this.expect(
             base instanceof rtt.BytesCalldataView ||
-            base instanceof rtt.StringCalldataView ||
-            base instanceof rtt.ArrayCalldataView ||
-            base instanceof MsgDataView
+                base instanceof rtt.StringCalldataView ||
+                base instanceof rtt.ArrayCalldataView ||
+                base instanceof MsgDataView
         );
 
         const cd = getMsg(state);
@@ -3191,7 +3212,9 @@ export class Interpreter {
             const v = sol.evalLiteral(expr);
             this.expect(typeof v === "bigint", ``);
             const type = this.typeOf(expr);
-            return type instanceof rtt.AddressType ? new Address(setLengthLeft(bigIntToBytes(v), 20)) : v;
+            return type instanceof rtt.AddressType
+                ? new Address(setLengthLeft(bigIntToBytes(v), 20))
+                : v;
         }
 
         if (expr.kind === sol.LiteralKind.Bool) {
@@ -3200,8 +3223,8 @@ export class Interpreter {
 
         this.expect(
             expr.kind === sol.LiteralKind.String ||
-            expr.kind === sol.LiteralKind.HexString ||
-            expr.kind === sol.LiteralKind.UnicodeString
+                expr.kind === sol.LiteralKind.HexString ||
+                expr.kind === sol.LiteralKind.UnicodeString
         );
 
         const view = state.constantsMap.get(expr.id);
@@ -3364,7 +3387,7 @@ export class Interpreter {
                     // Contract or Global scope constant vars
                     this.expect(
                         baseVal.def instanceof sol.SourceUnit ||
-                        baseVal.def instanceof sol.ContractDefinition
+                            baseVal.def instanceof sol.ContractDefinition
                     );
                     scope =
                         baseVal.def instanceof sol.SourceUnit
@@ -3374,7 +3397,7 @@ export class Interpreter {
                     // Base contract state var
                     this.expect(
                         baseVal.def instanceof sol.ContractDefinition &&
-                        isBaseOf(baseVal.def, getCodeContract(state))
+                            isBaseOf(baseVal.def, getCodeContract(state))
                     );
                     scope = this.makeStaticScope(baseVal.def, state);
                 }
@@ -3452,8 +3475,8 @@ export class Interpreter {
             const arrPtrT = this.typeOf(expr);
             this.expect(
                 arrPtrT instanceof rtt.PointerType &&
-                arrPtrT.toType instanceof rtt.ArrayType &&
-                arrPtrT.toType.size !== undefined,
+                    arrPtrT.toType instanceof rtt.ArrayType &&
+                    arrPtrT.toType.size !== undefined,
                 `Expected a fixed size array in memory not ${arrPtrT.pp()}`
             );
 
@@ -3580,13 +3603,13 @@ export class Interpreter {
             const subVal = this.evalT(expr.vSubExpression, BigInt, state);
             res = -subVal;
         } else if (expr.operator === "~") {
-            let subVal = this.evalNP(expr.vSubExpression, state);
-            this.expect(typeof subVal === "bigint" || subVal instanceof Uint8Array)
+            const subVal = this.evalNP(expr.vSubExpression, state);
+            this.expect(typeof subVal === "bigint" || subVal instanceof Uint8Array);
 
             if (typeof subVal === "bigint") {
-                res = ~subVal
+                res = ~subVal;
             } else {
-                res = bytesBitwiseNot(subVal)
+                res = bytesBitwiseNot(subVal);
             }
         } else {
             // @todo implement delete
@@ -3665,7 +3688,7 @@ export class Interpreter {
             nd = target.target instanceof rtt.InternalFunRef ? target.target.fun : target.target;
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];
-        } else[(nd = target)];
+        } else [(nd = target)];
 
         const staticScope = this.makeStaticScope(nd, state);
         let localNames: string[];
@@ -3746,6 +3769,4 @@ export class Interpreter {
 
         return res;
     }
-
-
 }

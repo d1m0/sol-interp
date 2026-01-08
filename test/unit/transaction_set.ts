@@ -145,7 +145,7 @@ export class TransactionSet {
             );
             abiRetTs = retTs.map(toABIEncodedType);
         } else {
-            retTs = getGetterArgAndReturnTs(fun)[1]
+            retTs = getGetterArgAndReturnTs(fun)[1];
             abiRetTs = retTs.map(toABIEncodedType);
         }
 

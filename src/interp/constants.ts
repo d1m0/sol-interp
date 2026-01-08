@@ -182,7 +182,7 @@ export function gatherConstants(
         state.scope = scope;
 
         sol.assert(nd.vValue !== undefined, `Unexpected constant variable with no initializer`);
-        const val = interp.castTo(interp.eval(nd.vValue, state), typ, state)
+        const val = interp.castTo(interp.eval(nd.vValue, state), typ, state);
 
         let view: BaseMemoryView<Value, rtt.BaseRuntimeType>;
 

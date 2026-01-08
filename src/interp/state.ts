@@ -8,7 +8,7 @@ import {
     ZERO_ADDRESS
 } from "sol-dbg";
 import { BaseScope, BuiltinsScope, LocalsScope } from "./scope";
-import * as sol from "solc-typed-ast"
+import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction, BuiltinStruct } from "./value";

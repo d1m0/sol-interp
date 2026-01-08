@@ -44,7 +44,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<string, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) { }
+    ) {}
 
     abstract _lookup(name: string): Value | undefined;
     abstract _lookupLocation(name: string): View | undefined;

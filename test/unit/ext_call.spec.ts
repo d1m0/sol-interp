@@ -93,7 +93,13 @@ describe("Simple function call tests", () => {
             const ctx = fun.requiredContext;
 
             const argTs = fun.vParameters.vParameters.map((decl) =>
-                abiTypeToCanonicalName(typeIdToRuntimeType(sol.toABIType(sol.typeOf(decl), ctx), ctx, sol.DataLocation.Memory))
+                abiTypeToCanonicalName(
+                    typeIdToRuntimeType(
+                        sol.toABIType(sol.typeOf(decl), ctx),
+                        ctx,
+                        sol.DataLocation.Memory
+                    )
+                )
             );
 
             const abiRetTs = fun.vReturnParameters.vParameters.map((decl) =>
