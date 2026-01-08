@@ -84,6 +84,10 @@ import {
 } from "./scope";
 import {
     bytes32,
+    bytesBitwiseAnd,
+    bytesBitwiseNot,
+    bytesBitwiseOr,
+    bytesBitwiseXor,
     bytesT,
     bytesToIntOfType,
     cdBytesT,
@@ -113,6 +117,7 @@ import {
     isValueType,
     length,
     liftExtCalRef,
+    locationOfView,
     makeZeroValue,
     memBytesT,
     memStringT,
@@ -747,8 +752,8 @@ export class Interpreter {
         // Decode any primitive values
         const returnVals: Value[] = returnViews.map((v) => {
             if (isValueType(v.type)) {
-                const t = v.decode(storage);
-                this.expect(isPrimitiveValue(t), ``);
+                const t = decodeView(v, state);
+                this.expect(isPrimitiveValue(t), `Expected a primitive value not: ${t}, ${t.constructor.name}`);
                 return t;
             }
 
@@ -1582,7 +1587,7 @@ export class Interpreter {
             }
         }
 
-        // Int literals to fixed byte
+        // Int to fixed byte
         if (typeof value === "bigint" && toType instanceof rtt.FixedBytesType) {
             const view = makeMemoryView(value < 0n ? int256 : rtt.uint256, 0n);
             view.encode(value, scratchWord, undefined as unknown as any);
@@ -1615,10 +1620,6 @@ export class Interpreter {
             return setLengthRight(t, toType.numBytes);
         }
 
-        if (typeof value === "bigint" && toType instanceof RationalNumberType) {
-            return value;
-        }
-
         // type args to builtins
         if (
             value instanceof TypeValue &&
@@ -1634,7 +1635,11 @@ export class Interpreter {
         rvalue: rtt.PrimitiveValue,
         lvType: rtt.BaseRuntimeType,
         state: State
-    ): PrimitiveValue {
+    ): rtt.PrimitiveValue {
+        if (typeof rvalue === "bigint" && lvType instanceof RationalNumberType && rvalue === lvType.numerator && lvType.denominator === 1n) {
+            return rvalue;
+        }
+
         const res = this.implicitCoercionImpl(rvalue, lvType, state);
         this.expect(
             res !== undefined,
@@ -1696,7 +1701,6 @@ export class Interpreter {
             return;
         }
 
-        // console.error(`Assigning ${ppValue(rvalue)}->${ppLValue(lvalue)} of type ${lvalue.type.pp()}`)
         this.expect(
             isPrimitiveValue(rvalue),
             `Unexpected rvalue ${ppValue(rvalue)} in assignment to ${ppLValue(lvalue)}`
@@ -1725,73 +1729,78 @@ export class Interpreter {
             return;
         }
 
-        rvalue = this.implicitCoercion(rvalue, lvalue.type, state);
-
-        // The following ref-type assignments result in a copy of the underlying complex value
-        // - storage-to-storage
-        // - memory-to-storage
-        // - storage-to-memory
-        // - calldata-to-memory
-        // - calldata-to-storage
-        if (
-            (lvalue instanceof BaseStorageView && rvalue instanceof BaseStorageView) ||
-            (lvalue instanceof BaseStorageView && rvalue instanceof BaseMemoryView) ||
-            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseStorageView) ||
-            (lvalue instanceof BaseMemoryView && rvalue instanceof BaseCalldataView) ||
-            (lvalue instanceof BaseStorageView && rvalue instanceof BaseCalldataView) ||
-            (lvalue instanceof PointerLocalView &&
-                lvalue.type.location === sol.DataLocation.Memory &&
-                (rvalue instanceof BaseStorageView || rvalue instanceof BaseCalldataView))
-        ) {
-            // Types should be equal modulo location
-            this.expect(
-                isDirectlyAssignable(lvalue.type, typeOfView(rvalue)),
-                `Mismatching types in copying ref assignment (modulo location): ${lvalue.type.pp()} and ${rvalue.type.pp()} `
-            );
-
-            const complexRVal = decodeView(rvalue, state);
-
-            if (lvalue instanceof BaseMemoryView) {
-                lvalue.encode(complexRVal, state.memory, state.memAllocator);
-            } else if (lvalue instanceof BaseStorageView) {
-                setStateStorage(state, lvalue.encode(complexRVal, getStateStorage(state)));
-            } else {
-                const memView = PointerMemView.allocMemFor(
-                    complexRVal,
-                    lvalue.type.toType,
-                    state.memAllocator
-                );
-                memView.encode(complexRVal, state.memory, state.memAllocator);
-                lvalue.encode(memView);
-            }
-
+        // Nothing to do - missing component in LHS tuple assignment
+        if (lvalue === null) {
             return;
         }
 
-        if (typeof rvalue === "bigint" && lvalue.type instanceof rtt.FixedBytesType) {
-            rvalue = bigIntToBytes(rvalue);
-        }
+        rvalue = this.implicitCoercion(rvalue, lvalue.type, state);
 
-        // In all other cases we are either:
-        // 1. assigning a primitive value,
-        // 2. assigning memory-to-memory (which aliases),
-        // 3. assigning to a local pointer a reference of the same type (which aliases)
-        if (lvalue instanceof BaseStorageView) {
-            setStateStorage(state, lvalue.encode(rvalue, getStateStorage(state)));
-        } else if (lvalue instanceof BaseMemoryView) {
-            lvalue.encode(rvalue, state.memory, state.memAllocator);
-        } else if (lvalue instanceof BaseLocalView) {
-            this.expect(
-                !(lvalue.type instanceof rtt.PointerType) ||
-                isPoison(rvalue as rtt.PrimitiveValue) ||
-                (rvalue instanceof View && lvalue.type.toType.pp() === rvalue.type.pp()),
-                `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
-            );
-            lvalue.encode(rvalue);
-        } else if (lvalue === null) {
-            // Nothing to do - missing component in the LHS of a tuple assignment.
+        if (rvalue instanceof View) {
+            // Reference value assignment - either copy or aliasing
+            const lvalueLoc = locationOfView(lvalue);
+            const rvalueLoc = locationOfView(rvalue);
+
+            // The following ref-type assignments result in a copy of the underlying complex value
+            // - storage-to-storage
+            // - memory-to-storage
+            // - storage-to-memory
+            // - calldata-to-memory
+            // - calldata-to-storage
+            // - storage/memory/calldata-to-stack pointer in different location
+            const isCopy = lvalueLoc !== rvalueLoc || (lvalueLoc === sol.DataLocation.Storage && rvalueLoc === sol.DataLocation.Storage && !(lvalue instanceof PointerLocalView));
+
+            if (isCopy) {
+                // Types should be equal modulo location
+                this.expect(
+                    isDirectlyAssignable(lvalue.type, typeOfView(rvalue)),
+                    `Mismatching types in copying ref assignment (modulo location): ${lvalue.type.pp()} and ${rvalue.type.pp()} `
+                );
+
+                const complexRVal = decodeView(rvalue, state);
+
+                if (lvalue instanceof BaseMemoryView) {
+                    lvalue.encode(complexRVal, state.memory, state.memAllocator);
+                } else if (lvalue instanceof BaseStorageView) {
+                    setStateStorage(state, lvalue.encode(complexRVal, getStateStorage(state)));
+                } else {
+                    this.expect(lvalue instanceof PointerLocalView);
+                    const memView = PointerMemView.allocMemFor(
+                        complexRVal,
+                        lvalue.type.toType,
+                        state.memAllocator
+                    );
+                    memView.encode(complexRVal, state.memory, state.memAllocator);
+                    lvalue.encode(memView);
+                }
+            } else {
+                // Aliasing assignment memory->memory or memory->stack memory pointer
+                if (lvalue instanceof BaseMemoryView) {
+                    lvalue.encode(rvalue, state.memory, state.memAllocator);
+                } else {
+                    this.expect(
+                        lvalue instanceof PointerLocalView &&
+                        lvalue.type.toType.pp() === rvalue.type.pp(),
+                        `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
+                    );
+                    lvalue.encode(rvalue);
+                }
+            }
+        } else if (rvalue instanceof rtt.Slice) {
+            nyi('Assignment of slices');
         } else {
-            nyi(`assign(${lvalue}, ${rvalue}, ${state})`);
+            // Primitive value assignment
+            if (lvalue instanceof BaseStorageView) {
+                // @todo fix this
+                setStateStorage(state, lvalue.encode(rvalue as any, getStateStorage(state)));
+            } else if (lvalue instanceof BaseMemoryView) {
+                lvalue.encode(rvalue, state.memory, state.memAllocator);
+            } else if (lvalue instanceof BaseLocalView) {
+                // 3. assigning to a local variable
+                lvalue.encode(rvalue);
+            } else {
+                nyi(`assign(${lvalue}, ${rvalue}, ${state})`);
+            }
         }
     }
 
@@ -1880,6 +1889,10 @@ export class Interpreter {
     ): [PrimitiveValue, PrimitiveValue] {
         if (lType.pp() == rType.pp()) {
             return [left, right];
+        }
+
+        if (lType instanceof RationalNumberType && rType instanceof RationalNumberType && typeof left === "bigint" && typeof right === "bigint") {
+            return [left, right]
         }
 
         const castRigth = this.implicitCoercionImpl(right, lType, state);
@@ -2044,23 +2057,33 @@ export class Interpreter {
                 nyi(`Bitshift of fixed bytes`);
             }
 
+            [left, right] = this.coerceToSameType(left, lType, right, rType, state);
+
             if (typeof left === "bigint" && typeof right === "bigint") {
                 if (operator === "|") {
                     return left | right;
-                }
-
-                if (operator === "&") {
+                } else if (operator === "&") {
                     return left & right;
-                }
-
-                if (operator === "^") {
+                } else {
+                    this.expect(operator === "^", `Unknown bitwise operator ${operator}`)
                     return left ^ right;
                 }
-
-                nyi(`Unknown bitwise operator ${operator}`);
             }
 
-            nyi(`Bitwise ${operator} on fixed bytes`);
+            if (left instanceof Uint8Array && right instanceof Uint8Array) {
+
+                if (operator === "|") {
+                    return bytesBitwiseOr(left, right);
+                } else if (operator === "&") {
+                    return bytesBitwiseAnd(left, right);
+                } else {
+                    this.expect(operator === "^")
+                    return bytesBitwiseXor(left, right);
+                }
+            }
+
+
+            nyi(`Bitwise ${operator} on fixed bytes ${ppValue(left)} and ${ppValue(right)}`);
         }
 
         nyi(`${left} ${operator} ${right}`);
@@ -3526,7 +3549,7 @@ export class Interpreter {
         }
 
         // In all other cases the result is bigint
-        let res: bigint;
+        let res: bigint | Uint8Array;
         const unchecked = this.isUnchecked(expr);
         const t = this.typeOf(expr);
 
@@ -3553,18 +3576,24 @@ export class Interpreter {
             return res;
         }
 
-        const subVal = this.evalT(expr.vSubExpression, BigInt, state);
-
         if (expr.operator === "-") {
+            const subVal = this.evalT(expr.vSubExpression, BigInt, state);
             res = -subVal;
         } else if (expr.operator === "~") {
-            res = ~subVal;
+            let subVal = this.evalNP(expr.vSubExpression, state);
+            this.expect(typeof subVal === "bigint" || subVal instanceof Uint8Array)
+
+            if (typeof subVal === "bigint") {
+                res = ~subVal
+            } else {
+                res = bytesBitwiseNot(subVal)
+            }
         } else {
             // @todo implement delete
             nyi(`Unary operator ${expr.operator}`);
         }
 
-        return this.clamp(res, t, unchecked, state);
+        return typeof res === "bigint" ? this.clamp(res, t, unchecked, state) : res;
     }
 
     /**
@@ -3705,4 +3734,18 @@ export class Interpreter {
 
         return vals;
     }
+
+    castTo(val: Value, type: BaseInterpType, state: State): Value {
+        const oldScope = state.scope;
+        const temps = new TempsScope([type], state, oldScope);
+        state.scope = temps;
+
+        this.assign(temps.temps[0], val, state);
+        const res = temps.tempVals[0];
+        state.scope = oldScope;
+
+        return res;
+    }
+
+
 }

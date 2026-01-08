@@ -283,7 +283,7 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
         return val.bytes;
     } else if (type instanceof rtt.PointerType) {
         if (type.toType instanceof rtt.BytesType) {
-            sol.assert(val instanceof View && val.type instanceof rtt.BytesType, ``);
+            sol.assert(val instanceof View && val.type instanceof rtt.BytesType, `Unexpected value ${ppValue(val)}`);
             const bytes = decodeView(val, state);
             sol.assert(bytes instanceof Uint8Array, ``);
             return bytes;

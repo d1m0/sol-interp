@@ -53,7 +53,7 @@ import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
 import { satisfies } from "semver";
 import { BaseInterpType, RationalNumberType } from "./types";
-import { BuiltinScope, TempsScope } from "./scope";
+import { BuiltinScope, } from "./scope";
 
 /**
  * A version-dependent buitlin description. This is a recursive datatype with several cases:
@@ -114,18 +114,6 @@ export function makeBuiltin(
     return makeBuiltin(matchingOptions[0][0], version);
 }
 
-function castTo(val: Value, type: BaseInterpType, state: State, interp: Interpreter): Value {
-    const oldScope = state.scope;
-    const temps = new TempsScope([type], state, oldScope);
-    state.scope = temps;
-
-    interp.assign(temps.temps[0], val, state);
-    const res = temps.tempVals[0];
-    state.scope = oldScope;
-
-    return res;
-}
-
 function getNthArg<T extends ValueTypeConstructors>(
     n: number,
     type: BaseInterpType,
@@ -137,7 +125,7 @@ function getNthArg<T extends ValueTypeConstructors>(
 
     const rawArg = scope.lookup(`arg_${n}`);
     interp.expect(rawArg !== undefined);
-    const res = castTo(rawArg, type, state, interp);
+    const res = interp.castTo(rawArg, type, state);
     interp.expect(match(res, valConstr));
     return res;
 }
@@ -177,7 +165,7 @@ export const pushBuiltin = new BuiltinFunction(
         let el: Value;
 
         if (args.length > 1) {
-            el = castTo(args[1], elT, state, interp);
+            el = interp.castTo(args[1], elT, state);
         } else {
             el = makeZeroValue(elT, state);
         }
@@ -272,15 +260,6 @@ function encodeImpl(
 ): Value {
     let encBytes: Uint8Array;
 
-    // Replace RationalNumTypes with appropriate int type
-    paramTs = paramTs.map((t) => {
-        if (t instanceof RationalNumberType) {
-            return t.numerator < 0 ? int256 : uint256
-        }
-
-        return t;
-    })
-
     if (paramTs.length === 0) {
         encBytes = new Uint8Array();
     } else {
@@ -300,18 +279,6 @@ function encodeImpl(
 function encodePackedImpl(paramTs: rtt.BaseRuntimeType[], args: Value[], state: State, ctx: sol.ASTContext): Value {
     let encBytes: Uint8Array;
 
-    // Replace RationalNumTypes with appropriate int type
-    paramTs = paramTs.map((t) => {
-        if (t instanceof RationalNumberType) {
-            sol.assert(t.isInt(), ``);
-            const intT = sol.smallestFittingType(t.numerator);
-            sol.assert(intT !== undefined, ``)
-            return rtt.typeIdToRuntimeType(intT, ctx)
-        }
-
-        return t;
-    })
-
     if (paramTs.length === 0) {
         encBytes = new Uint8Array();
     } else {
@@ -324,15 +291,20 @@ function encodePackedImpl(paramTs: rtt.BaseRuntimeType[], args: Value[], state: 
     return res;
 }
 
-function getEncodeTypes(state: State): BaseInterpType[] {
+function getEncodeTypes(state: State, ctx: sol.ASTContext, isPacked: boolean): BaseInterpType[] {
     const scope = state.scope as BuiltinScope;
     const paramTs = scope.argTs.map((paramT) => {
-        paramT =
-            paramT instanceof RationalNumberType
-                ? paramT.numerator < 0n
-                    ? int256
-                    : uint256
-                : paramT;
+        if (paramT instanceof RationalNumberType) {
+            sol.assert(paramT.isInt(), ``);
+            if (isPacked) {
+                const intT = sol.smallestFittingType(paramT.numerator);
+                sol.assert(intT !== undefined, ``)
+                return rtt.typeIdToRuntimeType(new sol.IntTypeId(intT.nBits, intT.signed), ctx)
+            } else {
+                return paramT.numerator < 0n ? int256 : uint256
+            }
+        }
+
         return changeLocTo(paramT, sol.DataLocation.Memory);
     });
 
@@ -343,7 +315,7 @@ export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const paramTs = getEncodeTypes(state);
+        const paramTs = getEncodeTypes(state, interp.ctx, false);
         const args = self.getArgs(paramTs.length, state);
         return [encodeImpl(paramTs, args, state)];
     }
@@ -353,7 +325,7 @@ export const abiEncodePackedBuiltin = new BuiltinFunction(
     "encodePacked",
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const paramTs = getEncodeTypes(state);
+        const paramTs = getEncodeTypes(state, interp.ctx, true);
         const args = self.getArgs(paramTs.length, state);
         return [encodePackedImpl(paramTs, args, state, interp.ctx)];
     }
@@ -363,10 +335,10 @@ export const abiEncodeWithSelectorBuiltin = new BuiltinFunction(
     "encodeWithSelector",
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const paramTs = getEncodeTypes(state);
+        const paramTs = getEncodeTypes(state, interp.ctx, false);
         const args = self.getArgs(paramTs.length, state);
         interp.expect(args.length >= 1, `Unexpected args to encodeWithSelector ${ppValue(args)}`);
-        const selector = castTo(args[0], rtt.bytes4, state, interp);
+        const selector = interp.castTo(args[0], rtt.bytes4, state);
         interp.expect(selector instanceof Uint8Array);
         return [encodeImpl(paramTs.slice(1), args.slice(1), state, selector)];
     }
@@ -376,13 +348,13 @@ export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
     "encodeWithSignature",
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const paramTs = getEncodeTypes(state);
+        const paramTs = getEncodeTypes(state, interp.ctx, false);
 
         const args = self.getArgs(paramTs.length, state);
 
         interp.expect(args.length >= 1 && args[0] instanceof View);
         const sigStr = decodeView(args[0], state);
-        interp.expect(typeof sigStr === "string");
+        interp.expect(typeof sigStr === "string", `Unexpected signature ${sigStr}`);
 
         return [encodeImpl(paramTs.slice(1), args.slice(1), state, signatureToSelector(sigStr))];
     }
@@ -392,8 +364,7 @@ export const abiEncodeCallBuiltin = new BuiltinFunction(
     "encodeCall",
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
-        const scope = state.scope as BuiltinScope;
-        const paramTs = scope.argTs.map((paramT) => changeLocTo(paramT, sol.DataLocation.Memory));
+        const paramTs = getEncodeTypes(state, interp.ctx, false)
         const args = self.getArgs(paramTs.length, state);
 
         interp.expect(args.length >= 1 && args[0] instanceof rtt.ExternalFunRef);
@@ -816,7 +787,7 @@ const keccak256v04Builtin = new BuiltinFunction(
     dummyFunT,
     (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const scope = state.scope as BuiltinScope;
-        const args = self.getArgs(scope.nArgs, state);
+        const args = getEncodeTypes(state, interp.ctx, true);
         const encoded = encodePacked(args, scope.argTs, state);
         const hash = keccak256(encoded);
         return [hash];

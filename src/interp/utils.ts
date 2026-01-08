@@ -24,7 +24,7 @@ import { CallResult, State, WorldInterface } from "./state";
 import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
-import { Address } from "@ethereumjs/util";
+import { Address, } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
@@ -377,24 +377,72 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
     nyi(`View type ${v.pp()}`);
 }
 
+export function bytesBitwiseOr(a: Uint8Array, b: Uint8Array): Uint8Array {
+    sol.assert(a.length === b.length, `Mismatch in bytes length {0} and {1}`, a, b);
+    const res = new Uint8Array(a.length);
+
+    for (let i = 0; i < a.length; i++) {
+        res[i] = a[i] | b[i];
+    }
+
+    return res;
+}
+
+export function bytesBitwiseAnd(a: Uint8Array, b: Uint8Array): Uint8Array {
+    sol.assert(a.length === b.length, `Mismatch in bytes length {0} and {1}`, a, b);
+    const res = new Uint8Array(a.length);
+
+    for (let i = 0; i < a.length; i++) {
+        res[i] = a[i] & b[i];
+    }
+
+    return res;
+}
+
+export function bytesBitwiseXor(a: Uint8Array, b: Uint8Array): Uint8Array {
+    sol.assert(a.length === b.length, `Mismatch in bytes length {0} and {1}`, a, b);
+    const res = new Uint8Array(a.length);
+
+    for (let i = 0; i < a.length; i++) {
+        res[i] = a[i] ^ b[i];
+    }
+
+    return res;
+}
+
+export function bytesBitwiseNot(a: Uint8Array): Uint8Array {
+    const res = new Uint8Array(a.length);
+    for (let i = 0; i < a.length; i++) {
+        res[i] = ~a[i];
+    }
+    return res;
+}
+
+/**
+ * Return the location of a given view
+ * @param v 
+ * @returns 
+ */
+export function locationOfView(v: rtt.View): sol.DataLocation {
+    if (v instanceof BaseMemoryView) {
+        return sol.DataLocation.Memory;
+    } else if (v instanceof BaseStorageView) {
+        return sol.DataLocation.Storage;
+    } else if (v instanceof BaseCalldataView) {
+        return sol.DataLocation.CallData;
+    } else if (v instanceof PointerLocalView) {
+        return v.type.location;
+    } else {
+        nyi(`View type ${v.constructor.name}`);
+    }
+}
+
 /**
  * The type of a "view" value is a Pointer to the underlying view type
  * @param v
  */
 export function typeOfView(v: rtt.View): rtt.BaseRuntimeType {
-    let loc: sol.DataLocation;
-
-    if (v instanceof BaseMemoryView) {
-        loc = sol.DataLocation.Memory;
-    } else if (v instanceof BaseStorageView) {
-        loc = sol.DataLocation.Storage;
-    } else if (v instanceof BaseCalldataView) {
-        loc = sol.DataLocation.CallData;
-    } else {
-        nyi(`View type ${v.constructor.name}`);
-    }
-
-    return new rtt.PointerType(v.type, loc);
+    return new rtt.PointerType(v.type, locationOfView(v));
 }
 
 /**
