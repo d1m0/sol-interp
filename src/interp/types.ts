@@ -1,163 +1,144 @@
 import * as rtt from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { memBytesT, memStringT } from "./utils";
-
-export class DefType extends rtt.BaseRuntimeType {
-    pp(): string {
-        return "<def>";
-    }
-}
-
-export class TypeType extends rtt.BaseRuntimeType {
-    pp(): string {
-        return `<type>`;
-    }
-}
-
-/**
- * Internal-only type hack to pass certain values without coercion to builtins
- */
-export class AnyType extends rtt.BaseRuntimeType {
-    constructor() {
-        super();
-    }
-    pp(): string {
-        return `<any>`;
-    }
-}
+import { memBytesT } from "./utils";
 
 export type BaseInterpType = rtt.BaseRuntimeType;
+export class WrappedType extends rtt.BaseRuntimeType {
+    constructor(public readonly innerT: sol.TypeIdentifier) {
+        super();
+    }
 
-/**
- * Helper for converting `TypeName`s to `TypeNode`s. In some cases when solc-typed-ast conversion fails,
- * it can try and guess the correct simplified type from the typeString
- *
- * - unknown contracts - retun address
- */
-function typeNameToTypeNode(
-    t: sol.TypeName,
-    infer: sol.InferType,
-    loc?: sol.DataLocation
-): sol.TypeNode {
-    try {
-        return loc ? infer.typeNameToSpecializedTypeNode(t, loc) : infer.typeNameToTypeNode(t);
-    } catch (e) {
-        if (rtt.isTypeUnknownContract(t)) {
-            return new sol.AddressType(false);
-        }
+    pp(): string {
+        return `<${this.innerT.pp()}>`;
+    }
+}
 
-        throw e;
+export class ArraySliceType extends rtt.BaseRuntimeType {
+    pp(): string {
+        return `<slice ${this.innerT.pp()}>`;
+    }
+    constructor(public readonly innerT: rtt.PointerType) {
+        super();
+    }
+}
+
+export class RationalNumberType extends rtt.BaseRuntimeType {
+    constructor(
+        public readonly numerator: bigint,
+        public readonly denominator: bigint
+    ) {
+        super();
+    }
+
+    pp(): string {
+        return `<rational ${this.numerator}/${this.denominator}>`;
+    }
+
+    isInt(): boolean {
+        return this.denominator === 1n;
+    }
+
+    asInt(): bigint {
+        sol.assert(this.denominator === 1n, ``);
+        return this.numerator;
     }
 }
 
 /**
- * Convert the given solc-typed-ast type to a runtime types. This does the following conversions:
- *
- * - Convert `UserDefinedType(StructDefinition)` to `ExpStructType`
- * - Convert `UserDefinedType(UserDefinedValueTypeDefinition)` to the underlying type
- * - Convert `UserDefinedType(ContractDefinition)` to address
+ * Convert the given TypeIdentifier to a runtime type. This is build on top of sol-dbg's
+ * `typeIdToRuntimeType` but adds support for several solidity types that appear only in the AST:
  *
  * @param rawT
  */
-export function astToRuntimeType(
-    rawT: sol.TypeNode,
-    infer: sol.InferType,
+export function typeIdToRuntimeType(
+    rawT: sol.TypeIdentifier,
+    ctx: sol.ASTContext,
     loc: sol.DataLocation | undefined = undefined
-): rtt.BaseRuntimeType {
-    if (rawT instanceof sol.StringLiteralType) {
-        return rawT.isHex ? memBytesT : memStringT;
-    }
-
-    if (rawT instanceof sol.ArrayType) {
-        const expElT = astToRuntimeType(rawT.elementT, infer, loc);
+): BaseInterpType {
+    // Handle compound cases
+    if (rawT instanceof sol.ArrayTypeId) {
+        const expElT = typeIdToRuntimeType(rawT.elT, ctx, loc);
 
         return new rtt.ArrayType(expElT, rawT.size);
     }
 
-    if (rawT instanceof sol.MappingType) {
-        const keyT = astToRuntimeType(rawT.keyType, infer, loc);
-        const valueT = astToRuntimeType(rawT.valueType, infer, loc);
+    if (rawT instanceof sol.MappingTypeId) {
+        const keyT = typeIdToRuntimeType(rawT.keyType, ctx, loc);
+        const valueT = typeIdToRuntimeType(rawT.valueType, ctx, loc);
 
         return new rtt.MappingType(keyT, valueT);
     }
 
-    if (rawT instanceof sol.TupleType) {
-        return new rtt.TupleType(
-            rawT.elements.map((elT) =>
-                elT === null ? new rtt.MissingType(undefined) : astToRuntimeType(elT, infer, loc)
-            )
-        );
+    if (rawT instanceof sol.TupleTypeId) {
+        return new rtt.TupleType(rawT.components.map((elT) => typeIdToRuntimeType(elT, ctx, loc)));
     }
 
-    if (rawT instanceof sol.PointerType) {
+    if (rawT instanceof sol.PointerTypeId) {
         const ptrLoc = rawT.location === sol.DataLocation.Default ? loc : rawT.location;
         sol.assert(ptrLoc !== undefined, `Missing location in conversion of {0}`, rawT);
 
-        const toT = astToRuntimeType(rawT.to, infer, ptrLoc);
-
+        const toT = typeIdToRuntimeType(rawT.toType, ctx, ptrLoc);
         return new rtt.PointerType(toT, ptrLoc);
     }
 
-    if (rawT instanceof sol.UserDefinedType) {
-        if (rawT.definition instanceof sol.StructDefinition) {
-            sol.assert(loc !== undefined, `Missing location in struct expansion {0}`, rawT);
-            const fields: Array<[string, rtt.BaseRuntimeType]> = rawT.definition.vMembers.map(
-                (decl) => {
-                    let fieldT: sol.TypeNode;
-                    try {
-                        fieldT = typeNameToTypeNode(decl.vType as sol.TypeName, infer, loc);
-                    } catch (e) {
-                        return [
-                            decl.name,
-                            new rtt.MissingType(
-                                decl.vType !== undefined ? decl.vType.typeString : undefined
-                            )
-                        ];
-                    }
+    if (rawT instanceof sol.StructTypeId) {
+        sol.assert(loc !== undefined, `Missing location in struct expansion {0}`, rawT);
+        const def = ctx.locate(rawT.id);
+        sol.assert(def instanceof sol.StructDefinition, ``);
 
-                    return [decl.name, astToRuntimeType(fieldT, infer, loc)];
-                }
-            );
+        const fields: Array<[string, BaseInterpType]> = def.vMembers.map((decl) => [
+            decl.name,
+            typeIdToRuntimeType(sol.changeLocationTo(sol.typeOf(decl), loc), ctx, loc)
+        ]);
 
-            return new rtt.StructType(rawT.name, fields);
-        }
-
-        if (rawT.definition instanceof sol.UserDefinedValueTypeDefinition) {
-            let underlyingType: sol.TypeNode;
-            try {
-                underlyingType = typeNameToTypeNode(rawT.definition.underlyingType, infer);
-            } catch (e) {
-                return new rtt.MissingType(rawT.definition.underlyingType.typeString);
-            }
-
-            return astToRuntimeType(underlyingType, infer, loc);
-        }
-
-        if (rawT.definition instanceof sol.ContractDefinition) {
-            return new rtt.AddressType();
-        }
-
-        if (rawT.definition instanceof sol.EnumDefinition) {
-            return astToRuntimeType(sol.enumToIntType(rawT.definition), infer);
-        }
+        return new rtt.StructType(rawT.name, fields);
     }
 
-    if (rawT instanceof sol.FunctionType) {
-        const argTs = rawT.parameters.map((argT) => astToRuntimeType(argT, infer));
-        const retTs = rawT.returns.map((retT) => astToRuntimeType(retT, infer));
-        return new rtt.FunctionType(
-            argTs,
-            rawT.visibility === sol.FunctionVisibility.External,
-            rawT.mutability,
-            retTs
+    // ArraySliceTypeId
+    if (rawT instanceof sol.ArraySliceTypeId) {
+        const innerT = typeIdToRuntimeType(rawT.toType, ctx, loc);
+        sol.assert(
+            innerT instanceof rtt.PointerType,
+            `Expected a pointer in a slice type not {0}`,
+            innerT
         );
+        return new ArraySliceType(innerT);
     }
 
-    // Sometimes builtins can end up as implicit first args (e.g. (addr).call.gas(...))
-    // Since those are not actually used/checked, just use a dummy type
-    if (rawT instanceof sol.BuiltinFunctionType) {
-        return new AnyType();
+    // Handle primitive cases not handled in sol-dbg
+    // StringLiteralTypeId are treated as memory bytes.
+    if (rawT instanceof sol.StringLiteralTypeId) {
+        return memBytesT;
     }
 
-    return rtt.astToRuntimeType(rawT, infer, loc);
+    // RationalNumTypeId
+    if (rawT instanceof sol.RationalNumTypeId) {
+        return new RationalNumberType(rawT.numerator, rawT.denominator);
+    }
+
+    // BuiltinStructTypeId
+    // ErrorTypeId
+    // MetaTypeTypeId
+    // ModuleTypeId
+    // SuperTypeId
+    // TypeTypeId
+    if (
+        rawT instanceof sol.BuiltinStructTypeId ||
+        rawT instanceof sol.ErrorTypeId ||
+        rawT instanceof sol.MetaTypeTypeId ||
+        rawT instanceof sol.ModuleTypeId ||
+        rawT instanceof sol.SuperTypeId ||
+        rawT instanceof sol.TypeTypeId
+    ) {
+        return new WrappedType(rawT);
+    }
+
+    // These ones shouldn't appear in the interepter
+    // ModifierTypeId
+    if (rawT instanceof sol.ModifierTypeId) {
+        sol.assert(false, `Unexpected type ${rawT.pp()}`);
+    }
+
+    // Rest is handled by sol-dbg
+    return rtt.typeIdToRuntimeType(rawT, ctx, loc);
 }

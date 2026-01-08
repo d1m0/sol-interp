@@ -13,7 +13,6 @@ import { ParsedStep } from "./ast/parser";
 import {
     address,
     AddressType,
-    astToRuntimeType,
     ContractInfo,
     IntType,
     nyi,
@@ -21,7 +20,8 @@ import {
     ZERO_ADDRESS,
     Value as BaseValue,
     BaseRuntimeType,
-    BoolType
+    BoolType,
+    typeIdToRuntimeType
 } from "sol-dbg";
 import { BaseInterpType } from "../interp/types";
 import { ExpressionNode } from "./ast";
@@ -155,34 +155,29 @@ export class Runner {
             target = this.findMethod(targetContract.ast, step.method);
         }
 
-        let argSolTs: sol.TypeNode[] = [];
-        const infer = this.artifactManager.infer(targetContract.artifact.compilerVersion);
+        let argSolTs: sol.TypeIdentifier[] = [];
 
         if (target instanceof sol.FunctionDefinition) {
-            argSolTs = target.vParameters.vParameters.map((decl) =>
-                infer.toABIEncodedType(
-                    infer.variableDeclarationToTypeNode(decl),
-                    sol.ABIEncoderVersion.V2
-                )
-            );
+            argSolTs = target.vParameters.vParameters.map((decl) => sol.typeOf(decl));
         } else if (target instanceof sol.VariableDeclaration) {
-            argSolTs = infer
-                .getterArgsAndReturn(target)[0]
-                .map((argT) => infer.toABIEncodedType(argT, sol.ABIEncoderVersion.V2));
+            argSolTs = sol.getterArgsAndReturn(target)[0];
         } else {
             argSolTs = [];
         }
 
         const argRTTs = argSolTs.map((solT) =>
-            astToRuntimeType(solT, infer, sol.DataLocation.Memory)
+            toABIEncodedType(
+                typeIdToRuntimeType(solT, targetContract.artifact.ctx, sol.DataLocation.Memory)
+            )
         );
+
         this.expect(
             argRTTs.length === step.args.length,
             `Mismatch in given arg length (${step.args.length} and number of args (${argRTTs.length} for method ${target ? target.name : "<unknown>"} in ${targetContract.contractName}))`
         );
 
         const args = step.args.map((exprNode, i) => this.evalExpr(exprNode, argRTTs[i]));
-        const abiTypeNames = argSolTs.map(sol.abiTypeToCanonicalName);
+        const abiTypeNames = argSolTs.map(abiTypeToCanonicalName);
 
         const argData =
             args.length > 0
@@ -195,7 +190,7 @@ export class Runner {
             data = concatBytes(bytecode, argData);
         } else {
             this.expect(target !== undefined);
-            const selector = hexToBytes(`0x${infer.signatureHash(target)}`);
+            const selector = hexToBytes(`0x${sol.signatureHash(target)}`);
             data = concatBytes(selector, argData);
         }
 
@@ -216,19 +211,19 @@ export class Runner {
 
     decodeReturns(
         data: Uint8Array,
-        fun: sol.FunctionDefinition | sol.VariableDeclaration,
-        infer: sol.InferType
+        fun: sol.FunctionDefinition | sol.VariableDeclaration
     ): BaseValue[] {
         let abiRetTs: BaseRuntimeType[];
         let retTs: BaseRuntimeType[];
+        const ctx = fun.requiredContext;
 
         if (fun instanceof sol.FunctionDefinition) {
             retTs = fun.vReturnParameters.vParameters.map((decl) =>
-                astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer)
+                typeIdToRuntimeType(sol.typeOf(decl), ctx)
             );
             abiRetTs = retTs.map(toABIEncodedType);
         } else {
-            retTs = getGetterArgAndReturnTs(fun, infer)[1];
+            retTs = getGetterArgAndReturnTs(fun)[1];
             abiRetTs = retTs.map(toABIEncodedType);
         }
 
@@ -268,8 +263,7 @@ export class Runner {
             const fun = this.artifactManager.findEntryPoint(msg.data, info);
 
             if (fun) {
-                const infer = this.artifactManager.infer(info.artifact.compilerVersion);
-                decodedReturns = this.decodeReturns(res.data, fun, infer);
+                decodedReturns = this.decodeReturns(res.data, fun);
             }
         }
 

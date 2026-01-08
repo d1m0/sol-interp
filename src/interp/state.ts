@@ -8,12 +8,7 @@ import {
     ZERO_ADDRESS
 } from "sol-dbg";
 import { BaseScope, BuiltinsScope, LocalsScope } from "./scope";
-import {
-    assert,
-    FunctionDefinition,
-    ModifierInvocation,
-    VariableDeclaration
-} from "solc-typed-ast";
+import * as sol from "solc-typed-ast"
 import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction, BuiltinStruct } from "./value";
@@ -49,9 +44,9 @@ export interface SolMessage {
 }
 
 export interface InternalCallFrame {
-    callee: FunctionDefinition | VariableDeclaration | BuiltinFunction;
+    callee: sol.FunctionDefinition | sol.VariableDeclaration | BuiltinFunction;
     scope: LocalsScope;
-    curModifier: ModifierInvocation | undefined;
+    curModifier: sol.ModifierInvocation | undefined;
 }
 
 export interface State {
@@ -118,7 +113,7 @@ export function makeStateForAccount(
 ): State {
     const memAllocator = new DefaultAllocator();
     const contract = (codeAccount !== undefined ? codeAccount : account).contract;
-    assert(contract !== undefined, ``);
+    sol.assert(contract !== undefined, ``);
     const [constantsMap, constantsMemory] = artifactManager.getConstants(contract.artifact);
 
     // Copy over the constants into the new memory
@@ -170,7 +165,7 @@ export function makeStateWithConstants(
 
 export function makeBuiltinScope(state: State, compilerVersion: string): BuiltinsScope {
     const builtinStruct = makeBuiltin(globalBuiltinStructDesc, compilerVersion);
-    assert(builtinStruct instanceof BuiltinStruct, ``);
+    sol.assert(builtinStruct instanceof BuiltinStruct, ``);
 
     return new BuiltinsScope(builtinStruct, state, undefined);
 }

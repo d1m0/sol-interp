@@ -19,20 +19,12 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import {
-    BaseTypeValue,
-    ExternalCallDescription,
-    NewCall,
-    none,
-    TypeTuple,
-    TypeValue,
-    Value
-} from "./value";
+import { ExternalCallDescription, NewCall, none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
 import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
 import { AccountInfo } from "./chain";
-import { BaseInterpType, DefType, TypeType } from "./types";
-import { Address } from "@ethereumjs/util";
+import { BaseInterpType, typeIdToRuntimeType } from "./types";
+import { Address, } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
@@ -72,16 +64,24 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
                 zeroValue = [];
 
                 for (let i = 0; i < len; i++) {
-                    zeroValue.push(makeZeroValue(t.toType.elementT, state));
+                    if (t.toType.elementT instanceof rtt.MappingType) {
+                        zeroValue.push(new Map());
+                    } else {
+                        zeroValue.push(makeZeroValue(t.toType.elementT, state));
+                    }
                 }
             } else if (t.toType instanceof rtt.BytesType) {
                 zeroValue = new Uint8Array();
             } else if (t.toType instanceof rtt.StringType) {
                 zeroValue = "";
             } else if (t.toType instanceof rtt.StructType) {
-                const fieldVals: Array<[string, PrimitiveValue]> = [];
+                const fieldVals: Array<[string, BaseValue]> = [];
                 for (const [fieldName, fieldT] of t.toType.fields) {
-                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
+                    if (fieldT instanceof rtt.MappingType) {
+                        fieldVals.push([fieldName, new Map()]);
+                    } else {
+                        fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
+                    }
                 }
                 zeroValue = new Struct(fieldVals);
             } else {
@@ -325,7 +325,7 @@ export function indexView<T extends rtt.StateArea>(
 }
 
 // @todo move to solc-typed-ast
-// @todo dimo: Is it sufficient here to say !(type instancesof sol.PointerType) ?
+// @todo dimo: I think this has missing cases ?
 export function isValueType(type: rtt.BaseRuntimeType): boolean {
     return (
         type instanceof rtt.IntType ||
@@ -377,24 +377,72 @@ export function getViewLocation(v: View): sol.DataLocation | "local" {
     nyi(`View type ${v.pp()}`);
 }
 
+export function bytesBitwiseOr(a: Uint8Array, b: Uint8Array): Uint8Array {
+    sol.assert(a.length === b.length, `Mismatch in bytes length {0} and {1}`, a, b);
+    const res = new Uint8Array(a.length);
+
+    for (let i = 0; i < a.length; i++) {
+        res[i] = a[i] | b[i];
+    }
+
+    return res;
+}
+
+export function bytesBitwiseAnd(a: Uint8Array, b: Uint8Array): Uint8Array {
+    sol.assert(a.length === b.length, `Mismatch in bytes length {0} and {1}`, a, b);
+    const res = new Uint8Array(a.length);
+
+    for (let i = 0; i < a.length; i++) {
+        res[i] = a[i] & b[i];
+    }
+
+    return res;
+}
+
+export function bytesBitwiseXor(a: Uint8Array, b: Uint8Array): Uint8Array {
+    sol.assert(a.length === b.length, `Mismatch in bytes length {0} and {1}`, a, b);
+    const res = new Uint8Array(a.length);
+
+    for (let i = 0; i < a.length; i++) {
+        res[i] = a[i] ^ b[i];
+    }
+
+    return res;
+}
+
+export function bytesBitwiseNot(a: Uint8Array): Uint8Array {
+    const res = new Uint8Array(a.length);
+    for (let i = 0; i < a.length; i++) {
+        res[i] = ~a[i];
+    }
+    return res;
+}
+
+/**
+ * Return the location of a given view
+ * @param v 
+ * @returns 
+ */
+export function locationOfView(v: rtt.View): sol.DataLocation {
+    if (v instanceof BaseMemoryView) {
+        return sol.DataLocation.Memory;
+    } else if (v instanceof BaseStorageView) {
+        return sol.DataLocation.Storage;
+    } else if (v instanceof BaseCalldataView) {
+        return sol.DataLocation.CallData;
+    } else if (v instanceof PointerLocalView) {
+        return v.type.location;
+    } else {
+        nyi(`View type ${v.constructor.name}`);
+    }
+}
+
 /**
  * The type of a "view" value is a Pointer to the underlying view type
  * @param v
  */
 export function typeOfView(v: rtt.View): rtt.BaseRuntimeType {
-    let loc: sol.DataLocation;
-
-    if (v instanceof BaseMemoryView) {
-        loc = sol.DataLocation.Memory;
-    } else if (v instanceof BaseStorageView) {
-        loc = sol.DataLocation.Storage;
-    } else if (v instanceof BaseCalldataView) {
-        loc = sol.DataLocation.CallData;
-    } else {
-        nyi(`View type ${v.constructor.name}`);
-    }
-
-    return new rtt.PointerType(v.type, loc);
+    return new rtt.PointerType(v.type, locationOfView(v));
 }
 
 /**
@@ -626,54 +674,15 @@ export function clampIntToType(val: bigint, type: rtt.IntType): bigint {
     return val < min ? ((val - max) % size) + max : ((val - min) % size) + min;
 }
 
-export function removeLiteralTypes(
-    t: sol.TypeNode,
-    e: sol.Expression,
-    infer: sol.InferType
-): sol.TypeNode {
-    if (t instanceof sol.IntLiteralType) {
-        const v = sol.evalConstantExpr(e, infer);
-        sol.assert(typeof v === "bigint", ``);
-        const smallestT = sol.smallestFittingType(v);
-        sol.assert(smallestT !== undefined, ``);
-        return smallestT;
-    }
-
-    if (t instanceof sol.StringLiteralType) {
-        return t.isHex || (e instanceof sol.Literal && e.value === null)
-            ? sol.types.bytesMemory
-            : sol.types.stringMemory;
-    }
-
-    // Tuples
-    if (t instanceof sol.TupleType && e instanceof sol.TupleExpression) {
-        const elTs: Array<sol.TypeNode | null> = [];
-
-        for (let i = 0; i < t.elements.length; i++) {
-            let elT = t.elements[i];
-
-            if (elT instanceof sol.IntLiteralType) {
-                elT = removeLiteralTypes(elT, e.vOriginalComponents[i] as sol.Expression, infer);
-            }
-
-            elTs.push(elT);
-        }
-
-        return new sol.TupleType(elTs);
-    }
-
-    return t;
-}
-
 export function getGetterArgAndReturnTs(
-    getter: sol.VariableDeclaration,
-    infer: sol.InferType
+    getter: sol.VariableDeclaration
 ): [BaseInterpType[], BaseInterpType[]] {
-    const [solArgTs, solRetT] = infer.getterArgsAndReturn(getter);
+    const ctx = getter.requiredContext;
+    const [solArgTs, solRetT] = sol.getterArgsAndReturn(getter);
     const argTs: BaseInterpType[] = solArgTs.map((solT) =>
-        rtt.astToRuntimeType(solT, infer, sol.DataLocation.CallData)
+        typeIdToRuntimeType(solT, ctx, sol.DataLocation.CallData)
     );
-    const retT = rtt.astToRuntimeType(solRetT, infer, sol.DataLocation.CallData);
+    const retT = typeIdToRuntimeType(solRetT, ctx, sol.DataLocation.CallData);
     return [argTs, retT instanceof rtt.TupleType ? retT.elementTypes : [retT]];
 }
 
@@ -683,12 +692,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-    Address,
-    Uint8Array | undefined,
-    bigint | undefined,
-    bigint | undefined,
-    Uint8Array | undefined
-] {
+        Address,
+        Uint8Array | undefined,
+        bigint | undefined,
+        bigint | undefined,
+        Uint8Array | undefined
+    ] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -730,8 +739,6 @@ export const bytesT = new rtt.BytesType();
 export const memBytesT = new rtt.PointerType(bytesT, sol.DataLocation.Memory);
 export const cdBytesT = new rtt.PointerType(bytesT, sol.DataLocation.CallData);
 export const bytes1 = new rtt.FixedBytesType(1);
-export const defT = new DefType();
-export const typeT = new TypeType();
 
 /**
  * Return true IFF baseContract is a base (or the same contract) of childContract
@@ -760,8 +767,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-              ? "contract_deployment"
-              : "call";
+                ? "contract_deployment"
+                : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }
@@ -777,14 +784,6 @@ export function indexOfEnumOption(
     }
 
     return undefined;
-}
-
-export function unwrapUnaryTypeTuples(t: BaseTypeValue): TypeValue {
-    while (t instanceof TypeTuple && t.elements.length === 1) {
-        t = t.elements[0];
-    }
-
-    return t as TypeValue;
 }
 
 export function bytesToIntOfType(

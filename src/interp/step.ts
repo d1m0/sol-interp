@@ -1,15 +1,15 @@
-import { Expression, Statement } from "solc-typed-ast";
+import * as sol from "solc-typed-ast";
 import { LValue, Value } from "./value";
 import { CallResult, SolMessage } from "./state";
 import { RuntimeError } from "./exceptions";
 
-export abstract class BaseStep {}
+export abstract class BaseStep { }
 
 export type Trace = BaseStep[];
 
 export class EvalStep extends BaseStep {
     constructor(
-        public readonly expr: Expression,
+        public readonly expr: sol.Expression,
         public readonly val: Value | LValue
     ) {
         super();
@@ -17,7 +17,7 @@ export class EvalStep extends BaseStep {
 }
 
 export class ExecStep extends BaseStep {
-    constructor(public readonly stmt: Statement) {
+    constructor(public readonly stmt: sol.Statement) {
         super();
     }
 }

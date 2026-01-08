@@ -10,8 +10,8 @@ import {
     Value as BaseValue,
     ContractInfo,
     Struct,
-    ZERO_ADDRESS,
-    astToRuntimeType
+    typeIdToRuntimeType,
+    ZERO_ADDRESS
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
@@ -88,27 +88,20 @@ export class TransactionSet {
 
     encodeArgs(
         args: BaseValue[],
-        target: sol.FunctionDefinition | sol.VariableDeclaration,
-        infer: sol.InferType
+        target: sol.FunctionDefinition | sol.VariableDeclaration
     ): Uint8Array {
         let argTs: string[];
+        const ctx = target.requiredContext;
 
         if (target instanceof sol.FunctionDefinition) {
             argTs = target.vParameters.vParameters.map((decl) =>
-                sol.abiTypeToCanonicalName(
-                    infer.toABIEncodedType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        sol.ABIEncoderVersion.V2
-                    )
-                )
+                abiTypeToCanonicalName(toABIEncodedType(typeIdToRuntimeType(sol.typeOf(decl), ctx)))
             );
         } else {
-            argTs = infer
+            argTs = sol
                 .getterArgsAndReturn(target)[0]
                 .map((argT) =>
-                    sol.abiTypeToCanonicalName(
-                        infer.toABIEncodedType(argT, sol.ABIEncoderVersion.V2)
-                    )
+                    abiTypeToCanonicalName(toABIEncodedType(typeIdToRuntimeType(argT, ctx)))
                 );
         }
 
@@ -117,21 +110,20 @@ export class TransactionSet {
 
     encodeCallArgs(
         args: BaseValue[],
-        fun: sol.FunctionDefinition | sol.VariableDeclaration,
-        infer: sol.InferType
+        fun: sol.FunctionDefinition | sol.VariableDeclaration
     ): Uint8Array {
-        const argBytes = this.encodeArgs(args, fun, infer);
+        const argBytes = this.encodeArgs(args, fun);
 
-        return concatBytes(hexToBytes(`0x${infer.signatureHash(fun)}`), argBytes);
+        return concatBytes(sol.signatureHash(fun), argBytes);
     }
 
-    encodeCreateArgs(args: BaseValue[], contract: ContractInfo, infer: sol.InferType): Uint8Array {
+    encodeCreateArgs(args: BaseValue[], contract: ContractInfo): Uint8Array {
         const constructor = contract.ast?.vConstructor;
         let argBytes: Uint8Array;
 
         if (args.length !== 0) {
             sol.assert(constructor !== undefined, `No constructor on ${contract.contractName}`);
-            argBytes = this.encodeArgs(args, constructor, infer);
+            argBytes = this.encodeArgs(args, constructor);
         } else {
             argBytes = new Uint8Array(0);
         }
@@ -142,19 +134,18 @@ export class TransactionSet {
 
     decodeReturns(
         data: Uint8Array,
-        fun: sol.FunctionDefinition | sol.VariableDeclaration,
-        infer: sol.InferType
+        fun: sol.FunctionDefinition | sol.VariableDeclaration
     ): BaseValue[] {
         let abiRetTs: BaseRuntimeType[];
         let retTs: BaseRuntimeType[];
 
         if (fun instanceof sol.FunctionDefinition) {
             retTs = fun.vReturnParameters.vParameters.map((decl) =>
-                astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer)
+                typeIdToRuntimeType(sol.typeOf(decl), fun.requiredContext)
             );
             abiRetTs = retTs.map(toABIEncodedType);
         } else {
-            retTs = getGetterArgAndReturnTs(fun, infer)[1];
+            retTs = getGetterArgAndReturnTs(fun)[1]
             abiRetTs = retTs.map(toABIEncodedType);
         }
 
@@ -219,7 +210,6 @@ export class TransactionSet {
         let to: Address | undefined;
 
         const [info, entrypoint] = this.getEntypoint(step);
-        const infer = this._artifactManager.infer(info.artifact.compilerVersion);
 
         if (step.type === "deploy") {
             to = ZERO_ADDRESS;
@@ -233,11 +223,10 @@ export class TransactionSet {
         if (step.type === "call") {
             data = this.encodeCallArgs(
                 step.args,
-                entrypoint as sol.FunctionDefinition | sol.VariableDeclaration,
-                infer
+                entrypoint as sol.FunctionDefinition | sol.VariableDeclaration
             );
         } else {
-            data = this.encodeCreateArgs(step.args, info, infer);
+            data = this.encodeCreateArgs(step.args, info);
         }
 
         return {
@@ -264,7 +253,6 @@ export class TransactionSet {
         for (const step of this.steps) {
             const msg = this.messageFromStep(step);
             const [info, entrypoint] = this.getEntypoint(step);
-            const infer = this._artifactManager.infer(info.artifact.compilerVersion);
             let res: CallResult;
 
             if (step.type === "call") {
@@ -291,8 +279,7 @@ export class TransactionSet {
                 const expectedReturnsStr = pp(step.result.returns);
                 const actualReturns = this.decodeReturns(
                     res.data,
-                    entrypoint as sol.FunctionDefinition | sol.VariableDeclaration,
-                    infer
+                    entrypoint as sol.FunctionDefinition | sol.VariableDeclaration
                 );
                 const actualReturnsStr = pp(actualReturns);
 

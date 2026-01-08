@@ -11,6 +11,7 @@ import {
     BuiltinFunction,
     BuiltinStruct,
     BytesStorageLength,
+    CurriedVal,
     DefValue,
     ExternalCallDescription,
     LValue,
@@ -64,6 +65,8 @@ export function ppValue(v: Value): string {
         return `<external call to ${ppValue(v.target)} with gas ${v.gas} value ${v.value} salt ${v.salt} of kind ${v.callKind}`;
     } else if (v instanceof NewCall) {
         return `<new call to ${v.type.pp()}>`;
+    } else if (v instanceof CurriedVal) {
+        return `<curried ${ppValue(v.target)} with args [${v.args.map(ppValue).join(",")}] of types [${v.argTs.map(t => t.pp()).join(",")}]>`
     } else {
         return `${v}`;
     }

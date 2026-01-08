@@ -1,4 +1,4 @@
-import { View, Value, zip, astToRuntimeType } from "sol-dbg";
+import { View, Value, zip, typeIdToRuntimeType } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
@@ -142,7 +142,7 @@ describe("Simple function call tests", () => {
                 argVals
             );
             const argTs = fun.vParameters.vParameters.map((decl) =>
-                astToRuntimeType(interp._infer.variableDeclarationToTypeNode(decl), interp._infer)
+                typeIdToRuntimeType(sol.typeOf(decl), fun.requiredContext)
             );
             if (expectedReturns instanceof Array) {
                 try {

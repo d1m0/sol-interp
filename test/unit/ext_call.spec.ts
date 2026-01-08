@@ -1,4 +1,4 @@
-import { Value, ImmMap, astToRuntimeType } from "sol-dbg";
+import { Value, ImmMap, typeIdToRuntimeType } from "sol-dbg";
 import { Chain } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
@@ -58,8 +58,6 @@ describe("Simple function call tests", () => {
     for (const [fileName, contract, funName, argVals, expectedReturns] of samples) {
         it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, () => {
             const info = sampleMap.get(fileName) as SampleInfo;
-            const infer = new sol.InferType(info.version);
-
             let fun: sol.FunctionDefinition | undefined = undefined;
 
             for (const unit of info.units) {
@@ -92,23 +90,20 @@ describe("Simple function call tests", () => {
                 nonce: 0n
             });
 
+            const ctx = fun.requiredContext;
+
             const argTs = fun.vParameters.vParameters.map((decl) =>
-                sol.abiTypeToCanonicalName(
-                    infer.toABIEncodedType(
-                        infer.variableDeclarationToTypeNode(decl),
-                        sol.ABIEncoderVersion.V2
-                    )
-                )
+                abiTypeToCanonicalName(typeIdToRuntimeType(sol.toABIType(sol.typeOf(decl), ctx), ctx, sol.DataLocation.Memory))
             );
 
             const abiRetTs = fun.vReturnParameters.vParameters.map((decl) =>
-                toABIEncodedType(astToRuntimeType(infer.variableDeclarationToTypeNode(decl), infer))
+                toABIEncodedType(typeIdToRuntimeType(sol.typeOf(decl), fun.requiredContext))
             );
 
             const canonicalRetTNames = abiRetTs.map((retT) => abiTypeToCanonicalName(retT));
 
             const data = concatBytes(
-                hexToBytes(`0x${infer.signatureHash(fun)}`),
+                sol.signatureHash(fun),
                 hexToBytes(ethABI.encodeParameters(argTs, argVals) as `0x${string}`)
             );
 

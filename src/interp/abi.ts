@@ -38,7 +38,7 @@ export function skipFieldDueToMap(t: rtt.BaseRuntimeType): boolean {
 }
 
 /**
- * Convert an interpreter type to an ABI type. This is analogous to `InferType.toABIEncodedType`,
+ * Convert an interpreter type to an ABI type. This is analogous to `sol.toABIType`,
  * however it handles runtime types only.
  */
 export function toABIEncodedType(type: BaseInterpType): BaseInterpType {
@@ -210,7 +210,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
 }
 
 /**
- * Get the canonical name for the `TypeNode` `t`, to be used for encoding the
+ * Get the canonical name for the `BaseRuntimeType` `t`, to be used for encoding the
  * type.
  */
 export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType): string {
@@ -283,16 +283,16 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
         return val.bytes;
     } else if (type instanceof rtt.PointerType) {
         if (type.toType instanceof rtt.BytesType) {
-            sol.assert(val instanceof View && val.type instanceof rtt.BytesType, ``);
+            sol.assert(val instanceof View && val.type instanceof rtt.BytesType, `Unexpected value ${ppValue(val)}`);
             const bytes = decodeView(val, state);
             sol.assert(bytes instanceof Uint8Array, ``);
             return bytes;
         } else if (type.toType instanceof rtt.StringType) {
             sol.assert(
                 val instanceof rtt.StringMemView ||
-                    val instanceof rtt.StringStorageView ||
-                    val instanceof rtt.StringCalldataView ||
-                    val instanceof rtt.StringSliceCalldataView,
+                val instanceof rtt.StringStorageView ||
+                val instanceof rtt.StringCalldataView ||
+                val instanceof rtt.StringSliceCalldataView,
                 ``
             );
             // cast to string type
