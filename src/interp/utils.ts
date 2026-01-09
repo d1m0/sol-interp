@@ -29,6 +29,37 @@ import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
 
+export function castBytesViewToString<T extends rtt.BytesCalldataView | rtt.BytesMemView | rtt.BytesStorageView | rtt.BytesSliceCalldataView>(v: T): T {
+    if (v instanceof rtt.BytesCalldataView) {
+        return new rtt.BytesCalldataView(stringT, v.offset, v.base) as T;
+    }
+
+    if (v instanceof rtt.BytesMemView) {
+        return new rtt.BytesMemView(stringT, v.offset) as T;
+    }
+
+    if (v instanceof rtt.BytesSliceCalldataView) {
+        return new rtt.BytesSliceCalldataView(stringT, v.offset, v.len) as T
+    }
+
+    return new rtt.BytesStorageView(stringT, [v.key, v.endOffsetInWord]) as T;
+}
+
+export function castStringViewToBytes<T extends rtt.BytesCalldataView | rtt.BytesMemView | rtt.BytesStorageView | rtt.BytesSliceCalldataView>(v: T): T {
+    if (v instanceof rtt.BytesCalldataView) {
+        return new rtt.BytesCalldataView(bytesT, v.offset, v.base) as T;
+    }
+
+    if (v instanceof rtt.BytesMemView) {
+        return new rtt.BytesMemView(bytesT, v.offset) as T;
+    }
+
+    if (v instanceof rtt.BytesSliceCalldataView) {
+        return new rtt.BytesSliceCalldataView(bytesT, v.offset, v.len) as T
+    }
+
+    return new rtt.BytesStorageView(bytesT, [v.key, v.endOffsetInWord]) as T;
+}
 /**
  * Marks that we reached a place we shouldn't have. Differs from nyi() in that this is definitely
  * not missing functionality.
@@ -692,12 +723,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-    Address,
-    Uint8Array | undefined,
-    bigint | undefined,
-    bigint | undefined,
-    Uint8Array | undefined
-] {
+        Address,
+        Uint8Array | undefined,
+        bigint | undefined,
+        bigint | undefined,
+        Uint8Array | undefined
+    ] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -767,8 +798,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-              ? "contract_deployment"
-              : "call";
+                ? "contract_deployment"
+                : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }

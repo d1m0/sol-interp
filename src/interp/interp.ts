@@ -19,7 +19,6 @@ import {
     bigIntToNum,
     ArrayMemView,
     MapStorageView,
-    StringMemView,
     BytesMemView,
     MAX_ARR_DECODE_LIMIT,
     stackTop,
@@ -90,6 +89,8 @@ import {
     bytesBitwiseXor,
     bytesT,
     bytesToIntOfType,
+    castBytesViewToString,
+    castStringViewToBytes,
     cdBytesT,
     changeLocTo,
     clampIntToType,
@@ -123,7 +124,6 @@ import {
     memStringT,
     printNode,
     setStateStorage,
-    stringT,
     typeOfView
 } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
@@ -148,8 +148,6 @@ import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
 import { InterpVisitor } from "./visitors";
 import {
-    castBytesToString,
-    castStringToBytes,
     decodeLinkMap
 } from "sol-dbg/dist/debug/decoding/utils";
 
@@ -355,8 +353,8 @@ export class Interpreter {
         // If there are arguments to be passed, then the target MDC must have a constructor
         this.expect(
             msg.data.length === mdc.bytecode.bytecode.length ||
-                (mdc.ast.vConstructor !== undefined &&
-                    mdc.ast.vConstructor.vParameters.vParameters.length > 0)
+            (mdc.ast.vConstructor !== undefined &&
+                mdc.ast.vConstructor.vParameters.vParameters.length > 0)
         );
 
         try {
@@ -733,7 +731,7 @@ export class Interpreter {
 
         let returnViews =
             stateVarView instanceof PointerStorageView &&
-            stateVarView.innerView instanceof StructStorageView
+                stateVarView.innerView instanceof StructStorageView
                 ? stateVarView.innerView.fieldViews.map(([, fv]) => fv)
                 : [stateVarView];
 
@@ -926,7 +924,7 @@ export class Interpreter {
                 const target = stmt.vExternalCall.vReferencedDeclaration;
                 this.expect(
                     target instanceof sol.FunctionDefinition ||
-                        target instanceof sol.VariableDeclaration,
+                    target instanceof sol.VariableDeclaration,
                     `NYI external call target`
                 );
                 vals = this.getValuesFromReturnedCalldata(res.data, target, state);
@@ -1569,23 +1567,28 @@ export class Interpreter {
             toType.toType instanceof rtt.BytesType
         ) {
             this.expect(
-                value instanceof StringMemView ||
-                    value instanceof rtt.StringCalldataView ||
-                    value instanceof rtt.StringSliceCalldataView
+                value instanceof BytesMemView ||
+                value instanceof rtt.BytesCalldataView ||
+                value instanceof rtt.BytesStorageView ||
+                value instanceof rtt.BytesSliceCalldataView
             );
-            return castStringToBytes(value);
+            return castStringViewToBytes(value);
         }
 
-        // bytes -> string cast in memory
+        // bytes -> string cast 
         if (
             value instanceof View &&
             value.type instanceof rtt.BytesType &&
             toType instanceof rtt.PointerType &&
             toType.toType instanceof rtt.StringType
         ) {
-            if (value instanceof BytesMemView) {
-                return new StringMemView(stringT, value.offset);
-            }
+            this.expect(
+                value instanceof BytesMemView ||
+                value instanceof rtt.BytesCalldataView ||
+                value instanceof rtt.BytesStorageView ||
+                value instanceof rtt.BytesSliceCalldataView
+            );
+            return castBytesViewToString(value);
         }
 
         // Int to fixed byte
@@ -1604,16 +1607,6 @@ export class Interpreter {
         // bytes memory literals to fixed bytes
         if (value instanceof BytesMemView && toType instanceof rtt.FixedBytesType) {
             const t = decodeView(value, state) as Uint8Array;
-            if (t.length > toType.numBytes) {
-                return undefined;
-            }
-
-            return setLengthRight(t, toType.numBytes);
-        }
-
-        // string memory literals to fixed bytes
-        if (value instanceof StringMemView && toType instanceof rtt.FixedBytesType) {
-            const t = decodeView(castStringToBytes(value), state) as Uint8Array;
             if (t.length > toType.numBytes) {
                 return undefined;
             }
@@ -1661,8 +1654,8 @@ export class Interpreter {
     private assignToStorageArray(lvalue: rtt.ArrayStorageView, rvalue: Value, state: State): void {
         this.expect(
             rvalue instanceof View &&
-                isArrayLikeView(rvalue) &&
-                rvalue.type instanceof rtt.ArrayType
+            isArrayLikeView(rvalue) &&
+            rvalue.type instanceof rtt.ArrayType
         );
         this.expect(lvalue.type.size === undefined || lvalue.type.size === rvalue.type.size);
 
@@ -1762,11 +1755,6 @@ export class Interpreter {
 
             if (isCopy) {
                 // Types should be equal modulo location
-                this.expect(
-                    isDirectlyAssignable(lvalue.type, typeOfView(rvalue)),
-                    `Mismatching types in copying ref assignment (modulo location): ${lvalue.type.pp()} and ${rvalue.type.pp()} `
-                );
-
                 const complexRVal = decodeView(rvalue, state);
 
                 if (lvalue instanceof BaseMemoryView) {
@@ -1790,7 +1778,7 @@ export class Interpreter {
                 } else {
                     this.expect(
                         lvalue instanceof PointerLocalView &&
-                            lvalue.type.toType.pp() === rvalue.type.pp(),
+                        lvalue.type.toType.pp() === rvalue.type.pp(),
                         `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
                     );
                     lvalue.encode(rvalue);
@@ -2011,7 +1999,7 @@ export class Interpreter {
 
             this.expect(
                 (typeof sleft === "bigint" && typeof sright === "bigint") ||
-                    (typeof sleft === "string" && typeof sright === "string")
+                (typeof sleft === "string" && typeof sright === "string")
             );
 
             if (operator === "<") {
@@ -2206,14 +2194,13 @@ export class Interpreter {
             toT.toType instanceof rtt.BytesType
         ) {
             this.expect(
-                fromV instanceof rtt.StringMemView ||
-                    fromV instanceof rtt.StringCalldataView ||
-                    fromV instanceof rtt.StringSliceCalldataView ||
-                    fromV instanceof rtt.StringStorageView,
+                fromV instanceof rtt.BytesMemView ||
+                fromV instanceof rtt.BytesCalldataView ||
+                fromV instanceof rtt.BytesStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            return castStringToBytes(fromV);
+            return castStringViewToBytes(fromV)
         }
 
         // bytes ptr -> strings ptr
@@ -2225,13 +2212,13 @@ export class Interpreter {
         ) {
             this.expect(
                 fromV instanceof rtt.BytesMemView ||
-                    fromV instanceof rtt.BytesCalldataView ||
-                    fromV instanceof rtt.BytesSliceCalldataView ||
-                    fromV instanceof rtt.BytesStorageView,
+                fromV instanceof rtt.BytesCalldataView ||
+                fromV instanceof rtt.BytesSliceCalldataView ||
+                fromV instanceof rtt.BytesStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            return castBytesToString(fromV);
+            return castBytesViewToString(fromV);
         }
 
         // string literals -> fixed bytes
@@ -2241,19 +2228,13 @@ export class Interpreter {
             toT instanceof rtt.FixedBytesType
         ) {
             this.expect(
-                fromV instanceof StringMemView ||
-                    fromV instanceof rtt.StringCalldataView ||
-                    fromV instanceof rtt.StringStorageView ||
-                    fromV instanceof rtt.StringSliceCalldataView,
+                fromV instanceof rtt.BytesMemView ||
+                fromV instanceof rtt.BytesCalldataView ||
+                fromV instanceof rtt.BytesStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            const bytesView:
-                | rtt.BytesCalldataView
-                | BytesMemView
-                | rtt.BytesStorageView
-                | rtt.BytesSliceCalldataView = castStringToBytes(fromV);
-            const bts = decodeView(bytesView, state);
+            const bts = decodeView(fromV, state);
             this.expect(bts instanceof Uint8Array && bts.length === toT.numBytes);
             return bts;
         }
@@ -2716,7 +2697,7 @@ export class Interpreter {
         } else {
             this.expect(
                 astTarget instanceof sol.FunctionDefinition ||
-                    astTarget instanceof sol.VariableDeclaration,
+                astTarget instanceof sol.VariableDeclaration,
                 `NYI External call target`
             );
 
@@ -2920,8 +2901,8 @@ export class Interpreter {
             (newT instanceof rtt.ArrayType ||
                 newT instanceof rtt.BytesType ||
                 newT instanceof rtt.StringType) &&
-                args.length === 1 &&
-                typeof args[0] === "bigint",
+            args.length === 1 &&
+            typeof args[0] === "bigint",
             `Expected an array type with a single length argument not ${newT.pp()} with ${args}`
         );
 
@@ -2954,9 +2935,9 @@ export class Interpreter {
         const base = this.evalNP(expr.vExpression, state);
         this.expect(
             base instanceof rtt.ExternalFunRef ||
-                base instanceof Address ||
-                base instanceof NewCall ||
-                base instanceof ExternalCallDescription
+            base instanceof Address ||
+            base instanceof NewCall ||
+            base instanceof ExternalCallDescription
         );
 
         const res = liftExtCalRef(base);
@@ -3009,8 +2990,8 @@ export class Interpreter {
         if (expr.kind === sol.FunctionCallKind.StructConstructorCall) {
             this.expect(
                 callee instanceof TypeValue &&
-                    callee.type instanceof rtt.PointerType &&
-                    callee.type.toType instanceof rtt.StructType,
+                callee.type instanceof rtt.PointerType &&
+                callee.type.toType instanceof rtt.StructType,
                 `Struct constructors expect a struct type as its callee not ${ppValue(callee)}`
             );
 
@@ -3172,17 +3153,12 @@ export class Interpreter {
         this.expect(typeof start === "bigint" && typeof end === "bigint");
         this.expect(
             base instanceof rtt.BytesCalldataView ||
-                base instanceof rtt.StringCalldataView ||
-                base instanceof rtt.ArrayCalldataView ||
-                base instanceof MsgDataView
+            base instanceof rtt.ArrayCalldataView ||
+            base instanceof MsgDataView
         );
 
         const cd = getMsg(state);
-        const indexableView =
-            base instanceof rtt.StringCalldataView
-                ? new rtt.BytesCalldataView(bytesT, base.offset, base.base)
-                : base;
-        const actualLen = indexableView.size(cd);
+        const actualLen = base.size(cd);
         this.expect(typeof actualLen === "bigint");
 
         // If end range is ommitted assume the length
@@ -3194,14 +3170,12 @@ export class Interpreter {
             this.runtimeError(NoPayloadError, state);
         }
 
-        const rangeOffset = indexableView.indexView(start, cd);
+        const rangeOffset = base.indexView(start, cd);
         this.expect(rangeOffset instanceof BaseCalldataView);
         const startOffset = rangeOffset.offset + rangeOffset.base;
 
-        if (base instanceof rtt.BytesCalldataView) {
-            return new rtt.BytesSliceCalldataView(startOffset, len);
-        } else if (base instanceof rtt.StringCalldataView || base instanceof MsgDataView) {
-            return new rtt.StringSliceCalldataView(startOffset, len);
+        if (base instanceof rtt.BytesCalldataView || base instanceof MsgDataView) {
+            return new rtt.BytesSliceCalldataView(base.type, startOffset, len);
         } else {
             return new rtt.ArraySliceCalldataView(base.type, startOffset, len);
         }
@@ -3223,8 +3197,8 @@ export class Interpreter {
 
         this.expect(
             expr.kind === sol.LiteralKind.String ||
-                expr.kind === sol.LiteralKind.HexString ||
-                expr.kind === sol.LiteralKind.UnicodeString
+            expr.kind === sol.LiteralKind.HexString ||
+            expr.kind === sol.LiteralKind.UnicodeString
         );
 
         const view = state.constantsMap.get(expr.id);
@@ -3387,7 +3361,7 @@ export class Interpreter {
                     // Contract or Global scope constant vars
                     this.expect(
                         baseVal.def instanceof sol.SourceUnit ||
-                            baseVal.def instanceof sol.ContractDefinition
+                        baseVal.def instanceof sol.ContractDefinition
                     );
                     scope =
                         baseVal.def instanceof sol.SourceUnit
@@ -3397,7 +3371,7 @@ export class Interpreter {
                     // Base contract state var
                     this.expect(
                         baseVal.def instanceof sol.ContractDefinition &&
-                            isBaseOf(baseVal.def, getCodeContract(state))
+                        isBaseOf(baseVal.def, getCodeContract(state))
                     );
                     scope = this.makeStaticScope(baseVal.def, state);
                 }
@@ -3475,8 +3449,8 @@ export class Interpreter {
             const arrPtrT = this.typeOf(expr);
             this.expect(
                 arrPtrT instanceof rtt.PointerType &&
-                    arrPtrT.toType instanceof rtt.ArrayType &&
-                    arrPtrT.toType.size !== undefined,
+                arrPtrT.toType instanceof rtt.ArrayType &&
+                arrPtrT.toType.size !== undefined,
                 `Expected a fixed size array in memory not ${arrPtrT.pp()}`
             );
 
@@ -3688,7 +3662,7 @@ export class Interpreter {
             nd = target.target instanceof rtt.InternalFunRef ? target.target.fun : target.target;
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];
-        } else [(nd = target)];
+        } else[(nd = target)];
 
         const staticScope = this.makeStaticScope(nd, state);
         let localNames: string[];

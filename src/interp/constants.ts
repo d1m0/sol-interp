@@ -8,7 +8,6 @@ import {
     PointerMemView,
     Value
 } from "sol-dbg";
-import { StringMemView } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 
@@ -135,7 +134,7 @@ export function gatherConstants(
                 return;
             }
 
-            let view: StringMemView | BytesMemView;
+            let view: BytesMemView;
 
             // In Solidity <0.5 hex strings were still shown as LiteralKind.String, not HexString
             if (
@@ -146,8 +145,8 @@ export function gatherConstants(
                     nd.value,
                     stringT,
                     state.memAllocator
-                ) as StringMemView;
-                view.encode(nd.value, state.memory);
+                ) as BytesMemView;
+                view.encodeStr(nd.value, state.memory);
             } else {
                 view = PointerMemView.allocMemFor(
                     nd.hexValue,

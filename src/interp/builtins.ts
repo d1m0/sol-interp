@@ -357,9 +357,9 @@ export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
 
         interp.expect(args.length >= 1 && args[0] instanceof View);
         const sigStr = decodeView(args[0], state);
-        interp.expect(typeof sigStr === "string", `Unexpected signature ${sigStr}`);
+        interp.expect(sigStr instanceof Uint8Array, `Unexpected signature ${sigStr}`);
 
-        return [encodeImpl(paramTs.slice(1), args.slice(1), state, signatureToSelector(sigStr))];
+        return [encodeImpl(paramTs.slice(1), args.slice(1), state, signatureToSelector(bytesToUtf8(sigStr)))];
     }
 );
 
@@ -436,20 +436,11 @@ export const requireBuiltin = new BuiltinFunction(
         }
 
         const msgArg = args[1];
-        interp.expect(msgArg instanceof rtt.BytesMemView || msgArg instanceof rtt.StringMemView);
-        let msg: string;
+        interp.expect(msgArg instanceof rtt.BytesMemView);
+        const bs = msgArg.decode(state.memory);
+        interp.expect(bs instanceof Uint8Array);
 
-        if (msgArg instanceof BytesMemView) {
-            const bs = msgArg.decode(state.memory);
-            interp.expect(bs instanceof Uint8Array);
-            msg = bytesToUtf8(bs);
-        } else {
-            const t = msgArg.decode(state.memory);
-            interp.expect(typeof t === "string");
-            msg = t;
-        }
-
-        throw new ErrorError(interp.curNode, msg);
+        throw new ErrorError(interp.curNode, bytesToUtf8(bs));
     }
 );
 
@@ -788,10 +779,11 @@ const abiBuiltinStructDesc: BuiltinDescriptor = [
 const keccak256v04Builtin = new BuiltinFunction(
     "keccak256",
     dummyFunT,
-    (interp: Interpreter, state: State): Value[] => {
+    (interp: Interpreter, state: State, self: BuiltinFunction): Value[] => {
         const scope = state.scope as BuiltinScope;
-        const args = getEncodeTypes(state, interp.ctx, true);
-        const encoded = encodePacked(args, scope.argTs, state);
+        const args = self.getArgs(scope.nArgs, state);
+        const argTs = getEncodeTypes(state, interp.ctx, true);
+        const encoded = encodePacked(args, argTs, state);
         const hash = keccak256(encoded);
         return [hash];
     },
