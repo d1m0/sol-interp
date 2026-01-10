@@ -2,6 +2,8 @@ import * as rtt from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { memBytesT } from "./utils";
 
+rtt.setTreatStringAsBytes(true);
+
 export type BaseInterpType = rtt.BaseRuntimeType;
 export class WrappedType extends rtt.BaseRuntimeType {
     constructor(public readonly innerT: sol.TypeIdentifier) {

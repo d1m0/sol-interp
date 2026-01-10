@@ -7,6 +7,7 @@ import { State } from "./state";
 import {
     Address,
     bytesToHex,
+    bytesToUtf8,
     concatBytes,
     createAddressFromString,
     equalsBytes,
@@ -16,7 +17,6 @@ import { bytes24, decodeView, deref, indexView, isStructView, isValueType, lengt
 import { BaseInterpType } from "./types";
 import { isArrayLikeView } from "./view";
 import * as sol from "solc-typed-ast";
-import { castStringToBytes } from "sol-dbg/dist/debug/decoding/utils";
 
 /**
  * Helper to decide if we should skip a struct field when assing memory structs due to it containing a map
@@ -155,7 +155,9 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
             v instanceof View && v.type instanceof rtt.StringType,
             `Expected string View for ${typ.pp()} not ${ppValue(v)}`
         );
-        return decodeView(v, s);
+        const bytes = decodeView(v, s);
+        sol.assert(bytes instanceof Uint8Array, `Expected an Uint8Array for string not {0}`, bytes as any)
+        return bytesToUtf8(bytes);
     }
 
     if (typ instanceof rtt.ArrayType) {
@@ -283,24 +285,19 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
         return val.bytes;
     } else if (type instanceof rtt.PointerType) {
         if (type.toType instanceof rtt.BytesType) {
-            sol.assert(
-                val instanceof View && val.type instanceof rtt.BytesType,
-                `Unexpected value ${ppValue(val)}`
-            );
+            sol.assert(val instanceof View, `Unexpected value ${ppValue(val)}`);
             const bytes = decodeView(val, state);
             sol.assert(bytes instanceof Uint8Array, ``);
             return bytes;
         } else if (type.toType instanceof rtt.StringType) {
             sol.assert(
-                val instanceof rtt.StringMemView ||
-                    val instanceof rtt.StringStorageView ||
-                    val instanceof rtt.StringCalldataView ||
-                    val instanceof rtt.StringSliceCalldataView,
+                val instanceof rtt.BytesMemView ||
+                val instanceof rtt.BytesStorageView ||
+                val instanceof rtt.BytesCalldataView ||
+                val instanceof rtt.BytesSliceCalldataView,
                 ``
             );
-            // cast to string type
-            const bytesView = castStringToBytes(val);
-            const bytes = decodeView(bytesView, state);
+            const bytes = decodeView(val, state);
             sol.assert(bytes instanceof Uint8Array, ``);
             return bytes;
         }
