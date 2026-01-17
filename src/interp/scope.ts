@@ -15,7 +15,7 @@ import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { FixedBytesLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
 import { getStateStorage, isValueType, panic, setStateStorage } from "./utils";
-import { BaseInterpType, typeIdToRuntimeType, WrappedType } from "./types";
+import { typeIdToRuntimeType, WrappedType } from "./types";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -44,7 +44,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<string, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) {}
+    ) { }
 
     abstract _lookup(name: string): Value | undefined;
     abstract _lookupLocation(name: string): View | undefined;
@@ -136,39 +136,6 @@ abstract class BaseLocalsScope extends BaseScope {
 
     _set(name: string, val: Value): void {
         this.defs.set(name, val);
-    }
-}
-
-export class TempsScope extends BaseLocalsScope {
-    constructor(tempTs: BaseInterpType[], state: State, next: BaseScope | undefined) {
-        const knownIds = new Map<string, rtt.BaseRuntimeType>(
-            tempTs.map((t, i) => [`<tmp_${i}>`, t])
-        );
-        super(`<temp scope>`, knownIds, state, next);
-    }
-
-    get temps(): Array<BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>> {
-        return this.views;
-    }
-
-    get tempVals(): Value[] {
-        return this.temps.map((t) => this.defs.get(t.name) as Value);
-    }
-}
-export class BuiltinScope extends BaseLocalsScope {
-    get nArgs(): number {
-        return this.argTs.length;
-    }
-
-    constructor(
-        public readonly argTs: BaseInterpType[],
-        builtin: BuiltinFunction,
-        state: State,
-        next: BaseScope | undefined
-    ) {
-        const knownIds = new Map<string, rtt.BaseRuntimeType>(argTs.map((t, i) => [`arg_${i}`, t]));
-
-        super(`<builtin ${builtin.name}>`, knownIds, state, next);
     }
 }
 

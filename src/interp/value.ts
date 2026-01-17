@@ -28,6 +28,8 @@ export class BuiltinFunction extends BaseInterpValue {
         protected readonly _call: (
             interp: Interpreter,
             state: State,
+            args: Value[],
+            argTs: BaseInterpType[],
             self: BuiltinFunction
         ) => Value[],
         // Flag specifying if this builtin expects an implicit first argument. E.g. `arr` in `arr.push(...)`
@@ -54,21 +56,9 @@ export class BuiltinFunction extends BaseInterpValue {
         return `<builtin fun ${this.type.pp()}>`;
     }
 
-    call(interp: Interpreter, state: State): Value[] {
-        return this._call(interp, state, this);
-    }
-
-    getArgs(numArgs: number, state: State): Value[] {
-        const res: Value[] = [];
-
-        sol.assert(state.scope !== undefined, ``);
-        for (let i = 0; i < numArgs; i++) {
-            const argV = state.scope.lookup(`arg_${i}`);
-            sol.assert(argV !== undefined, ``);
-            res.push(argV);
-        }
-
-        return res;
+    call(interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[]): Value[] {
+        interp.expect(args.length === argTs.length, `Unexpected mismatch in number of args (${args.length}) and argument types (${argTs.length}) in call to builtin ${this.name}`)
+        return this._call(interp, state, args, argTs, this);
     }
 }
 
@@ -130,8 +120,8 @@ export class DefValue extends BaseInterpValue {
             this.def instanceof sol.SourceUnit
                 ? this.def.sourceEntryKey
                 : this.def instanceof sol.ImportDirective
-                  ? this.def.unitAlias
-                  : this.def.name;
+                    ? this.def.unitAlias
+                    : this.def.name;
         return `<${this.def.constructor.name} ${name}>`;
     }
 }
@@ -163,7 +153,7 @@ export class TypeValue extends BaseInterpValue {
  * (Note that this is different from `new T(...)`)
  */
 export class NewCall {
-    constructor(public readonly type: sol.TypeIdentifier) {}
+    constructor(public readonly type: sol.TypeIdentifier) { }
 }
 
 /**
@@ -189,7 +179,7 @@ export class ExternalCallDescription {
             | "transfer"
             | "solidity_call"
             | "contract_deployment"
-    ) {}
+    ) { }
 }
 
 export class CurriedVal {
@@ -246,7 +236,7 @@ export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDes
 export type InternalCallTargetValue = InternalFunRef | CurriedVal;
 
 export class BytesStorageLength {
-    constructor(public readonly view: rtt.BytesStorageView) {}
+    constructor(public readonly view: rtt.BytesStorageView) { }
 }
 
 export type LValue =
@@ -298,30 +288,30 @@ export type ValueTypeConstructors =
 
 export type TypeConstructorToValueType<V extends ValueTypeConstructors> =
     V extends BigIntConstructor
-        ? bigint
-        : V extends BooleanConstructor
-          ? boolean
-          : V extends Uint8ArrayConstructor
-            ? Uint8Array
-            : V extends AddressConstructor
-              ? Address
-              : V extends ExternalFunRefConstructor
-                ? ExternalFunRef
-                : V extends InternalFunRefConstructor
-                  ? InternalFunRef
-                  : V extends SliceConstructor
-                    ? Slice
-                    : V extends ViewConstructor
-                      ? View
-                      : V extends PoisonConstructor
-                        ? Poison
-                        : V extends BuiltinFunctionConstructor
-                          ? BuiltinFunction
-                          : V extends BuiltinStructConstructor
-                            ? BuiltinStruct
-                            : V extends ArrayConstructor
-                              ? Value[]
-                              : never;
+    ? bigint
+    : V extends BooleanConstructor
+    ? boolean
+    : V extends Uint8ArrayConstructor
+    ? Uint8Array
+    : V extends AddressConstructor
+    ? Address
+    : V extends ExternalFunRefConstructor
+    ? ExternalFunRef
+    : V extends InternalFunRefConstructor
+    ? InternalFunRef
+    : V extends SliceConstructor
+    ? Slice
+    : V extends ViewConstructor
+    ? View
+    : V extends PoisonConstructor
+    ? Poison
+    : V extends BuiltinFunctionConstructor
+    ? BuiltinFunction
+    : V extends BuiltinStructConstructor
+    ? BuiltinStruct
+    : V extends ArrayConstructor
+    ? Value[]
+    : never;
 
 export function match<T extends ValueTypeConstructors>(
     v: Value,

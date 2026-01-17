@@ -22,7 +22,6 @@ import { BaseScope } from "./scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bytes1, bytesT } from "./utils";
 import { ppValue } from "./pp";
-import * as sol from "solc-typed-ast";
 
 export abstract class BaseLocalView<
     V extends PrimitiveValue,
@@ -51,7 +50,7 @@ export abstract class BaseLocalView<
     }
 }
 
-export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, BaseRuntimeType> {}
+export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, BaseRuntimeType> { }
 
 export class SingleByteLocalView extends BaseLocalView<Uint8Array, FixedBytesType> {
     constructor(
@@ -98,8 +97,7 @@ export class SingleByteLocalView extends BaseLocalView<Uint8Array, FixedBytesTyp
 
 export class PointerLocalView
     extends BaseLocalView<View, PointerType>
-    implements PointerView<null, View<any, Value, any, BaseRuntimeType>>
-{
+    implements PointerView<null, View<any, Value, any, BaseRuntimeType>> {
     toView(): DecodingFailure | View<any, Value, any, BaseRuntimeType> {
         const ptr = this.decode();
 
@@ -113,8 +111,7 @@ export class PointerLocalView
 
 export class FixedBytesLocalView
     extends BaseLocalView<Uint8Array, FixedBytesType>
-    implements ArrayLikeView<any, SingleByteLocalView>
-{
+    implements ArrayLikeView<any, SingleByteLocalView> {
     size(): bigint {
         return BigInt(this.type.numBytes);
     }
@@ -133,8 +130,7 @@ export class FixedBytesLocalView
  */
 export class MsgDataView
     extends BaseCalldataView<Uint8Array, BytesType>
-    implements ArrayLikeView<Memory, SingleByteCalldataView>
-{
+    implements ArrayLikeView<Memory, SingleByteCalldataView> {
     constructor() {
         super(bytesT, 0n, 0n);
     }
@@ -166,10 +162,6 @@ export class TempView<V extends PrimitiveValue, T extends BaseRuntimeType> exten
 
     constructor(type: T) {
         super(type, null);
-        sol.assert(
-            !(type instanceof PointerType) || type.location === sol.DataLocation.Memory,
-            `Unexpected complex temporary not in memory`
-        );
     }
 
     decode(): V | DecodingFailure {

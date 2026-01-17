@@ -11,7 +11,7 @@ import {
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 
-import { bytesT, stringT, topoSort, worldFailMock } from "./utils";
+import { bytesT, topoSort, worldFailMock } from "./utils";
 import { Interpreter } from "./interp";
 import { ContractScope, GlobalScope } from "./scope";
 import { makeNoContractState } from "./state";
@@ -143,7 +143,7 @@ export function gatherConstants(
             ) {
                 view = PointerMemView.allocMemFor(
                     nd.value,
-                    stringT,
+                    bytesT,
                     state.memAllocator
                 ) as BytesMemView;
                 view.encodeStr(nd.value, state.memory);
