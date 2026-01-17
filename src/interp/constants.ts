@@ -194,7 +194,7 @@ export function gatherConstants(
         }
 
         state.constantsMap.set(nd.id, view);
-        scope.setConst(nd.name, view);
+        scope.setConst(nd, view);
     }
 
     // @todo replace with state.memAllocator.baseOffset

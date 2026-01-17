@@ -528,7 +528,11 @@ export class Interpreter {
         return resData;
     }
 
-    private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
+    private pushScope(
+        node: sol.ASTNode,
+        vals: Array<[sol.VariableDeclaration, Value]>,
+        state: State
+    ): void {
         if (
             node instanceof sol.FunctionDefinition ||
             node instanceof sol.ModifierDefinition ||
@@ -574,7 +578,7 @@ export class Interpreter {
         s.scope = this.makeStaticScope(v.vScope, s);
 
         const initalVal = this.eval(v.vValue, s);
-        const varLoc = s.scope.lookupLocation(v.name);
+        const varLoc = s.scope.lookupLocation(v);
         this.expect(varLoc !== undefined);
         this.assign(varLoc, initalVal, s);
         s.scope = oldScope;
@@ -701,7 +705,7 @@ export class Interpreter {
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
             | BaseMemoryView<BaseValue, rtt.BaseRuntimeType>
             | DecodingFailure
-            | undefined = scope.lookupLocation(callee.name) as
+            | undefined = scope.lookupLocation(callee) as
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
             | undefined;
         this.expect(stateVarView !== undefined, `No state var ${callee.name}`);
@@ -959,14 +963,7 @@ export class Interpreter {
         state: State
     ): ControlFlow {
         if (clause.vParameters) {
-            this.pushScope(
-                clause,
-                rtt.zip(
-                    clause.vParameters.vParameters.map((d) => d.name),
-                    args
-                ),
-                state
-            );
+            this.pushScope(clause, rtt.zip(clause.vParameters.vParameters, args), state);
         } else {
             this.pushScope(clause, [], state);
         }
@@ -998,7 +995,7 @@ export class Interpreter {
         if (gte(this.compilerVersion, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
             this.pushScope(
                 stmt,
-                stmt.vDeclarations.map((d) => [d.name, none]),
+                stmt.vDeclarations.map((d) => [d, none]),
                 state
             );
         }
@@ -1009,7 +1006,7 @@ export class Interpreter {
                 continue;
             }
 
-            const loc = state.scope.lookupLocation(stmt.vDeclarations[j].name);
+            const loc = state.scope.lookupLocation(stmt.vDeclarations[j]);
 
             if (loc === undefined) {
                 this.fail(NotDefined, ``);
@@ -1033,7 +1030,7 @@ export class Interpreter {
     private execBlock(block: sol.Block | sol.UncheckedBlock, state: State): ControlFlow {
         let flow: ControlFlow = ControlFlow.Fallthrough;
 
-        const localVals: Array<[string, Value]> = [];
+        const localVals: Array<[sol.VariableDeclaration, Value]> = [];
 
         // For Solidity <0.5.0 block locals are live for the whole block. So 0-init them at the start of the block
         if (lt(this.compilerVersion, "0.5.0")) {
@@ -1041,7 +1038,7 @@ export class Interpreter {
                 if (stmt instanceof sol.VariableDeclarationStatement) {
                     for (const decl of stmt.vDeclarations) {
                         const type = this.varDeclToRuntimeType(decl);
-                        localVals.push([decl.name, makeZeroValue(type, state)]);
+                        localVals.push([decl, makeZeroValue(type, state)]);
                     }
                 }
             }
@@ -1094,9 +1091,7 @@ export class Interpreter {
         );
 
         for (let i = 0; i < retVals.length; i++) {
-            const ret = frame.scope._lookupLocation(
-                LocalsScope.returnName(fun?.vReturnParameters.vParameters[i], i)
-            );
+            const ret = frame.scope._lookupLocation(fun.vReturnParameters.vParameters[i]);
             this.expect(ret !== undefined);
             this.assign(ret, retVals[i], state);
         }
@@ -1360,8 +1355,13 @@ export class Interpreter {
         let res: LValue;
 
         if (expr instanceof sol.Identifier) {
-            sol.assert(state.scope !== undefined, `Missing scope in evalLV({0})`, expr);
-            const scopeView = state.scope.lookupLocation(expr.name);
+            this.expect(state.scope !== undefined, `Missing scope in evalLV(${expr.name})`);
+            this.expect(
+                expr.vReferencedDeclaration instanceof sol.VariableDeclaration,
+                `Unexpected non-var LV identifier ${expr.name}`
+            );
+
+            const scopeView = state.scope.lookupLocation(expr.vReferencedDeclaration);
             if (scopeView === undefined) {
                 this.fail(NotDefined, ``);
             }
@@ -2798,13 +2798,10 @@ export class Interpreter {
                 this.exec(target.vBody, state);
             }
 
-            res = target.vReturnParameters.vParameters.map((ret, i) => {
-                const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
+            res = target.vReturnParameters.vParameters.map((ret) => {
+                const res = (state.scope as BaseScope).lookup(ret);
                 if (res === undefined) {
-                    this.fail(
-                        NotDefined,
-                        `Missing value for return ${LocalsScope.returnName(ret, i)}`
-                    );
+                    this.fail(NotDefined, `Missing value for return`);
                 }
                 return res;
             });
@@ -3074,7 +3071,11 @@ export class Interpreter {
             this.fail(NoScope, ``);
         }
 
-        const res = state.scope.lookup(expr.name);
+        this.expect(
+            expr.vReferencedDeclaration instanceof sol.VariableDeclaration,
+            `Unexpected identifier ${expr.name}`
+        );
+        const res = state.scope.lookup(expr.vReferencedDeclaration);
 
         if (res === undefined) {
             this.fail(NotDefined, ``);
@@ -3348,13 +3349,8 @@ export class Interpreter {
             // - base state vars called with the base notation Base.Var
             if (expr.vReferencedDeclaration instanceof sol.VariableDeclaration) {
                 const scope = this.makeStaticScope(baseVal.def, state);
+                const res = scope.lookup(expr.vReferencedDeclaration);
 
-                if (baseVal.def instanceof sol.ContractDefinition) {
-                    this.expect(scope instanceof ContractScope);
-                    return scope.lookupDecl(expr.vReferencedDeclaration);
-                }
-
-                const res = scope.lookup(expr.memberName);
                 this.expect(
                     res !== undefined,
                     `Couldnt find ${expr.memberName} in ${ppValue(baseVal)}`
@@ -3643,14 +3639,12 @@ export class Interpreter {
 
         const staticScope = this.makeStaticScope(nd, state);
 
-        const localNames = nd.vParameters.vParameters.map((d) => d.name);
+        const localDecls = [...nd.vParameters.vParameters];
         const localVals: Value[] = args;
 
         // We keep the returns in the function scope as well
         if (nd instanceof sol.FunctionDefinition) {
-            localNames.push(
-                ...nd.vReturnParameters.vParameters.map((ret, i) => LocalsScope.returnName(ret, i))
-            );
+            localDecls.push(...nd.vReturnParameters.vParameters);
             localVals.push(
                 ...nd.vReturnParameters.vParameters.map((ret) => {
                     const type = this.varDeclToRuntimeType(ret);
@@ -3660,14 +3654,14 @@ export class Interpreter {
         }
 
         sol.assert(
-            localNames.length === localVals.length,
-            `Mismatch in args in call to ${nd.name} expected ${localNames.length} got ${localVals.length}`
+            localDecls.length === localVals.length,
+            `Mismatch in args in call to ${nd.name} expected ${localDecls.length} got ${localVals.length}`
         );
 
         const res = new LocalsScope(nd, state, this.compilerVersion, staticScope);
 
-        for (let i = 0; i < localNames.length; i++) {
-            const v = res.lookupLocation(localNames[i]);
+        for (let i = 0; i < localDecls.length; i++) {
+            const v = res.lookupLocation(localDecls[i]);
             this.expect(v !== undefined, ``);
             this.assign(v, localVals[i], state);
         }

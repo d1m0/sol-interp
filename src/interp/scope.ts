@@ -1,6 +1,6 @@
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { BuiltinFunction, BuiltinStruct, Value } from "./value";
+import { Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -41,42 +41,42 @@ import { typeIdToRuntimeType } from "./types";
 export abstract class BaseScope {
     constructor(
         public readonly name: string,
-        protected readonly knownIds: Map<string, rtt.BaseRuntimeType>,
+        protected readonly knownIds: Map<sol.VariableDeclaration, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
     ) {}
 
-    abstract _lookup(name: string): Value | undefined;
-    abstract _lookupLocation(name: string): View | undefined;
-    abstract _set(name: string, val: Value): void;
+    abstract _lookup(decl: sol.VariableDeclaration): Value | undefined;
+    abstract _lookupLocation(decl: sol.VariableDeclaration): View | undefined;
+    abstract _set(decl: sol.VariableDeclaration, val: Value): void;
 
-    lookup(name: string): Value | undefined {
+    lookup(decl: sol.VariableDeclaration): Value | undefined {
         let v;
 
-        if (this.knownIds.has(name)) {
-            v = this._lookup(name);
+        if (this.knownIds.has(decl)) {
+            v = this._lookup(decl);
         } else {
-            v = this._next ? this._next.lookup(name) : undefined;
+            v = this._next ? this._next.lookup(decl) : undefined;
         }
 
         return v;
     }
 
-    lookupLocation(name: string): View | undefined {
+    lookupLocation(decl: sol.VariableDeclaration): View | undefined {
         let v;
 
-        if (this.knownIds.has(name)) {
-            v = this._lookupLocation(name);
+        if (this.knownIds.has(decl)) {
+            v = this._lookupLocation(decl);
         } else {
-            v = this._next ? this._next.lookupLocation(name) : undefined;
+            v = this._next ? this._next.lookupLocation(decl) : undefined;
         }
 
         return v;
     }
 
-    set(name: string, val: Value): void {
-        if (this.knownIds.has(name)) {
-            this._set(name, val);
+    set(decl: sol.VariableDeclaration, val: Value): void {
+        if (this.knownIds.has(decl)) {
+            this._set(decl, val);
             return;
         }
 
@@ -84,7 +84,17 @@ export abstract class BaseScope {
             return;
         }
 
-        this._next.set(name, val);
+        this._next.set(decl, val);
+    }
+
+    findDecl(name: string): sol.VariableDeclaration | undefined {
+        for (const decl of this.knownIds.keys()) {
+            if (decl.name === name) {
+                return decl;
+            }
+        }
+
+        return this._next === undefined ? undefined : this._next.findDecl(name);
     }
 }
 
@@ -93,49 +103,54 @@ export abstract class BaseScope {
  * interpreter specific temporaries.
  */
 abstract class BaseLocalsScope extends BaseScope {
-    protected defs = new Map<string, Value>();
-    protected readonly views: Array<BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>>;
-    protected readonly viewsMap: Map<string, BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>>;
+    protected defs = new Map<sol.VariableDeclaration, Value>();
+    protected readonly viewsMap: Map<
+        sol.VariableDeclaration,
+        BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>
+    >;
 
     constructor(
         name: string,
-        defTypesMap: Map<string, rtt.BaseRuntimeType>,
+        defTypesMap: Map<sol.VariableDeclaration, rtt.BaseRuntimeType>,
         state: State,
         _next: BaseScope | undefined
     ) {
         super(name, defTypesMap, state, _next);
 
-        this.views = [...defTypesMap.entries()].map(([name, type]) =>
-            this.makeLocalView(name, type)
-        );
-        this.viewsMap = new Map(this.views.map((t) => [t.name, t]));
+        const declAndView: Array<
+            [sol.VariableDeclaration, BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType>]
+        > = [...defTypesMap.entries()].map(([decl, type]) => [
+            decl,
+            this.makeLocalView(decl, type)
+        ]);
+        this.viewsMap = new Map(declAndView);
     }
 
-    _lookup(name: string): Value | undefined {
-        return this.defs.get(name);
+    _lookup(decl: sol.VariableDeclaration): Value | undefined {
+        return this.defs.get(decl);
     }
 
     private makeLocalView(
-        name: string,
+        decl: sol.VariableDeclaration,
         t: rtt.BaseRuntimeType
     ): BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType> {
         if (t instanceof rtt.PointerType) {
-            return new PointerLocalView(t, [this, name]);
+            return new PointerLocalView(t, [this, decl]);
         }
 
         if (t instanceof rtt.FixedBytesType) {
-            return new FixedBytesLocalView(t, [this, name]);
+            return new FixedBytesLocalView(t, [this, decl]);
         }
 
-        return new PrimitiveLocalView(t, [this, name]);
+        return new PrimitiveLocalView(t, [this, decl]);
     }
 
-    _lookupLocation(name: string): View | undefined {
-        return this.viewsMap.get(name);
+    _lookupLocation(decl: sol.VariableDeclaration): View | undefined {
+        return this.viewsMap.get(decl);
     }
 
-    _set(name: string, val: Value): void {
-        this.defs.set(name, val);
+    _set(decl: sol.VariableDeclaration, val: Value): void {
+        this.defs.set(decl, val);
     }
 }
 
@@ -179,15 +194,11 @@ export class LocalsScope extends BaseLocalsScope {
         super(name, defTypesMap, state, _next);
     }
 
-    public static returnName(decl: sol.VariableDeclaration, idx: number): string {
-        return decl.name === "" ? `<ret_${idx}>` : decl.name;
-    }
-
     private static detectIds(
         node: LocalsScopeNodeType,
         version: string
-    ): Map<string, rtt.BaseRuntimeType> {
-        const res = new Map<string, rtt.BaseRuntimeType>();
+    ): Map<sol.VariableDeclaration, rtt.BaseRuntimeType> {
+        const res = new Map<sol.VariableDeclaration, rtt.BaseRuntimeType>();
 
         if (node instanceof sol.Block || node instanceof sol.UncheckedBlock) {
             const ctx = node.requiredContext;
@@ -197,7 +208,7 @@ export class LocalsScope extends BaseLocalsScope {
                     if (stmt instanceof sol.VariableDeclarationStatement) {
                         for (const decl of stmt.vDeclarations) {
                             res.set(
-                                decl.name,
+                                decl,
                                 typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
                             );
                         }
@@ -216,7 +227,7 @@ export class LocalsScope extends BaseLocalsScope {
                 // Also if this is the initialization stmt of a for loop, its its own scope
                 for (const decl of node.vDeclarations) {
                     res.set(
-                        decl.name,
+                        decl,
                         typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
                     );
                 }
@@ -225,28 +236,25 @@ export class LocalsScope extends BaseLocalsScope {
             const ctx = node.requiredContext;
 
             for (const decl of node.vParameters.vParameters) {
-                res.set(decl.name, typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined));
+                res.set(decl, typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined));
             }
 
             for (let i = 0; i < node.vReturnParameters.vParameters.length; i++) {
                 const decl = node.vReturnParameters.vParameters[i];
-                res.set(
-                    LocalsScope.returnName(decl, i),
-                    typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined)
-                );
+                res.set(decl, typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined));
             }
         } else if (node instanceof sol.ModifierDefinition) {
             const ctx = node.requiredContext;
 
             for (const decl of node.vParameters.vParameters) {
-                res.set(decl.name, typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined));
+                res.set(decl, typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined));
             }
         } else {
             const ctx = node.requiredContext;
 
             if (node.vParameters) {
                 for (const decl of node.vParameters.vParameters) {
-                    res.set(decl.name, typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined));
+                    res.set(decl, typeIdToRuntimeType(sol.typeOf(decl), ctx, undefined));
                 }
             }
         }
@@ -256,8 +264,7 @@ export class LocalsScope extends BaseLocalsScope {
 }
 
 export class ContractScope extends BaseScope {
-    private nameToView = new Map<string, View<any, rtt.BaseRuntimeType>>();
-    private declToView = new Map<sol.VariableDeclaration, View<any, rtt.BaseRuntimeType>>();
+    private declToView: Map<sol.VariableDeclaration, View<any, rtt.BaseRuntimeType>>;
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
@@ -269,22 +276,17 @@ export class ContractScope extends BaseScope {
         const [layoutType] = getContractLayoutType(contract);
         const layout = makeStorageView(layoutType, [0n, 32]) as StructStorageView;
 
-        const defTypes = new Map<string, rtt.BaseRuntimeType>(layoutType.fields);
+        const defTypes = new Map<sol.VariableDeclaration, rtt.BaseRuntimeType>();
+        const declToView = new Map<sol.VariableDeclaration, View<any, rtt.BaseRuntimeType>>();
 
-        for (const v of constVars) {
-            defTypes.set(v.name, typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory));
-        }
-
-        super(`<contract ${contract.name}>`, defTypes, state, _next);
-
-        for (const [decl, [name], [, view]] of rtt.zip3(
+        for (const [decl, [name, typ], [, view]] of rtt.zip3(
             normalVars,
             layoutType.fields,
             layout.fieldViews
         )) {
             sol.assert(decl.name === name, ``);
-            this.nameToView.set(name, view as View<any, rtt.BaseRuntimeType>);
-            this.declToView.set(decl, view as View<any, rtt.BaseRuntimeType>);
+            declToView.set(decl, view as View<any, rtt.BaseRuntimeType>);
+            defTypes.set(decl, typ);
         }
 
         for (const v of constVars) {
@@ -293,9 +295,12 @@ export class ContractScope extends BaseScope {
                 constView !== undefined,
                 `Missing value for constant state var ${contract.name}.${v.name}`
             );
-            this.nameToView.set(v.name, constView as View<any, rtt.BaseRuntimeType>);
-            this.declToView.set(v, constView as View<any, rtt.BaseRuntimeType>);
+            declToView.set(v, constView as View<any, rtt.BaseRuntimeType>);
+            defTypes.set(v, typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory));
         }
+
+        super(`<contract ${contract.name}>`, defTypes, state, _next);
+        this.declToView = declToView;
     }
 
     private stateVarViewToValue(view: View<any, rtt.BaseRuntimeType>): Value {
@@ -324,8 +329,8 @@ export class ContractScope extends BaseScope {
         return view.decode(getStateStorage(this.state));
     }
 
-    _lookup(name: string): Value | undefined {
-        const view = this.nameToView.get(name);
+    _lookup(decl: sol.VariableDeclaration): Value | undefined {
+        const view = this.declToView.get(decl);
 
         if (view === undefined) {
             return undefined;
@@ -334,43 +339,34 @@ export class ContractScope extends BaseScope {
         return this.stateVarViewToValue(view);
     }
 
-    _lookupLocation(name: string): View | undefined {
-        return this.nameToView.get(name);
-    }
-
-    lookupDecl(decl: sol.VariableDeclaration): Value {
-        const view = this.declToView.get(decl);
-        sol.assert(view !== undefined, `No state var ${decl.name}`);
-        return this.stateVarViewToValue(view);
-    }
-
-    lookupDeclLocation(decl: sol.VariableDeclaration): View {
-        const view = this.declToView.get(decl);
-        sol.assert(view !== undefined, `No state var ${decl.name}`);
-        return view;
+    _lookupLocation(decl: sol.VariableDeclaration): View | undefined {
+        return this.declToView.get(decl);
     }
 
     // @todo is this method really necessary? Don't assignments to storage happen through Interpreter.assign?
-    _set(name: string, v: Value): void {
-        const view = this.nameToView.get(name);
-        sol.assert(view instanceof BaseStorageView, `Uknown non-constant state var ${name}`);
+    _set(decl: sol.VariableDeclaration, v: Value): void {
+        const view = this.declToView.get(decl);
+        sol.assert(view instanceof BaseStorageView, `Uknown non-constant state var ${decl}`);
         setStateStorage(this.state, view.encode(v, getStateStorage(this.state)));
     }
 
-    public setConst(name: string, v: BaseMemoryView<BaseValue, rtt.BaseRuntimeType>): void {
-        this.nameToView.set(name, v as View<any, rtt.BaseRuntimeType>);
+    public setConst(
+        decl: sol.VariableDeclaration,
+        v: BaseMemoryView<BaseValue, rtt.BaseRuntimeType>
+    ): void {
+        this.declToView.set(decl, v as View<any, rtt.BaseRuntimeType>);
     }
 }
 
 export class GlobalScope extends BaseScope {
-    private viewMap: Map<string, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
+    private viewMap: Map<sol.VariableDeclaration, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
 
-    private static gatherDefs(
+    private static gatherConstVars(
         unit: sol.SourceUnit,
-        res = new Map<string, sol.VariableDeclaration>()
-    ): Map<string, sol.VariableDeclaration> {
+        res = new Set<sol.VariableDeclaration>()
+    ): Set<sol.VariableDeclaration> {
         for (const v of unit.vVariables) {
-            res.set(v.name, v);
+            res.add(v);
         }
 
         for (const imp of unit.vImportDirectives) {
@@ -380,26 +376,15 @@ export class GlobalScope extends BaseScope {
             } else if (imp.symbolAliases.length > 0) {
                 // import { a, b as c, ...} from "..."
                 for (const alias of imp.vSymbolAliases) {
-                    const [originalDef, newName] = alias;
+                    const [originalDef] = alias;
                     if (originalDef instanceof sol.VariableDeclaration) {
-                        const name =
-                            newName === undefined
-                                ? originalDef instanceof sol.ImportDirective
-                                    ? originalDef.unitAlias
-                                    : originalDef.name
-                                : newName;
-                        res.set(name, originalDef);
+                        res.add(originalDef);
                     }
                 }
             } else {
                 // import "foo"
-                for (const [name, varDecl] of GlobalScope.gatherDefs(
-                    imp.vSourceUnit,
-                    res
-                ).entries()) {
-                    if (!res.has(name)) {
-                        res.set(name, varDecl);
-                    }
+                for (const varDecl of GlobalScope.gatherConstVars(imp.vSourceUnit, res)) {
+                    res.add(varDecl);
                 }
             }
         }
@@ -413,26 +398,26 @@ export class GlobalScope extends BaseScope {
         _next: BaseScope | undefined
     ) {
         const ctx = unit.requiredContext;
-        const defMap = new Map<string, rtt.BaseRuntimeType>();
-        const declMap = GlobalScope.gatherDefs(unit);
+        const defMap = new Map<sol.VariableDeclaration, rtt.BaseRuntimeType>();
+        const constVars = GlobalScope.gatherConstVars(unit);
 
-        for (const [name, decl] of declMap) {
+        for (const decl of constVars) {
             const type = typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory);
-            defMap.set(name, type);
+            defMap.set(decl, type);
         }
 
         super(`<global scope ${unit.sourceEntryKey}>`, defMap, state, _next);
         this.viewMap = new Map();
 
-        for (const [name, decl] of declMap) {
+        for (const decl of constVars) {
             const view = state.constantsMap.get(decl.id);
-            sol.assert(view !== undefined, `Missing view for global constant ${name}`);
-            this.viewMap.set(name, view);
+            sol.assert(view !== undefined, `Missing view for global constant ${decl.name}`);
+            this.viewMap.set(decl, view);
         }
     }
 
-    _lookup(name: string): Value | undefined {
-        const view = this.viewMap.get(name);
+    _lookup(decl: sol.VariableDeclaration): Value | undefined {
+        const view = this.viewMap.get(decl);
 
         if (view === undefined) {
             return undefined;
@@ -442,7 +427,7 @@ export class GlobalScope extends BaseScope {
             const res = view.decode(this.state.memory);
             sol.assert(
                 !(res instanceof DecodingFailure),
-                `Unexpected failure decoding constant ${name}`
+                `Unexpected failure decoding constant ${decl}`
             );
             return res as PrimitiveValue;
         }
@@ -450,46 +435,21 @@ export class GlobalScope extends BaseScope {
         return view;
     }
 
-    _lookupLocation(name: string): View | undefined {
-        panic(`Can't get location of ${name} in GlobalScope`);
+    _lookupLocation(decl: sol.VariableDeclaration): View | undefined {
+        panic(`Can't get location of ${decl} in GlobalScope`);
     }
 
-    _set(name: string): void {
-        panic(`Can't set ${name} in GlobalScope`);
+    _set(decl: sol.VariableDeclaration): void {
+        panic(`Can't set ${decl} in GlobalScope`);
     }
 
     /**
      * Only called from gatherConstant during constant eval.
      */
-    public setConst(name: string, v: BaseMemoryView<BaseValue, rtt.BaseRuntimeType>): void {
-        this.viewMap.set(name, v);
-    }
-}
-
-export class BuiltinsScope extends BaseScope {
-    builtinsMap: Map<string, Value>;
-
-    constructor(
-        public readonly builtins: BuiltinStruct,
-        state: State,
-        _next: BaseScope | undefined
-    ) {
-        const builtinsFields: Array<[string, rtt.BaseRuntimeType, Value]> = builtins.fields.map(
-            ([name, val]) => [name, (val as BuiltinFunction | BuiltinStruct).type, val]
-        );
-        super(`<builtins>`, new Map(builtinsFields.map((x) => [x[0], x[1]])), state, _next);
-        this.builtinsMap = new Map(builtinsFields.map((x) => [x[0], x[2]]));
-    }
-
-    _lookup(name: string): Value | undefined {
-        return this.builtinsMap.get(name);
-    }
-
-    _lookupLocation(): View | undefined {
-        sol.assert(false, `Can't lookup a builtin's location`);
-    }
-
-    _set(): void {
-        sol.assert(false, `Can't set a builtin after initialization`);
+    public setConst(
+        decl: sol.VariableDeclaration,
+        v: BaseMemoryView<BaseValue, rtt.BaseRuntimeType>
+    ): void {
+        this.viewMap.set(decl, v);
     }
 }
