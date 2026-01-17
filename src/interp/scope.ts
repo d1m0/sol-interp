@@ -14,7 +14,7 @@ import {
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { FixedBytesLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
-import { getStateStorage, isValueType, panic, setStateStorage } from "./utils";
+import { gatherStateVars, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
 import { typeIdToRuntimeType } from "./types";
 
 /**
@@ -44,7 +44,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<string, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) { }
+    ) {}
 
     abstract _lookup(name: string): Value | undefined;
     abstract _lookupLocation(name: string): View | undefined;
@@ -256,10 +256,8 @@ export class LocalsScope extends BaseLocalsScope {
 }
 
 export class ContractScope extends BaseScope {
-    private readonly layoutType: rtt.StructType;
-    private readonly layout: StructStorageView;
-    private fieldToView: Map<string, BaseStorageView<any, rtt.BaseRuntimeType>>;
-    private constFieldToView: Map<string, BaseMemoryView<any, rtt.BaseRuntimeType>>;
+    private nameToView = new Map<string, View<any, rtt.BaseRuntimeType>>();
+    private declToView = new Map<sol.VariableDeclaration, View<any, rtt.BaseRuntimeType>>();
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
@@ -267,57 +265,52 @@ export class ContractScope extends BaseScope {
         _next: BaseScope | undefined
     ) {
         const ctx = contract.requiredContext;
+        const [constVars, normalVars] = gatherStateVars(contract);
         const [layoutType] = getContractLayoutType(contract);
-        const defTypes = new Map<string, rtt.BaseRuntimeType>(layoutType.fields);
+        const layout = makeStorageView(layoutType, [0n, 32]) as StructStorageView;
 
-        const constVars = contract.vStateVariables.filter(
-            (decl) => decl.mutability === sol.Mutability.Constant
-        );
+        const defTypes = new Map<string, rtt.BaseRuntimeType>(layoutType.fields);
 
         for (const v of constVars) {
             defTypes.set(v.name, typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory));
         }
 
         super(`<contract ${contract.name}>`, defTypes, state, _next);
-        this.layoutType = layoutType;
-        this.layout = makeStorageView(this.layoutType, [0n, 32]) as StructStorageView;
-        this.fieldToView = new Map(this.layout.fieldViews);
 
-        this.constFieldToView = new Map();
+        for (const [decl, [name], [, view]] of rtt.zip3(
+            normalVars,
+            layoutType.fields,
+            layout.fieldViews
+        )) {
+            sol.assert(decl.name === name, ``);
+            this.nameToView.set(name, view as View<any, rtt.BaseRuntimeType>);
+            this.declToView.set(decl, view as View<any, rtt.BaseRuntimeType>);
+        }
+
         for (const v of constVars) {
             const constView = state.constantsMap.get(v.id);
             sol.assert(
                 constView !== undefined,
                 `Missing value for constant state var ${contract.name}.${v.name}`
             );
-            this.constFieldToView.set(v.name, constView);
+            this.nameToView.set(v.name, constView as View<any, rtt.BaseRuntimeType>);
+            this.declToView.set(v, constView as View<any, rtt.BaseRuntimeType>);
         }
     }
 
-    private _lookupConst(name: string): Value | undefined {
-        const view = this.constFieldToView.get(name);
+    private stateVarViewToValue(view: View<any, rtt.BaseRuntimeType>): Value {
+        if (view instanceof BaseMemoryView) {
+            // Constant/immutable var
+            if (isValueType(view.type)) {
+                const res = view.decode(this.state.memory);
+                sol.assert(
+                    !(res instanceof DecodingFailure),
+                    `Unexpected failure decoding constant at ${view.pp()}`
+                );
+                return res as PrimitiveValue;
+            }
 
-        if (view === undefined) {
-            return undefined;
-        }
-
-        if (isValueType(view.type)) {
-            const res = view.decode(this.state.memory);
-            sol.assert(
-                !(res instanceof DecodingFailure),
-                `Unexpected failure decoding constant ${name}`
-            );
-            return res as PrimitiveValue;
-        }
-
-        return view;
-    }
-
-    _lookup(name: string): Value | undefined {
-        const view = this.fieldToView.get(name);
-
-        if (view === undefined) {
-            return this._lookupConst(name);
+            return view;
         }
 
         if (view instanceof rtt.MapStorageView) {
@@ -331,25 +324,41 @@ export class ContractScope extends BaseScope {
         return view.decode(getStateStorage(this.state));
     }
 
-    _lookupLocation(name: string): View | undefined {
-        const res = this.fieldToView.get(name);
+    _lookup(name: string): Value | undefined {
+        const view = this.nameToView.get(name);
 
-        if (res !== undefined) {
-            return res;
+        if (view === undefined) {
+            return undefined;
         }
 
-        return this.constFieldToView.get(name);
+        return this.stateVarViewToValue(view);
+    }
+
+    _lookupLocation(name: string): View | undefined {
+        return this.nameToView.get(name);
+    }
+
+    lookupDecl(decl: sol.VariableDeclaration): Value {
+        const view = this.declToView.get(decl);
+        sol.assert(view !== undefined, `No state var ${decl.name}`);
+        return this.stateVarViewToValue(view);
+    }
+
+    lookupDeclLocation(decl: sol.VariableDeclaration): View {
+        const view = this.declToView.get(decl);
+        sol.assert(view !== undefined, `No state var ${decl.name}`);
+        return view;
     }
 
     // @todo is this method really necessary? Don't assignments to storage happen through Interpreter.assign?
     _set(name: string, v: Value): void {
-        const view = this.fieldToView.get(name);
-        sol.assert(view !== undefined, `Uknown identifier ${name}`);
+        const view = this.nameToView.get(name);
+        sol.assert(view instanceof BaseStorageView, `Uknown non-constant state var ${name}`);
         setStateStorage(this.state, view.encode(v, getStateStorage(this.state)));
     }
 
     public setConst(name: string, v: BaseMemoryView<BaseValue, rtt.BaseRuntimeType>): void {
-        this.constFieldToView.set(name, v);
+        this.nameToView.set(name, v as View<any, rtt.BaseRuntimeType>);
     }
 }
 
@@ -384,7 +393,10 @@ export class GlobalScope extends BaseScope {
                 }
             } else {
                 // import "foo"
-                for (const [name, varDecl] of GlobalScope.gatherDefs(imp.vSourceUnit, res).entries()) {
+                for (const [name, varDecl] of GlobalScope.gatherDefs(
+                    imp.vSourceUnit,
+                    res
+                ).entries()) {
                     if (!res.has(name)) {
                         res.set(name, varDecl);
                     }
@@ -405,7 +417,7 @@ export class GlobalScope extends BaseScope {
         const declMap = GlobalScope.gatherDefs(unit);
 
         for (const [name, decl] of declMap) {
-            const type = typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
+            const type = typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory);
             defMap.set(name, type);
         }
 

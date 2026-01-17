@@ -884,3 +884,35 @@ export function getUsingForDirectives(
     }
     return res;
 }
+
+/**
+ * Given a contract `c` gather all state vars of `c` and its bases (in reversed C3 order), and return them split in 3 groups:
+ * 1. Constant and immutable state vars
+ * 2. Normal state vars
+ * 3. Transient state vars
+ * @param c
+ */
+export function gatherStateVars(
+    c: sol.ContractDefinition
+): [sol.VariableDeclaration[], sol.VariableDeclaration[], sol.VariableDeclaration[]] {
+    const constVars: sol.VariableDeclaration[] = [];
+    const normalVars: sol.VariableDeclaration[] = [];
+    const transientVars: sol.VariableDeclaration[] = [];
+
+    for (const base of [...c.vLinearizedBaseContracts].reverse()) {
+        for (const v of base.vStateVariables) {
+            if (
+                v.mutability === sol.Mutability.Constant ||
+                v.mutability === sol.Mutability.Immutable
+            ) {
+                constVars.push(v);
+            } else if (v.storageLocation === sol.DataLocation.Transient) {
+                transientVars.push(v);
+            } else {
+                normalVars.push(v);
+            }
+        }
+    }
+
+    return [constVars, normalVars, transientVars];
+}

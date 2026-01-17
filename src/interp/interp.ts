@@ -28,7 +28,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { WorldInterface, State, SolMessage, CallResult, makeBuiltinScope } from "./state";
+import { WorldInterface, State, SolMessage, CallResult } from "./state";
 import {
     InternalError,
     NoScope,
@@ -72,13 +72,7 @@ import {
     setLengthLeft,
     setLengthRight
 } from "@ethereumjs/util";
-import {
-    BaseScope,
-    BuiltinsScope,
-    ContractScope,
-    GlobalScope,
-    LocalsScope
-} from "./scope";
+import { BaseScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
     bytes32,
     bytesBitwiseAnd,
@@ -109,7 +103,6 @@ import {
     indexOfEnumOption,
     indexView,
     int256,
-    isBaseOf,
     isDirectlyAssignable,
     isMethod,
     isStructView,
@@ -138,6 +131,8 @@ import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
     ADDRESS_BUILTIN_STRUCT_NAME,
     EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
+    globalBuiltinStructDesc,
+    makeBuiltin,
     popBuiltin,
     pushBuiltin,
     revertBuiltin
@@ -179,6 +174,10 @@ export class Interpreter {
 
     get compilerVersion(): string {
         return this.artifact.compilerVersion;
+    }
+
+    get builtins(): BuiltinStruct {
+        return makeBuiltin(globalBuiltinStructDesc, this.compilerVersion) as BuiltinStruct;
     }
 
     constructor(
@@ -350,8 +349,8 @@ export class Interpreter {
         // If there are arguments to be passed, then the target MDC must have a constructor
         this.expect(
             msg.data.length === mdc.bytecode.bytecode.length ||
-            (mdc.ast.vConstructor !== undefined &&
-                mdc.ast.vConstructor.vParameters.vParameters.length > 0)
+                (mdc.ast.vConstructor !== undefined &&
+                    mdc.ast.vConstructor.vParameters.vParameters.length > 0)
         );
 
         try {
@@ -728,7 +727,7 @@ export class Interpreter {
 
         let returnViews =
             stateVarView instanceof PointerStorageView &&
-                stateVarView.innerView instanceof StructStorageView
+            stateVarView.innerView instanceof StructStorageView
                 ? stateVarView.innerView.fieldViews.map(([, fv]) => fv)
                 : [stateVarView];
 
@@ -920,7 +919,7 @@ export class Interpreter {
                 const target = stmt.vExternalCall.vReferencedDeclaration;
                 this.expect(
                     target instanceof sol.FunctionDefinition ||
-                    target instanceof sol.VariableDeclaration,
+                        target instanceof sol.VariableDeclaration,
                     `NYI external call target`
                 );
                 vals = this.getValuesFromReturnedCalldata(res.data, target, state);
@@ -1564,9 +1563,9 @@ export class Interpreter {
         ) {
             this.expect(
                 value instanceof BytesMemView ||
-                value instanceof rtt.BytesCalldataView ||
-                value instanceof rtt.BytesStorageView ||
-                value instanceof rtt.BytesSliceCalldataView
+                    value instanceof rtt.BytesCalldataView ||
+                    value instanceof rtt.BytesStorageView ||
+                    value instanceof rtt.BytesSliceCalldataView
             );
             return castStringViewToBytes(value);
         }
@@ -1580,9 +1579,9 @@ export class Interpreter {
         ) {
             this.expect(
                 value instanceof BytesMemView ||
-                value instanceof rtt.BytesCalldataView ||
-                value instanceof rtt.BytesStorageView ||
-                value instanceof rtt.BytesSliceCalldataView
+                    value instanceof rtt.BytesCalldataView ||
+                    value instanceof rtt.BytesStorageView ||
+                    value instanceof rtt.BytesSliceCalldataView
             );
             return castBytesViewToString(value);
         }
@@ -1650,8 +1649,8 @@ export class Interpreter {
     private assignToStorageArray(lvalue: rtt.ArrayStorageView, rvalue: Value, state: State): void {
         this.expect(
             rvalue instanceof View &&
-            isArrayLikeView(rvalue) &&
-            rvalue.type instanceof rtt.ArrayType
+                isArrayLikeView(rvalue) &&
+                rvalue.type instanceof rtt.ArrayType
         );
         this.expect(lvalue.type.size === undefined || lvalue.type.size === rvalue.type.size);
 
@@ -1774,7 +1773,7 @@ export class Interpreter {
                 } else {
                     this.expect(
                         (lvalue instanceof PointerLocalView || lvalue instanceof TempView) &&
-                        lvalue.type.toType.pp() === rvalue.type.pp(),
+                            lvalue.type.toType.pp() === rvalue.type.pp(),
                         `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
                     );
                     lvalue.encode(rvalue);
@@ -1998,7 +1997,7 @@ export class Interpreter {
 
             this.expect(
                 (typeof sleft === "bigint" && typeof sright === "bigint") ||
-                (typeof sleft === "string" && typeof sright === "string")
+                    (typeof sleft === "string" && typeof sright === "string")
             );
 
             if (operator === "<") {
@@ -2194,8 +2193,8 @@ export class Interpreter {
         ) {
             this.expect(
                 fromV instanceof rtt.BytesMemView ||
-                fromV instanceof rtt.BytesCalldataView ||
-                fromV instanceof rtt.BytesStorageView,
+                    fromV instanceof rtt.BytesCalldataView ||
+                    fromV instanceof rtt.BytesStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -2211,9 +2210,9 @@ export class Interpreter {
         ) {
             this.expect(
                 fromV instanceof rtt.BytesMemView ||
-                fromV instanceof rtt.BytesCalldataView ||
-                fromV instanceof rtt.BytesSliceCalldataView ||
-                fromV instanceof rtt.BytesStorageView,
+                    fromV instanceof rtt.BytesCalldataView ||
+                    fromV instanceof rtt.BytesSliceCalldataView ||
+                    fromV instanceof rtt.BytesStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -2228,8 +2227,8 @@ export class Interpreter {
         ) {
             this.expect(
                 fromV instanceof rtt.BytesMemView ||
-                fromV instanceof rtt.BytesCalldataView ||
-                fromV instanceof rtt.BytesStorageView,
+                    fromV instanceof rtt.BytesCalldataView ||
+                    fromV instanceof rtt.BytesStorageView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -2681,7 +2680,7 @@ export class Interpreter {
         } else {
             this.expect(
                 astTarget instanceof sol.FunctionDefinition ||
-                astTarget instanceof sol.VariableDeclaration,
+                    astTarget instanceof sol.VariableDeclaration,
                 `NYI External call target`
             );
 
@@ -2887,8 +2886,8 @@ export class Interpreter {
             (newT instanceof rtt.ArrayType ||
                 newT instanceof rtt.BytesType ||
                 newT instanceof rtt.StringType) &&
-            args.length === 1 &&
-            typeof args[0] === "bigint",
+                args.length === 1 &&
+                typeof args[0] === "bigint",
             `Expected an array type with a single length argument not ${newT.pp()} with ${args}`
         );
 
@@ -2921,9 +2920,9 @@ export class Interpreter {
         const base = this.evalNP(expr.vExpression, state);
         this.expect(
             base instanceof rtt.ExternalFunRef ||
-            base instanceof Address ||
-            base instanceof NewCall ||
-            base instanceof ExternalCallDescription
+                base instanceof Address ||
+                base instanceof NewCall ||
+                base instanceof ExternalCallDescription
         );
 
         const res = liftExtCalRef(base);
@@ -2976,8 +2975,8 @@ export class Interpreter {
         if (expr.kind === sol.FunctionCallKind.StructConstructorCall) {
             this.expect(
                 callee instanceof TypeValue &&
-                callee.type instanceof rtt.PointerType &&
-                callee.type.toType instanceof rtt.StructType,
+                    callee.type instanceof rtt.PointerType &&
+                    callee.type.toType instanceof rtt.StructType,
                 `Struct constructors expect a struct type as its callee not ${ppValue(callee)}`
             );
 
@@ -3012,17 +3011,23 @@ export class Interpreter {
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
-        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "this") {
-            return getThis(state);
-        }
+        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin) {
+            if (expr.name === "this") {
+                return getThis(state);
+            }
 
-        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "super") {
-            const contract = getCodeContract(state);
-            this.expect(
-                contract.vLinearizedBaseContracts.length > 1,
-                `Unexpected call to super() in contract with no bases`
-            );
-            return new DefValue(contract.vLinearizedBaseContracts[1]);
+            if (expr.name === "super") {
+                const contract = getCodeContract(state);
+                this.expect(
+                    contract.vLinearizedBaseContracts.length > 1,
+                    `Unexpected call to super() in contract with no bases`
+                );
+                return new DefValue(contract.vLinearizedBaseContracts[1]);
+            }
+
+            const res = this.builtins.getField(expr.name);
+            this.expect(res !== undefined, `Uknown builtin ${expr.name}`);
+            return res;
         }
 
         // contract name
@@ -3149,8 +3154,8 @@ export class Interpreter {
         this.expect(typeof start === "bigint" && typeof end === "bigint");
         this.expect(
             base instanceof rtt.BytesCalldataView ||
-            base instanceof rtt.ArrayCalldataView ||
-            base instanceof MsgDataView
+                base instanceof rtt.ArrayCalldataView ||
+                base instanceof MsgDataView
         );
 
         const cd = getMsg(state);
@@ -3193,8 +3198,8 @@ export class Interpreter {
 
         this.expect(
             expr.kind === sol.LiteralKind.String ||
-            expr.kind === sol.LiteralKind.HexString ||
-            expr.kind === sol.LiteralKind.UnicodeString
+                expr.kind === sol.LiteralKind.HexString ||
+                expr.kind === sol.LiteralKind.UnicodeString
         );
 
         const view = state.constantsMap.get(expr.id);
@@ -3226,16 +3231,7 @@ export class Interpreter {
     }
 
     private getBuiltin(state: State, ...path: string[]): Value {
-        let s = state.scope;
-
-        // @todo: stupid. fix
-        while (s !== undefined && !(s instanceof BuiltinsScope)) {
-            s = s._next;
-        }
-
-        this.expect(s !== undefined, `No builtin scope`);
-
-        let res: Value | undefined = s.builtins;
+        let res: Value | undefined = this.builtins;
 
         for (const id of path) {
             this.expect(res instanceof BuiltinStruct);
@@ -3351,25 +3347,11 @@ export class Interpreter {
             // - contract constants. We need to tweak how we built scope here
             // - base state vars called with the base notation Base.Var
             if (expr.vReferencedDeclaration instanceof sol.VariableDeclaration) {
-                let scope: BaseScope;
+                const scope = this.makeStaticScope(baseVal.def, state);
 
-                if (expr.vReferencedDeclaration.mutability === sol.Mutability.Constant) {
-                    // Contract or Global scope constant vars
-                    this.expect(
-                        baseVal.def instanceof sol.SourceUnit ||
-                        baseVal.def instanceof sol.ContractDefinition
-                    );
-                    scope =
-                        baseVal.def instanceof sol.SourceUnit
-                            ? new GlobalScope(baseVal.def, state, undefined)
-                            : new ContractScope(baseVal.def, state, undefined);
-                } else {
-                    // Base contract state var
-                    this.expect(
-                        baseVal.def instanceof sol.ContractDefinition &&
-                        isBaseOf(baseVal.def, getCodeContract(state))
-                    );
-                    scope = this.makeStaticScope(baseVal.def, state);
+                if (baseVal.def instanceof sol.ContractDefinition) {
+                    this.expect(scope instanceof ContractScope);
+                    return scope.lookupDecl(expr.vReferencedDeclaration);
                 }
 
                 const res = scope.lookup(expr.memberName);
@@ -3445,8 +3427,8 @@ export class Interpreter {
             const arrPtrT = this.typeOf(expr);
             this.expect(
                 arrPtrT instanceof rtt.PointerType &&
-                arrPtrT.toType instanceof rtt.ArrayType &&
-                arrPtrT.toType.size !== undefined,
+                    arrPtrT.toType instanceof rtt.ArrayType &&
+                    arrPtrT.toType.size !== undefined,
                 `Expected a fixed size array in memory not ${arrPtrT.pp()}`
             );
 
@@ -3597,12 +3579,8 @@ export class Interpreter {
      * 1. Compute constant expressions
      * 2. As a basis for dynamic runtime scopes. Those build on this scope with LocalScopes for function args, locals, etc..
      */
-    public makeStaticScope(nd: sol.ASTNode | BuiltinFunction | undefined, state: State): BaseScope {
+    public makeStaticScope(nd: sol.ASTNode | undefined, state: State): BaseScope {
         const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
-
-        if (nd instanceof BuiltinFunction) {
-            return makeBuiltinScope(state, this.compilerVersion);
-        }
 
         while (nd !== undefined) {
             if (nd instanceof sol.SourceUnit) {
@@ -3624,7 +3602,7 @@ export class Interpreter {
         }
 
         scopeNodes.reverse();
-        let scope: BaseScope = makeBuiltinScope(state, this.compilerVersion);
+        let scope: BaseScope | undefined = undefined;
 
         for (const nd of scopeNodes) {
             if (nd instanceof sol.SourceUnit) {
@@ -3634,7 +3612,7 @@ export class Interpreter {
             }
         }
 
-        return scope;
+        return scope as BaseScope;
     }
 
     /**
@@ -3656,12 +3634,12 @@ export class Interpreter {
 
         if (target instanceof CurriedVal) {
             nd = target.target instanceof rtt.InternalFunRef ? target.target.fun : target.target;
-            this.expect(!(nd instanceof BuiltinFunction))
+            this.expect(!(nd instanceof BuiltinFunction));
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];
         } else {
-            nd = target
-        };
+            nd = target;
+        }
 
         const staticScope = this.makeStaticScope(nd, state);
 

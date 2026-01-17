@@ -9,7 +9,7 @@ import {
     NewCall,
     none,
     TypeValue,
-    Value,
+    Value
 } from "./value";
 import { State } from "./state";
 import {
@@ -132,7 +132,13 @@ export const assertBuiltin = new BuiltinFunction(
 export const pushBuiltin = new BuiltinFunction(
     "push",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length > 0 && args.length <= 2);
 
         const arr = args[0];
@@ -193,8 +199,17 @@ export const pushBuiltin = new BuiltinFunction(
 export const popBuiltin = new BuiltinFunction(
     "pop",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
-        interp.expect(args.length === 1 && (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView));
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
+        interp.expect(
+            args.length === 1 &&
+                (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
+        );
         const arr = args[0];
 
         if (arr instanceof ArrayStorageView) {
@@ -272,7 +287,11 @@ function encodePackedImpl(paramTs: rtt.BaseRuntimeType[], args: Value[], state: 
     return res;
 }
 
-function getEncodeTypes(argTs: BaseInterpType[], ctx: sol.ASTContext, isPacked: boolean): BaseInterpType[] {
+function getEncodeTypes(
+    argTs: BaseInterpType[],
+    ctx: sol.ASTContext,
+    isPacked: boolean
+): BaseInterpType[] {
     const paramTs = argTs.map((paramT) => {
         if (paramT instanceof RationalNumberType) {
             sol.assert(paramT.isInt(), ``);
@@ -294,7 +313,13 @@ function getEncodeTypes(argTs: BaseInterpType[], ctx: sol.ASTContext, isPacked: 
 export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         const paramTs = getEncodeTypes(argTs, interp.ctx, false);
         return [encodeImpl(paramTs, args, state)];
     }
@@ -303,7 +328,13 @@ export const abiEncodeBuiltin = new BuiltinFunction(
 export const abiEncodePackedBuiltin = new BuiltinFunction(
     "encodePacked",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         const paramTs = getEncodeTypes(argTs, interp.ctx, true);
         return [encodePackedImpl(paramTs, args, state)];
     }
@@ -312,7 +343,13 @@ export const abiEncodePackedBuiltin = new BuiltinFunction(
 export const abiEncodeWithSelectorBuiltin = new BuiltinFunction(
     "encodeWithSelector",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         const paramTs = getEncodeTypes(argTs, interp.ctx, false);
         interp.expect(args.length >= 1, `Unexpected args to encodeWithSelector ${ppValue(args)}`);
         const selector = interp.castTo(args[0], rtt.bytes4, state);
@@ -324,7 +361,13 @@ export const abiEncodeWithSelectorBuiltin = new BuiltinFunction(
 export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
     "encodeWithSignature",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         const paramTs = getEncodeTypes(argTs, interp.ctx, false);
         interp.expect(args.length >= 1 && args[0] instanceof View);
         const sigStr = decodeView(args[0], state);
@@ -344,7 +387,13 @@ export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
 export const abiEncodeCallBuiltin = new BuiltinFunction(
     "encodeCall",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         const paramTs = getEncodeTypes(argTs, interp.ctx, false);
 
         interp.expect(args.length >= 1 && args[0] instanceof rtt.ExternalFunRef);
@@ -355,8 +404,14 @@ export const abiEncodeCallBuiltin = new BuiltinFunction(
 export const abiDecodeBuitin = new BuiltinFunction(
     "decode",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
-        interp.expect(args.length === 2)
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
+        interp.expect(args.length === 2);
         interp.expect(args[0] instanceof View, `Decode expects byte view not ${ppValue(args[0])}`);
         const bytes = decodeView(args[0], state);
         interp.expect(bytes instanceof Uint8Array, ``);
@@ -378,12 +433,21 @@ export const abiDecodeBuitin = new BuiltinFunction(
 export const revertBuiltin = new BuiltinFunction(
     "revert",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         if (args.length === 0) {
             throw new NoPayloadError(interp.curNode);
         }
 
-        interp.expect(args.length === 1 && args[0] instanceof rtt.BytesMemView, `Unexpected arg ${ppValue(args[0])}`);
+        interp.expect(
+            args.length === 1 && args[0] instanceof rtt.BytesMemView,
+            `Unexpected arg ${ppValue(args[0])}`
+        );
         const msgArg = args[0];
         const msg = msgArg.decode(state.memory);
         interp.expect(msg instanceof Uint8Array);
@@ -394,7 +458,13 @@ export const revertBuiltin = new BuiltinFunction(
 export const requireBuiltin = new BuiltinFunction(
     "require",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length >= 1 && args.length <= 2);
         const flag = interp.castTo(args[0], rtt.bool, state);
         interp.expect(typeof flag === "boolean");
@@ -418,9 +488,15 @@ export const requireBuiltin = new BuiltinFunction(
 export const addressBalanceBuiltin = new BuiltinFunction(
     "balance",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && args[0] instanceof Address);
-        const addr = args[0]
+        const addr = args[0];
 
         const account = interp.world.getAccount(addr);
         return account === undefined ? [0n] : [account.balance];
@@ -432,9 +508,15 @@ export const addressBalanceBuiltin = new BuiltinFunction(
 export const addressCodeBuiltin = new BuiltinFunction(
     "code",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && args[0] instanceof Address);
-        const addr = args[0]
+        const addr = args[0];
 
         const account = interp.world.getAccount(addr);
         const code = account === undefined ? new Uint8Array() : account.deployedBytecode;
@@ -452,9 +534,15 @@ export const addressCodeBuiltin = new BuiltinFunction(
 export const addressCodehashBuiltin = new BuiltinFunction(
     "codehash",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && args[0] instanceof Address);
-        const addr = args[0]
+        const addr = args[0];
 
         const account = interp.world.getAccount(addr);
         const code = account === undefined ? new Uint8Array() : account.deployedBytecode;
@@ -468,9 +556,15 @@ export const addressCodehashBuiltin = new BuiltinFunction(
 export const addressTransfer = new BuiltinFunction(
     "transfer",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && args[0] instanceof Address);
-        const addr = args[0]
+        const addr = args[0];
         const res = new ExternalCallDescription(addr, undefined, undefined, undefined, "transfer");
 
         return [res];
@@ -483,9 +577,15 @@ export const addressTransfer = new BuiltinFunction(
 export const addressSend = new BuiltinFunction(
     "send",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && args[0] instanceof Address);
-        const addr = args[0]
+        const addr = args[0];
 
         const res = new ExternalCallDescription(addr, undefined, undefined, undefined, "send");
 
@@ -499,9 +599,15 @@ export const addressSend = new BuiltinFunction(
 export const addressCall = new BuiltinFunction(
     "call",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && args[0] instanceof Address);
-        const addr = args[0]
+        const addr = args[0];
 
         const res = new ExternalCallDescription(
             addr,
@@ -521,9 +627,15 @@ export const addressCall = new BuiltinFunction(
 export const addressDelegatecall = new BuiltinFunction(
     "delegatecall",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && args[0] instanceof Address);
-        const addr = args[0]
+        const addr = args[0];
 
         const res = new ExternalCallDescription(
             addr,
@@ -545,7 +657,13 @@ export const addressStaticcall = addressCall.alias("staticcall");
 export const valueBuiltin = new BuiltinFunction(
     "value",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 2);
         const [target, value] = args;
         interp.expect(isExternalCallTarget(target) && typeof value === "bigint");
@@ -563,7 +681,13 @@ export const valueBuiltin = new BuiltinFunction(
 export const gasBuiltin = new BuiltinFunction(
     "gas",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 2);
         const [target, gas] = args;
         interp.expect(isExternalCallTarget(target) && typeof gas === "bigint");
@@ -581,7 +705,13 @@ export const gasBuiltin = new BuiltinFunction(
 export const saltBuiltin = new BuiltinFunction(
     "salt",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 2);
         const [target, salt] = args;
         interp.expect(isExternalCallTarget(target) && salt instanceof Uint8Array);
@@ -634,7 +764,13 @@ function getAddress(v: ExternalCallTargetValue): Address {
 const selectorBuiltin = new BuiltinFunction(
     "selector",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && isExternalCallTarget(args[0]));
         const [target] = args;
         return [getSelector(target)];
@@ -647,7 +783,13 @@ const selectorBuiltin = new BuiltinFunction(
 const addressBuiltin = new BuiltinFunction(
     "address",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         interp.expect(args.length === 1 && isExternalCallTarget(args[0]));
         const [target] = args;
 
@@ -752,7 +894,13 @@ const abiBuiltinStructDesc: BuiltinDescriptor = [
 const keccak256v04Builtin = new BuiltinFunction(
     "keccak256",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
         const encTs = getEncodeTypes(argTs, interp.ctx, true);
         const encoded = encodePacked(args, encTs, state);
         const hash = keccak256(encoded);
@@ -766,8 +914,16 @@ const keccak256v04Builtin = new BuiltinFunction(
 const keccak256v05Builtin = new BuiltinFunction(
     "keccak256",
     dummyFunT,
-    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[], self: BuiltinFunction): Value[] => {
-        interp.expect(args.length === 1 && args[0] instanceof View && args[0].type instanceof rtt.BytesType)
+    (
+        interp: Interpreter,
+        state: State,
+        args: Value[],
+        argTs: BaseInterpType[],
+        self: BuiltinFunction
+    ): Value[] => {
+        interp.expect(
+            args.length === 1 && args[0] instanceof View && args[0].type instanceof rtt.BytesType
+        );
         return [keccak256(decodeView(args[0], state) as Uint8Array)];
     },
     false,
