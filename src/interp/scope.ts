@@ -1,6 +1,6 @@
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { BuiltinFunction, BuiltinStruct, DefValue, Value } from "./value";
+import { BuiltinFunction, BuiltinStruct, Value } from "./value";
 import { State } from "./state";
 import {
     BaseMemoryView,
@@ -15,7 +15,7 @@ import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import { FixedBytesLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
 import { getStateStorage, isValueType, panic, setStateStorage } from "./utils";
-import { typeIdToRuntimeType, WrappedType } from "./types";
+import { typeIdToRuntimeType } from "./types";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -255,92 +255,11 @@ export class LocalsScope extends BaseLocalsScope {
     }
 }
 
-// @todo should I move this inside the global/contract scope classes?
-// @todo I think I should just kill this
-function defToType(decl: UnitDef): rtt.BaseRuntimeType {
-    const ctx = decl.requiredContext;
-    // @todo - this ugly struct is temporary until I decide if I need separate types
-    // for the type definitions and import defs
-    if (decl instanceof sol.VariableDeclaration) {
-        // @todo I think loc here should be determine based on the scope of the def?
-        return typeIdToRuntimeType(sol.typeOf(decl), ctx);
-    } else if (decl instanceof sol.ContractDefinition) {
-        return new WrappedType(new sol.TypeTypeId(new sol.ContractTypeId(decl.name, decl.id)));
-    } else if (decl instanceof sol.EventDefinition) {
-        // @todo fix args
-        return new WrappedType(
-            new sol.FunctionTypeId("event", "pure", [], [], false, false, false)
-        );
-    } else if (decl instanceof sol.FunctionDefinition) {
-        // @todo fix everything
-        return new WrappedType(
-            new sol.FunctionTypeId("internal", "pure", [], [], false, false, false)
-        );
-    } else if (decl instanceof sol.ErrorDefinition) {
-        // @todo fix everything
-        return new WrappedType(
-            new sol.FunctionTypeId("error", "pure", [], [], false, false, false)
-        );
-    } else if (decl instanceof sol.StructDefinition) {
-        // @todo fix everything
-        return new WrappedType(new sol.TypeTypeId(new sol.StructTypeId(decl.name, decl.id)));
-    } else if (decl instanceof sol.EnumDefinition) {
-        // @todo fix everything
-        return new WrappedType(new sol.TypeTypeId(new sol.EnumTypeId(decl.name, decl.id)));
-    } else if (decl instanceof sol.UserDefinedValueTypeDefinition) {
-        // @todo fix everything
-        return new WrappedType(
-            new sol.TypeTypeId(new sol.UserDefinedValueTypeId(decl.name, decl.id))
-        );
-    } else {
-        return new WrappedType(new sol.ModuleTypeId(decl.sourceUnit));
-    }
-}
-
-function defToValue(decl: UnitDef): DefValue {
-    if (decl instanceof sol.ImportDirective) {
-        return new DefValue(decl.vSourceUnit);
-    }
-
-    return new DefValue(decl);
-}
-
 export class ContractScope extends BaseScope {
     private readonly layoutType: rtt.StructType;
     private readonly layout: StructStorageView;
     private fieldToView: Map<string, BaseStorageView<any, rtt.BaseRuntimeType>>;
     private constFieldToView: Map<string, BaseMemoryView<any, rtt.BaseRuntimeType>>;
-    private defMap: Map<string, DefValue>;
-
-    private static gatherDefs(contract: sol.ContractDefinition): Map<string, UnitDef> {
-        const res = new Map<string, UnitDef>();
-
-        for (const d of contract.vFunctions) {
-            res.set(d.name, d);
-        }
-
-        for (const d of contract.vEvents) {
-            res.set(d.name, d);
-        }
-
-        for (const d of contract.vErrors) {
-            res.set(d.name, d);
-        }
-
-        for (const d of contract.vStructs) {
-            res.set(d.name, d);
-        }
-
-        for (const d of contract.vEnums) {
-            res.set(d.name, d);
-        }
-
-        for (const d of contract.vUserDefinedValueTypes) {
-            res.set(d.name, d);
-        }
-
-        return res;
-    }
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
@@ -359,16 +278,6 @@ export class ContractScope extends BaseScope {
             defTypes.set(v.name, typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory));
         }
 
-        const defMap = ContractScope.gatherDefs(contract);
-        for (const [name, def] of defMap) {
-            if (def instanceof sol.VariableDeclaration) {
-                // Handled above
-                continue;
-            }
-
-            defTypes.set(name, defToType(def));
-        }
-
         super(`<contract ${contract.name}>`, defTypes, state, _next);
         this.layoutType = layoutType;
         this.layout = makeStorageView(this.layoutType, [0n, 32]) as StructStorageView;
@@ -383,15 +292,13 @@ export class ContractScope extends BaseScope {
             );
             this.constFieldToView.set(v.name, constView);
         }
-
-        this.defMap = new Map([...defMap.entries()].map(([name, def]) => [name, defToValue(def)]));
     }
 
     private _lookupConst(name: string): Value | undefined {
         const view = this.constFieldToView.get(name);
 
         if (view === undefined) {
-            return this.defMap.get(name);
+            return undefined;
         }
 
         if (isValueType(view.type)) {
@@ -446,37 +353,13 @@ export class ContractScope extends BaseScope {
     }
 }
 
-type UnitDef =
-    | sol.ContractDefinition
-    | sol.ImportDirective
-    | sol.FunctionDefinition
-    | sol.EventDefinition
-    | sol.ErrorDefinition
-    | sol.StructDefinition
-    | sol.EnumDefinition
-    | sol.UserDefinedValueTypeDefinition;
-
-function isUnitDef(n: sol.ASTNode): n is UnitDef {
-    return (
-        n instanceof sol.ContractDefinition ||
-        n instanceof sol.ImportDirective ||
-        n instanceof sol.FunctionDefinition ||
-        n instanceof sol.EventDefinition ||
-        n instanceof sol.ErrorDefinition ||
-        n instanceof sol.StructDefinition ||
-        n instanceof sol.EnumDefinition ||
-        n instanceof sol.UserDefinedValueTypeDefinition
-    );
-}
-
 export class GlobalScope extends BaseScope {
     private viewMap: Map<string, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
-    private defMap: Map<string, DefValue>;
 
     private static gatherDefs(
         unit: sol.SourceUnit,
-        res = new Map<string, sol.VariableDeclaration | UnitDef>()
-    ): Map<string, sol.VariableDeclaration | UnitDef> {
+        res = new Map<string, sol.VariableDeclaration>()
+    ): Map<string, sol.VariableDeclaration> {
         for (const v of unit.vVariables) {
             res.set(v.name, v);
         }
@@ -485,12 +368,11 @@ export class GlobalScope extends BaseScope {
             // import * as foo from "..."
             if (imp.unitAlias !== "") {
                 // Nothing to do - constants get resolved by evalMemberAccess
-                res.set(imp.unitAlias, imp);
             } else if (imp.symbolAliases.length > 0) {
                 // import { a, b as c, ...} from "..."
                 for (const alias of imp.vSymbolAliases) {
                     const [originalDef, newName] = alias;
-                    if (originalDef instanceof sol.VariableDeclaration || isUnitDef(originalDef)) {
+                    if (originalDef instanceof sol.VariableDeclaration) {
                         const name =
                             newName === undefined
                                 ? originalDef instanceof sol.ImportDirective
@@ -502,36 +384,12 @@ export class GlobalScope extends BaseScope {
                 }
             } else {
                 // import "foo"
-                res = GlobalScope.gatherDefs(imp.vSourceUnit, res);
+                for (const [name, varDecl] of GlobalScope.gatherDefs(imp.vSourceUnit, res).entries()) {
+                    if (!res.has(name)) {
+                        res.set(name, varDecl);
+                    }
+                }
             }
-        }
-
-        for (const d of unit.vContracts) {
-            res.set(d.name, d);
-        }
-
-        for (const d of unit.vFunctions) {
-            res.set(d.name, d);
-        }
-
-        for (const d of unit.vEvents) {
-            res.set(d.name, d);
-        }
-
-        for (const d of unit.vErrors) {
-            res.set(d.name, d);
-        }
-
-        for (const d of unit.vStructs) {
-            res.set(d.name, d);
-        }
-
-        for (const d of unit.vEnums) {
-            res.set(d.name, d);
-        }
-
-        for (const d of unit.vUserDefinedValueTypes) {
-            res.set(d.name, d);
         }
 
         return res;
@@ -547,32 +405,25 @@ export class GlobalScope extends BaseScope {
         const declMap = GlobalScope.gatherDefs(unit);
 
         for (const [name, decl] of declMap) {
-            const type =
-                decl instanceof sol.VariableDeclaration
-                    ? typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
-                    : defToType(decl);
+            const type = typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
             defMap.set(name, type);
         }
 
         super(`<global scope ${unit.sourceEntryKey}>`, defMap, state, _next);
         this.viewMap = new Map();
-        this.defMap = new Map();
 
         for (const [name, decl] of declMap) {
-            if (decl instanceof sol.VariableDeclaration) {
-                const view = state.constantsMap.get(decl.id);
-                sol.assert(view !== undefined, `Missing view for global constant ${name}`);
-                this.viewMap.set(name, view);
-            } else {
-                this.defMap.set(name, defToValue(decl));
-            }
+            const view = state.constantsMap.get(decl.id);
+            sol.assert(view !== undefined, `Missing view for global constant ${name}`);
+            this.viewMap.set(name, view);
         }
     }
 
     _lookup(name: string): Value | undefined {
         const view = this.viewMap.get(name);
+
         if (view === undefined) {
-            return this.defMap.get(name);
+            return undefined;
         }
 
         if (isValueType(view.type)) {

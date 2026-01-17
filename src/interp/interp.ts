@@ -3057,8 +3057,10 @@ export class Interpreter {
 
         if (
             expr.vReferencedDeclaration instanceof sol.EnumDefinition ||
+            expr.vReferencedDeclaration instanceof sol.StructDefinition ||
             expr.vReferencedDeclaration instanceof sol.EventDefinition ||
-            expr.vReferencedDeclaration instanceof sol.ErrorDefinition
+            expr.vReferencedDeclaration instanceof sol.ErrorDefinition ||
+            expr.vReferencedDeclaration instanceof sol.UserDefinedValueTypeDefinition
         ) {
             return new DefValue(expr.vReferencedDeclaration);
         }
