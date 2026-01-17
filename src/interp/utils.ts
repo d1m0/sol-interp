@@ -21,7 +21,13 @@ import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { ExternalCallDescription, NewCall, none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
-import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
+import {
+    FixedBytesLocalView,
+    BaseLocalView,
+    PointerLocalView,
+    PrimitiveLocalView,
+    TempView
+} from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
 import { Address } from "@ethereumjs/util";
@@ -29,7 +35,13 @@ import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
 
-export function castBytesViewToString<T extends rtt.BytesCalldataView | rtt.BytesMemView | rtt.BytesStorageView | rtt.BytesSliceCalldataView>(v: T): T {
+export function castBytesViewToString<
+    T extends
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
+>(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(stringT, v.offset, v.base) as T;
     }
@@ -39,13 +51,19 @@ export function castBytesViewToString<T extends rtt.BytesCalldataView | rtt.Byte
     }
 
     if (v instanceof rtt.BytesSliceCalldataView) {
-        return new rtt.BytesSliceCalldataView(stringT, v.offset, v.len) as T
+        return new rtt.BytesSliceCalldataView(stringT, v.offset, v.len) as T;
     }
 
     return new rtt.BytesStorageView(stringT, [v.key, v.endOffsetInWord]) as T;
 }
 
-export function castStringViewToBytes<T extends rtt.BytesCalldataView | rtt.BytesMemView | rtt.BytesStorageView | rtt.BytesSliceCalldataView>(v: T): T {
+export function castStringViewToBytes<
+    T extends
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
+>(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(bytesT, v.offset, v.base) as T;
     }
@@ -55,7 +73,7 @@ export function castStringViewToBytes<T extends rtt.BytesCalldataView | rtt.Byte
     }
 
     if (v instanceof rtt.BytesSliceCalldataView) {
-        return new rtt.BytesSliceCalldataView(bytesT, v.offset, v.len) as T
+        return new rtt.BytesSliceCalldataView(bytesT, v.offset, v.len) as T;
     }
 
     return new rtt.BytesStorageView(bytesT, [v.key, v.endOffsetInWord]) as T;
@@ -463,6 +481,8 @@ export function locationOfView(v: rtt.View): sol.DataLocation {
         return sol.DataLocation.CallData;
     } else if (v instanceof PointerLocalView) {
         return v.type.location;
+    } else if (v instanceof TempView) {
+        return v.type instanceof rtt.PointerType ? v.type.location : sol.DataLocation.Default;
     } else {
         nyi(`View type ${v.constructor.name}`);
     }
@@ -723,12 +743,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -798,8 +818,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }

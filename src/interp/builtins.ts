@@ -168,7 +168,7 @@ export const pushBuiltin = new BuiltinFunction(
         let el: Value;
 
         if (args.length > 1) {
-            el = interp.castTo(args[1], elT, state);
+            el = args[1];
         } else {
             el = makeZeroValue(elT, state);
         }
@@ -359,7 +359,14 @@ export const abiEncodeWithSignatureBuiltin = new BuiltinFunction(
         const sigStr = decodeView(args[0], state);
         interp.expect(sigStr instanceof Uint8Array, `Unexpected signature ${sigStr}`);
 
-        return [encodeImpl(paramTs.slice(1), args.slice(1), state, signatureToSelector(bytesToUtf8(sigStr)))];
+        return [
+            encodeImpl(
+                paramTs.slice(1),
+                args.slice(1),
+                state,
+                signatureToSelector(bytesToUtf8(sigStr))
+            )
+        ];
     }
 );
 

@@ -155,7 +155,6 @@ export class TempsScope extends BaseLocalsScope {
         return this.temps.map((t) => this.defs.get(t.name) as Value);
     }
 }
-
 export class BuiltinScope extends BaseLocalsScope {
     get nArgs(): number {
         return this.argTs.length;

@@ -21,6 +21,8 @@ import {
 import { BaseScope } from "./scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bytes1, bytesT } from "./utils";
+import { ppValue } from "./pp";
+import * as sol from "solc-typed-ast";
 
 export abstract class BaseLocalView<
     V extends PrimitiveValue,
@@ -154,8 +156,45 @@ export class MsgDataView
     }
 }
 
+export class TempView<V extends PrimitiveValue, T extends BaseRuntimeType> extends View<
+    null,
+    V,
+    null,
+    T
+> {
+    val: V | undefined;
+
+    constructor(type: T) {
+        super(type, null);
+        sol.assert(
+            !(type instanceof PointerType) || type.location === sol.DataLocation.Memory,
+            `Unexpected complex temporary not in memory`
+        );
+    }
+
+    decode(): V | DecodingFailure {
+        if (this.val === undefined) {
+            return new DecodingFailure(`Couldn't read an uninitialized temp`);
+        }
+
+        return this.val;
+    }
+
+    encode(v: V): void {
+        this.val = v;
+    }
+
+    pp(): string {
+        return `<temp ${this.type.pp()}: ${this.val === undefined ? "<uninitialized>" : ppValue(this.val)}>`;
+    }
+}
+
 export function isPointerView(v: any): v is PointerView<any, View> {
-    return v instanceof PointerLocalView || baseIsPointerView(v);
+    return (
+        v instanceof PointerLocalView ||
+        baseIsPointerView(v) ||
+        (v instanceof TempView && v.type instanceof PointerType)
+    );
 }
 
 export function isArrayLikeView(v: any): v is ArrayLikeView<any, View> {
