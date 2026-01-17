@@ -37,10 +37,10 @@ import { NoPayloadError } from "./exceptions";
 
 export function castBytesViewToString<
     T extends
-        | rtt.BytesCalldataView
-        | rtt.BytesMemView
-        | rtt.BytesStorageView
-        | rtt.BytesSliceCalldataView
+    | rtt.BytesCalldataView
+    | rtt.BytesMemView
+    | rtt.BytesStorageView
+    | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(stringT, v.offset, v.base) as T;
@@ -59,10 +59,10 @@ export function castBytesViewToString<
 
 export function castStringViewToBytes<
     T extends
-        | rtt.BytesCalldataView
-        | rtt.BytesMemView
-        | rtt.BytesStorageView
-        | rtt.BytesSliceCalldataView
+    | rtt.BytesCalldataView
+    | rtt.BytesMemView
+    | rtt.BytesStorageView
+    | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(bytesT, v.offset, v.base) as T;
@@ -342,31 +342,27 @@ export function length<T extends rtt.StateArea>(
 }
 
 export function indexView<T extends rtt.StateArea>(
-    v: rtt.IndexableView<BaseValue, T, View>,
-    key: BaseValue,
+    v: rtt.ArrayLikeView<T, View>,
+    key: bigint,
     state: State
 ): View<any, BaseValue, any, rtt.BaseRuntimeType> {
     let res: View<any, BaseValue, any, rtt.BaseRuntimeType> | rtt.DecodingFailure;
 
-    if (v instanceof rtt.MapStorageView) {
-        res = (v as rtt.MapStorageView).indexView(key);
-    } else {
-        sol.assert(typeof key === "bigint", ``);
+    sol.assert(typeof key === "bigint", ``);
 
-        if (v instanceof rtt.ArrayMemView || v instanceof rtt.BytesMemView) {
-            res = v.indexView(key, state.memory);
-        } else if (
-            v instanceof rtt.ArrayCalldataView ||
-            v instanceof rtt.BytesCalldataView ||
-            v instanceof rtt.ArraySliceCalldataView ||
-            v instanceof rtt.BytesSliceCalldataView
-        ) {
-            res = v.indexView(key, getMsg(state));
-        } else if (v instanceof rtt.ArrayStorageView || v instanceof rtt.BytesStorageView) {
-            res = v.indexView(key, getStateStorage(state));
-        } else {
-            nyi(`Pointer view ${v.constructor.name}`);
-        }
+    if (v instanceof rtt.ArrayMemView || v instanceof rtt.BytesMemView) {
+        res = v.indexView(key, state.memory);
+    } else if (
+        v instanceof rtt.ArrayCalldataView ||
+        v instanceof rtt.BytesCalldataView ||
+        v instanceof rtt.ArraySliceCalldataView ||
+        v instanceof rtt.BytesSliceCalldataView
+    ) {
+        res = v.indexView(key, getMsg(state));
+    } else if (v instanceof rtt.ArrayStorageView || v instanceof rtt.BytesStorageView) {
+        res = v.indexView(key, getStateStorage(state));
+    } else {
+        nyi(`Pointer view ${v.constructor.name}`);
     }
 
     sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`);
@@ -743,12 +739,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-    Address,
-    Uint8Array | undefined,
-    bigint | undefined,
-    bigint | undefined,
-    Uint8Array | undefined
-] {
+        Address,
+        Uint8Array | undefined,
+        bigint | undefined,
+        bigint | undefined,
+        Uint8Array | undefined
+    ] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -818,8 +814,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-              ? "contract_deployment"
-              : "call";
+                ? "contract_deployment"
+                : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }

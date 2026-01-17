@@ -22,6 +22,6 @@ contract __IRTest__ {
 
     function __testCase69__(Solidity08BuiltinsTest __this__) internal {
         (uint256 ret_69_0) = __this__.addrCodeAndCodeHash();
-        assert(ret_69_0 == uint256(402));
+        assert(ret_69_0 == uint256(389));
     }
 }
