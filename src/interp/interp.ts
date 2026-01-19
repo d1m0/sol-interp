@@ -142,6 +142,7 @@ import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
 import { InterpVisitor } from "./visitors";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
+import { bshl, bshr } from "./bitwise";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -2051,7 +2052,7 @@ export class Interpreter {
                 }
 
                 this.expect(left instanceof Uint8Array);
-                nyi(`Bitshift of fixed bytes`);
+                return operator === "<<" ? bshl(left, right) : bshr(left, right);
             }
 
             [left, right] = this.coerceToSameType(left, lType, right, rType, state);
