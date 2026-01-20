@@ -3498,6 +3498,7 @@ export class Interpreter {
     evalUnaryOperation(expr: sol.UnaryOperation, state: State): Value {
         const typ = this.typeOf(expr);
 
+        // Constant Expression - avoid evaluating its sub-expressions
         if (typ instanceof RationalNumberType) {
             this.expect(typ.isInt());
             return typ.asInt();
@@ -3505,6 +3506,13 @@ export class Interpreter {
 
         if (expr.vUserFunction) {
             nyi(`Unary user functions`);
+        }
+
+        if (expr.operator === "delete") {
+            const subT = this.typeOf(expr.vSubExpression);
+            const zeroV = makeZeroValue(changeLocTo(subT, sol.DataLocation.Memory), state);
+            this.assign(this.evalLV(expr.vSubExpression, state), zeroV, state);
+            return none;
         }
 
         if (expr.operator === "!") {

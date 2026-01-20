@@ -113,11 +113,7 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
                 zeroValue = [];
 
                 for (let i = 0; i < len; i++) {
-                    if (t.toType.elementT instanceof rtt.MappingType) {
-                        zeroValue.push(new Map());
-                    } else {
-                        zeroValue.push(makeZeroValue(t.toType.elementT, state));
-                    }
+                    zeroValue.push(makeZeroValue(t.toType.elementT, state));
                 }
             } else if (t.toType instanceof rtt.BytesType) {
                 zeroValue = new Uint8Array();
@@ -126,11 +122,7 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
             } else if (t.toType instanceof rtt.StructType) {
                 const fieldVals: Array<[string, BaseValue]> = [];
                 for (const [fieldName, fieldT] of t.toType.fields) {
-                    if (fieldT instanceof rtt.MappingType) {
-                        fieldVals.push([fieldName, new Map()]);
-                    } else {
-                        fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
-                    }
+                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
                 }
                 zeroValue = new Struct(fieldVals);
             } else {
@@ -145,6 +137,10 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
         }
 
         // In all other pointer case initialize with poison
+        return none;
+    }
+
+    if (t instanceof rtt.MappingType) {
         return none;
     }
 

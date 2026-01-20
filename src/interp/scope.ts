@@ -44,7 +44,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<sol.VariableDeclaration, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) {}
+    ) { }
 
     abstract _lookup(decl: sol.VariableDeclaration): Value | undefined;
     abstract _lookupLocation(decl: sol.VariableDeclaration): View | undefined;
@@ -136,6 +136,10 @@ abstract class BaseLocalsScope extends BaseScope {
     ): BaseLocalView<PrimitiveValue, rtt.BaseRuntimeType> {
         if (t instanceof rtt.PointerType) {
             return new PointerLocalView(t, [this, decl]);
+        }
+
+        if (t instanceof rtt.MappingType) {
+            return new PointerLocalView(new rtt.PointerType(t, sol.DataLocation.Storage), [this, decl])
         }
 
         if (t instanceof rtt.FixedBytesType) {
