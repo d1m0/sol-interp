@@ -2,8 +2,9 @@ import * as sol from "solc-typed-ast";
 import { LValue, Value } from "./value";
 import { CallResult, SolMessage } from "./state";
 import { RuntimeError } from "./exceptions";
+import { EventDesc } from "sol-dbg";
 
-export abstract class BaseStep {}
+export abstract class BaseStep { }
 
 export type Trace = BaseStep[];
 
@@ -36,6 +37,12 @@ export class ExtReturnStep extends BaseStep {
 
 export class ExceptionStep extends BaseStep {
     constructor(public readonly exception: RuntimeError) {
+        super();
+    }
+}
+
+export class EmitStep extends BaseStep {
+    constructor(public readonly event: EventDesc) {
         super();
     }
 }

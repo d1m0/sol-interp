@@ -296,9 +296,9 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
         } else if (type.toType instanceof rtt.StringType) {
             sol.assert(
                 val instanceof rtt.BytesMemView ||
-                    val instanceof rtt.BytesStorageView ||
-                    val instanceof rtt.BytesCalldataView ||
-                    val instanceof rtt.BytesSliceCalldataView,
+                val instanceof rtt.BytesStorageView ||
+                val instanceof rtt.BytesCalldataView ||
+                val instanceof rtt.BytesSliceCalldataView,
                 ``
             );
             const bytes = decodeView(val, state);

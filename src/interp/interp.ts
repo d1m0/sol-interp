@@ -143,6 +143,7 @@ import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } 
 import { InterpVisitor } from "./visitors";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { bshl, bshr } from "./bitwise";
+import { buildEvent } from "./events";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -819,9 +820,10 @@ export class Interpreter {
             res = this.execRevertStatement(stmt, state);
         } else if (stmt instanceof sol.Throw) {
             res = this.execThrow(stmt, state);
-            /*
         } else if (stmt instanceof sol.EmitStatement) {
-            res = this.execEmitStatement(stmt, state);
+            this.evalFunctionCall(stmt.vEventCall, state);
+            res = ControlFlow.Continue;
+            /*
         } else if (stmt instanceof sol.InlineAssembly) {
             res = this.execInlineAssembly(stmt, state);
             */
@@ -2948,6 +2950,19 @@ export class Interpreter {
 
     evalFunctionCall(expr: sol.FunctionCall, state: State): Value {
         let callee: Value;
+
+        if (expr.kind === sol.FunctionCallKind.FunctionCall &&
+            expr.vReferencedDeclaration instanceof sol.EventDefinition
+        ) {
+            const evt = expr.vReferencedDeclaration;
+            const args = expr.vArguments.map((arg) => this.evalNP(arg, state));
+
+            const lowLevelEvent = buildEvent(evt, args);
+            for (const v of this.visitors) {
+                v.emit(this, state, lowLevelEvent);
+            }
+            return none;
+        }
 
         if (
             expr.kind === sol.FunctionCallKind.TypeConversion ||
