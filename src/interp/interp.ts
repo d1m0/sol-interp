@@ -2127,6 +2127,20 @@ export class Interpreter {
         const fromT = this.typeOf(expr.vArguments[0]);
         const fromV = this.evalNP(expr.vArguments[0], state);
 
+        // We special case casts to enums since `typeIdToRuntimeType` converts enum types to int types
+        // and looses typing information
+        if (expr.vReferencedDeclaration instanceof sol.EnumDefinition) {
+            this.expect(isPrimitiveValue(fromV));
+            const fromNum = this.implicitCoercion(fromV, rtt.uint256, state);
+            this.expect(typeof fromNum === "bigint");
+
+            if (fromNum < 0n || fromNum >= BigInt(expr.vReferencedDeclaration.vMembers.length)) {
+                this.runtimeError(PanicError, state, 0x21n);
+            }
+
+            return fromNum
+        }
+
         if (fromT.pp() === toT.pp()) {
             return fromV;
         }
