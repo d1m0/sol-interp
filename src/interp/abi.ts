@@ -143,10 +143,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.BytesType) {
-        sol.assert(
-            v instanceof View,
-            `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`
-        );
+        sol.assert(v instanceof View, `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`);
         const bytes = decodeView(v, s);
         sol.assert(
             bytes instanceof Uint8Array,
@@ -157,10 +154,7 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
     }
 
     if (typ instanceof rtt.StringType) {
-        sol.assert(
-            v instanceof View,
-            `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`
-        );
+        sol.assert(v instanceof View, `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`);
         const bytes = decodeView(v, s);
         sol.assert(
             bytes instanceof Uint8Array,
@@ -302,9 +296,9 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
         } else if (type.toType instanceof rtt.StringType) {
             sol.assert(
                 val instanceof rtt.BytesMemView ||
-                val instanceof rtt.BytesStorageView ||
-                val instanceof rtt.BytesCalldataView ||
-                val instanceof rtt.BytesSliceCalldataView,
+                    val instanceof rtt.BytesStorageView ||
+                    val instanceof rtt.BytesCalldataView ||
+                    val instanceof rtt.BytesSliceCalldataView,
                 ``
             );
             const bytes = decodeView(val, state);

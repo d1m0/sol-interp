@@ -2,7 +2,16 @@ pragma solidity 0.6.12;
 
 contract Arrays {
     uint[] internal data;
+    bytes[] sData;
 
+    function byteArrs() public {
+        sData.push();
+        assert(sData[0].length == 0);
+        bytes memory b = sData.push() = hex"010203";
+        assert(keccak256(b) == keccak256(hex"010203"));
+        assert(sData.length == 2 && sData[1].length == 3 && keccak256(sData[1]) == keccak256(hex"010203"));
+    }
+    
     function addOne(uint a) public returns (uint) {
         return a + 1;
     }
@@ -54,5 +63,6 @@ contract __IRTest__ {
 
     function __testCase307__(Arrays __this__) internal {
         __this__.tupleInlineArrayAssignment();
+        __this__.byteArrs();
     }
 }
