@@ -21,15 +21,27 @@ import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { ExternalCallDescription, NewCall, none, Value } from "./value";
 import { CallResult, State, WorldInterface } from "./state";
-import { FixedBytesLocalView, BaseLocalView, PointerLocalView, PrimitiveLocalView } from "./view";
+import {
+    FixedBytesLocalView,
+    BaseLocalView,
+    PointerLocalView,
+    PrimitiveLocalView,
+    TempView
+} from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
-import { Address } from "@ethereumjs/util";
+import { Address, setLengthLeft } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
 
-export function castBytesViewToString<T extends rtt.BytesCalldataView | rtt.BytesMemView | rtt.BytesStorageView | rtt.BytesSliceCalldataView>(v: T): T {
+export function castBytesViewToString<
+    T extends
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
+>(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(stringT, v.offset, v.base) as T;
     }
@@ -39,13 +51,19 @@ export function castBytesViewToString<T extends rtt.BytesCalldataView | rtt.Byte
     }
 
     if (v instanceof rtt.BytesSliceCalldataView) {
-        return new rtt.BytesSliceCalldataView(stringT, v.offset, v.len) as T
+        return new rtt.BytesSliceCalldataView(stringT, v.offset, v.len) as T;
     }
 
     return new rtt.BytesStorageView(stringT, [v.key, v.endOffsetInWord]) as T;
 }
 
-export function castStringViewToBytes<T extends rtt.BytesCalldataView | rtt.BytesMemView | rtt.BytesStorageView | rtt.BytesSliceCalldataView>(v: T): T {
+export function castStringViewToBytes<
+    T extends
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
+>(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(bytesT, v.offset, v.base) as T;
     }
@@ -55,7 +73,7 @@ export function castStringViewToBytes<T extends rtt.BytesCalldataView | rtt.Byte
     }
 
     if (v instanceof rtt.BytesSliceCalldataView) {
-        return new rtt.BytesSliceCalldataView(bytesT, v.offset, v.len) as T
+        return new rtt.BytesSliceCalldataView(bytesT, v.offset, v.len) as T;
     }
 
     return new rtt.BytesStorageView(bytesT, [v.key, v.endOffsetInWord]) as T;
@@ -95,11 +113,7 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
                 zeroValue = [];
 
                 for (let i = 0; i < len; i++) {
-                    if (t.toType.elementT instanceof rtt.MappingType) {
-                        zeroValue.push(new Map());
-                    } else {
-                        zeroValue.push(makeZeroValue(t.toType.elementT, state));
-                    }
+                    zeroValue.push(makeZeroValue(t.toType.elementT, state));
                 }
             } else if (t.toType instanceof rtt.BytesType) {
                 zeroValue = new Uint8Array();
@@ -108,11 +122,7 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
             } else if (t.toType instanceof rtt.StructType) {
                 const fieldVals: Array<[string, BaseValue]> = [];
                 for (const [fieldName, fieldT] of t.toType.fields) {
-                    if (fieldT instanceof rtt.MappingType) {
-                        fieldVals.push([fieldName, new Map()]);
-                    } else {
-                        fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
-                    }
+                    fieldVals.push([fieldName, makeZeroValue(fieldT, state)]);
                 }
                 zeroValue = new Struct(fieldVals);
             } else {
@@ -127,6 +137,10 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
         }
 
         // In all other pointer case initialize with poison
+        return none;
+    }
+
+    if (t instanceof rtt.MappingType) {
         return none;
     }
 
@@ -324,31 +338,27 @@ export function length<T extends rtt.StateArea>(
 }
 
 export function indexView<T extends rtt.StateArea>(
-    v: rtt.IndexableView<BaseValue, T, View>,
-    key: BaseValue,
+    v: rtt.ArrayLikeView<T, View>,
+    key: bigint,
     state: State
 ): View<any, BaseValue, any, rtt.BaseRuntimeType> {
     let res: View<any, BaseValue, any, rtt.BaseRuntimeType> | rtt.DecodingFailure;
 
-    if (v instanceof rtt.MapStorageView) {
-        res = (v as rtt.MapStorageView).indexView(key);
-    } else {
-        sol.assert(typeof key === "bigint", ``);
+    sol.assert(typeof key === "bigint", ``);
 
-        if (v instanceof rtt.ArrayMemView || v instanceof rtt.BytesMemView) {
-            res = v.indexView(key, state.memory);
-        } else if (
-            v instanceof rtt.ArrayCalldataView ||
-            v instanceof rtt.BytesCalldataView ||
-            v instanceof rtt.ArraySliceCalldataView ||
-            v instanceof rtt.BytesSliceCalldataView
-        ) {
-            res = v.indexView(key, getMsg(state));
-        } else if (v instanceof rtt.ArrayStorageView || v instanceof rtt.BytesStorageView) {
-            res = v.indexView(key, getStateStorage(state));
-        } else {
-            nyi(`Pointer view ${v.constructor.name}`);
-        }
+    if (v instanceof rtt.ArrayMemView || v instanceof rtt.BytesMemView) {
+        res = v.indexView(key, state.memory);
+    } else if (
+        v instanceof rtt.ArrayCalldataView ||
+        v instanceof rtt.BytesCalldataView ||
+        v instanceof rtt.ArraySliceCalldataView ||
+        v instanceof rtt.BytesSliceCalldataView
+    ) {
+        res = v.indexView(key, getMsg(state));
+    } else if (v instanceof rtt.ArrayStorageView || v instanceof rtt.BytesStorageView) {
+        res = v.indexView(key, getStateStorage(state));
+    } else {
+        nyi(`Pointer view ${v.constructor.name}`);
     }
 
     sol.assert(!(res instanceof rtt.DecodingFailure), `Couldn't deref pointer view ${v.pp()}`);
@@ -463,6 +473,8 @@ export function locationOfView(v: rtt.View): sol.DataLocation {
         return sol.DataLocation.CallData;
     } else if (v instanceof PointerLocalView) {
         return v.type.location;
+    } else if (v instanceof TempView) {
+        return v.type instanceof rtt.PointerType ? v.type.location : sol.DataLocation.Default;
     } else {
         nyi(`View type ${v.constructor.name}`);
     }
@@ -723,12 +735,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -798,8 +810,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }
@@ -863,4 +875,41 @@ export function getUsingForDirectives(
         res.push(...getUsingForDirectives(imp.vSourceUnit, true));
     }
     return res;
+}
+
+/**
+ * Given a contract `c` gather all state vars of `c` and its bases (in reversed C3 order), and return them split in 3 groups:
+ * 1. Constant and immutable state vars
+ * 2. Normal state vars
+ * 3. Transient state vars
+ * @param c
+ */
+export function gatherStateVars(
+    c: sol.ContractDefinition
+): [sol.VariableDeclaration[], sol.VariableDeclaration[], sol.VariableDeclaration[]] {
+    const constVars: sol.VariableDeclaration[] = [];
+    const normalVars: sol.VariableDeclaration[] = [];
+    const transientVars: sol.VariableDeclaration[] = [];
+
+    for (const base of [...c.vLinearizedBaseContracts].reverse()) {
+        for (const v of base.vStateVariables) {
+            if (
+                v.mutability === sol.Mutability.Constant ||
+                v.mutability === sol.Mutability.Immutable
+            ) {
+                constVars.push(v);
+            } else if (v.storageLocation === sol.DataLocation.Transient) {
+                transientVars.push(v);
+            } else {
+                normalVars.push(v);
+            }
+        }
+    }
+
+    return [constVars, normalVars, transientVars];
+}
+
+export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
+    const paddedLength = bs.length / 32 + (bs.length % 32) === 0 ? 0 : 32;
+    return setLengthLeft(bs, paddedLength);
 }

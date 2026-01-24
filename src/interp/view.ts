@@ -21,11 +21,13 @@ import {
 import { BaseScope } from "./scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bytes1, bytesT } from "./utils";
+import { ppValue } from "./pp";
+import * as sol from "solc-typed-ast";
 
 export abstract class BaseLocalView<
     V extends PrimitiveValue,
     T extends BaseRuntimeType
-> extends View<null, V, [BaseScope, string], T> {
+> extends View<null, V, [BaseScope, sol.VariableDeclaration], T> {
     decode(): V | DecodingFailure {
         const [scope, name] = this.loc;
         const res = scope._lookup(name);
@@ -44,7 +46,7 @@ export abstract class BaseLocalView<
         return `<local ${this.loc[1]}@${this.loc[0].name}>`;
     }
 
-    get name(): string {
+    get decl(): sol.VariableDeclaration {
         return this.loc[1];
     }
 }
@@ -53,7 +55,7 @@ export class PrimitiveLocalView extends BaseLocalView<PrimitiveValue, BaseRuntim
 
 export class SingleByteLocalView extends BaseLocalView<Uint8Array, FixedBytesType> {
     constructor(
-        loc: [BaseScope, string],
+        loc: [BaseScope, sol.VariableDeclaration],
         private byteOffset: number
     ) {
         super(bytes1, loc);
@@ -154,8 +156,41 @@ export class MsgDataView
     }
 }
 
+export class TempView<V extends PrimitiveValue, T extends BaseRuntimeType> extends View<
+    null,
+    V,
+    null,
+    T
+> {
+    val: V | undefined;
+
+    constructor(type: T) {
+        super(type, null);
+    }
+
+    decode(): V | DecodingFailure {
+        if (this.val === undefined) {
+            return new DecodingFailure(`Couldn't read an uninitialized temp`);
+        }
+
+        return this.val;
+    }
+
+    encode(v: V): void {
+        this.val = v;
+    }
+
+    pp(): string {
+        return `<temp ${this.type.pp()}: ${this.val === undefined ? "<uninitialized>" : ppValue(this.val)}>`;
+    }
+}
+
 export function isPointerView(v: any): v is PointerView<any, View> {
-    return v instanceof PointerLocalView || baseIsPointerView(v);
+    return (
+        v instanceof PointerLocalView ||
+        baseIsPointerView(v) ||
+        (v instanceof TempView && v.type instanceof PointerType)
+    );
 }
 
 export function isArrayLikeView(v: any): v is ArrayLikeView<any, View> {

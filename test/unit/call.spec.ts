@@ -137,10 +137,7 @@ describe("Simple function call tests", () => {
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
             const state = makeState(fun, interp, ...stateVals);
 
-            const args = zip(
-                fun.vParameters.vParameters.map((d) => d.name),
-                argVals
-            );
+            const args = zip(fun.vParameters.vParameters, argVals);
             const argTs = fun.vParameters.vParameters.map((decl) =>
                 typeIdToRuntimeType(sol.typeOf(decl), fun.requiredContext)
             );

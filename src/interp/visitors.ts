@@ -3,8 +3,16 @@ import { Interpreter } from "./interp";
 import { CallResult, SolMessage, State } from "./state";
 import * as sol from "solc-typed-ast";
 import { LValue, Value } from "./value";
-import { EvalStep, ExceptionStep, ExecStep, ExtCallStep, ExtReturnStep, Trace } from "./step";
-import { ZERO_ADDRESS } from "sol-dbg";
+import {
+    EmitStep,
+    EvalStep,
+    ExceptionStep,
+    ExecStep,
+    ExtCallStep,
+    ExtReturnStep,
+    Trace
+} from "./step";
+import { EventDesc, ZERO_ADDRESS } from "sol-dbg";
 import { getThis } from "./utils";
 
 export interface InterpVisitor {
@@ -13,6 +21,7 @@ export interface InterpVisitor {
     exception(interp: Interpreter, state: State, err: RuntimeError): void;
     exec(interp: Interpreter, state: State, stmt: sol.Statement): void;
     eval(interp: Interpreter, state: State, expr: sol.Expression, val: Value | LValue): void;
+    emit(interp: Interpreter, state: State, event: EventDesc): void;
 }
 
 export class TraceVisitor implements InterpVisitor {
@@ -49,5 +58,9 @@ export class TraceVisitor implements InterpVisitor {
 
     eval(interp: Interpreter, state: State, expr: sol.Expression, val: Value | LValue): void {
         this.trace.push(new EvalStep(expr, val));
+    }
+
+    emit(interp: Interpreter, state: State, event: EventDesc): void {
+        this.trace.push(new EmitStep(event));
     }
 }

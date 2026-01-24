@@ -28,6 +28,8 @@ export class BuiltinFunction extends BaseInterpValue {
         protected readonly _call: (
             interp: Interpreter,
             state: State,
+            args: Value[],
+            argTs: BaseInterpType[],
             self: BuiltinFunction
         ) => Value[],
         // Flag specifying if this builtin expects an implicit first argument. E.g. `arr` in `arr.push(...)`
@@ -54,21 +56,12 @@ export class BuiltinFunction extends BaseInterpValue {
         return `<builtin fun ${this.type.pp()}>`;
     }
 
-    call(interp: Interpreter, state: State): Value[] {
-        return this._call(interp, state, this);
-    }
-
-    getArgs(numArgs: number, state: State): Value[] {
-        const res: Value[] = [];
-
-        sol.assert(state.scope !== undefined, ``);
-        for (let i = 0; i < numArgs; i++) {
-            const argV = state.scope.lookup(`arg_${i}`);
-            sol.assert(argV !== undefined, ``);
-            res.push(argV);
-        }
-
-        return res;
+    call(interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[]): Value[] {
+        interp.expect(
+            args.length === argTs.length,
+            `Unexpected mismatch in number of args (${args.length}) and argument types (${argTs.length}) in call to builtin ${this.name}`
+        );
+        return this._call(interp, state, args, argTs, this);
     }
 }
 

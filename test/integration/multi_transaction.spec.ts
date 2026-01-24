@@ -459,6 +459,28 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 value: 111n
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/delete.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Delete",
+                method: "",
+                args: [],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Delete",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: []
+                }
+            }
+        ]
     ]
 ];
 

@@ -144,19 +144,29 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
 
     if (typ instanceof rtt.BytesType) {
         sol.assert(
-            v instanceof View && v.type instanceof rtt.BytesType,
+            v instanceof View,
             `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`
         );
-        return bytesToHex(decodeView(v, s) as Uint8Array);
+        const bytes = decodeView(v, s);
+        sol.assert(
+            bytes instanceof Uint8Array,
+            `Expected an Uint8Array for string not {0}`,
+            bytes as any
+        );
+        return bytesToHex(bytes);
     }
 
     if (typ instanceof rtt.StringType) {
         sol.assert(
-            v instanceof View && v.type instanceof rtt.StringType,
-            `Expected string View for ${typ.pp()} not ${ppValue(v)}`
+            v instanceof View,
+            `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`
         );
         const bytes = decodeView(v, s);
-        sol.assert(bytes instanceof Uint8Array, `Expected an Uint8Array for string not {0}`, bytes as any)
+        sol.assert(
+            bytes instanceof Uint8Array,
+            `Expected an Uint8Array for string not {0}`,
+            bytes as any
+        );
         return bytesToUtf8(bytes);
     }
 

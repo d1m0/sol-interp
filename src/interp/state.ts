@@ -7,14 +7,13 @@ import {
     DefaultAllocator,
     ZERO_ADDRESS
 } from "sol-dbg";
-import { BaseScope, BuiltinsScope, LocalsScope } from "./scope";
+import { BaseScope, LocalsScope } from "./scope";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
-import { BuiltinFunction, BuiltinStruct } from "./value";
+import { BuiltinFunction } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { AccountInfo } from "./chain";
-import { makeBuiltin, globalBuiltinStructDesc } from "./builtins";
 
 export interface CallResult {
     reverted: boolean;
@@ -161,11 +160,4 @@ export function makeStateWithConstants(
         undefined,
         false
     );
-}
-
-export function makeBuiltinScope(state: State, compilerVersion: string): BuiltinsScope {
-    const builtinStruct = makeBuiltin(globalBuiltinStructDesc, compilerVersion);
-    sol.assert(builtinStruct instanceof BuiltinStruct, ``);
-
-    return new BuiltinsScope(builtinStruct, state, undefined);
 }

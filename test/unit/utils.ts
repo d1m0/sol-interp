@@ -51,7 +51,9 @@ export function makeState(
     res.scope = scope as BaseScope;
 
     for (const [name, val] of vals) {
-        const view = res.scope.lookupLocation(name);
+        const decl = res.scope.findDecl(name);
+        sol.assert(decl !== undefined, `Missing decl for name ${name}`);
+        const view = res.scope.lookupLocation(decl);
         if (view instanceof BaseMemoryView) {
             view.encode(val, res.memory, res.memAllocator);
         } else if (view instanceof BaseStorageView) {
@@ -64,7 +66,10 @@ export function makeState(
     return res;
 }
 
-export function encodeMemArgs(args: Array<[string, Value]>, state: State): InterpValue[] {
+export function encodeMemArgs(
+    args: Array<[sol.VariableDeclaration, Value]>,
+    state: State
+): InterpValue[] {
     const res: InterpValue[] = [];
 
     for (const [name, val] of args) {

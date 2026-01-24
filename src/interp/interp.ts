@@ -28,7 +28,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { WorldInterface, State, SolMessage, CallResult, makeBuiltinScope } from "./state";
+import { WorldInterface, State, SolMessage, CallResult } from "./state";
 import {
     InternalError,
     NoScope,
@@ -72,15 +72,7 @@ import {
     setLengthLeft,
     setLengthRight
 } from "@ethereumjs/util";
-import {
-    BaseScope,
-    BuiltinScope,
-    BuiltinsScope,
-    ContractScope,
-    GlobalScope,
-    LocalsScope,
-    TempsScope
-} from "./scope";
+import { BaseScope, ContractScope, GlobalScope, LocalsScope } from "./scope";
 import {
     bytes32,
     bytesBitwiseAnd,
@@ -111,7 +103,6 @@ import {
     indexOfEnumOption,
     indexView,
     int256,
-    isBaseOf,
     isDirectlyAssignable,
     isMethod,
     isStructView,
@@ -133,12 +124,15 @@ import {
     isArrayLikeView,
     isPointerView,
     PointerLocalView,
-    MsgDataView
+    MsgDataView,
+    TempView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
     ADDRESS_BUILTIN_STRUCT_NAME,
     EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
+    globalBuiltinStructDesc,
+    makeBuiltin,
     popBuiltin,
     pushBuiltin,
     revertBuiltin
@@ -147,9 +141,9 @@ import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
 import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
 import { InterpVisitor } from "./visitors";
-import {
-    decodeLinkMap
-} from "sol-dbg/dist/debug/decoding/utils";
+import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
+import { bshl, bshr } from "./bitwise";
+import { buildEvent } from "./events";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -182,6 +176,10 @@ export class Interpreter {
 
     get compilerVersion(): string {
         return this.artifact.compilerVersion;
+    }
+
+    get builtins(): BuiltinStruct {
+        return makeBuiltin(globalBuiltinStructDesc, this.compilerVersion) as BuiltinStruct;
     }
 
     constructor(
@@ -532,7 +530,11 @@ export class Interpreter {
         return resData;
     }
 
-    private pushScope(node: sol.ASTNode, vals: Array<[string, Value]>, state: State): void {
+    private pushScope(
+        node: sol.ASTNode,
+        vals: Array<[sol.VariableDeclaration, Value]>,
+        state: State
+    ): void {
         if (
             node instanceof sol.FunctionDefinition ||
             node instanceof sol.ModifierDefinition ||
@@ -578,7 +580,7 @@ export class Interpreter {
         s.scope = this.makeStaticScope(v.vScope, s);
 
         const initalVal = this.eval(v.vValue, s);
-        const varLoc = s.scope.lookupLocation(v.name);
+        const varLoc = s.scope.lookupLocation(v);
         this.expect(varLoc !== undefined);
         this.assign(varLoc, initalVal, s);
         s.scope = oldScope;
@@ -705,7 +707,7 @@ export class Interpreter {
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
             | BaseMemoryView<BaseValue, rtt.BaseRuntimeType>
             | DecodingFailure
-            | undefined = scope.lookupLocation(callee.name) as
+            | undefined = scope.lookupLocation(callee) as
             | BaseStorageView<BaseValue, rtt.BaseRuntimeType>
             | undefined;
         this.expect(stateVarView !== undefined, `No state var ${callee.name}`);
@@ -724,7 +726,7 @@ export class Interpreter {
                 this.expect(!(stateVarView instanceof DecodingFailure), `Failed indexing`);
             } else {
                 this.expect(stateVarView instanceof MapStorageView);
-                stateVarView = stateVarView.indexView(arg);
+                stateVarView = this.mapIndexView(stateVarView, arg, state);
                 this.expect(!(stateVarView instanceof DecodingFailure), `Failed indexing`);
             }
         }
@@ -818,9 +820,10 @@ export class Interpreter {
             res = this.execRevertStatement(stmt, state);
         } else if (stmt instanceof sol.Throw) {
             res = this.execThrow(stmt, state);
-            /*
         } else if (stmt instanceof sol.EmitStatement) {
-            res = this.execEmitStatement(stmt, state);
+            this.evalFunctionCall(stmt.vEventCall, state);
+            res = ControlFlow.Fallthrough;
+            /*
         } else if (stmt instanceof sol.InlineAssembly) {
             res = this.execInlineAssembly(stmt, state);
             */
@@ -847,10 +850,9 @@ export class Interpreter {
             changeLocTo(self.varDeclToRuntimeType(d), sol.DataLocation.Memory)
         );
         const argVs = stmt.errorCall.vArguments.map((arg) => this.eval(arg, state));
-        const ts = this.pushTempScope(argTs, state);
-        this.assign(ts.temps, argVs, state);
-        const argData = encode(ts.tempVals, argTs, state);
-        this.popScope(state);
+        const memArgTs = argTs.map((t) => changeLocTo(t, sol.DataLocation.Memory));
+        const castArgVs = this.castNTo(argVs, memArgTs, state);
+        const argData = encode(castArgVs, argTs, state);
         this.expect(argData instanceof Uint8Array);
         const data = concatBytes(selector, argData);
         const msg = `${errorDef.name}(${argVs.map(ppValue).join(", ")})`;
@@ -964,14 +966,7 @@ export class Interpreter {
         state: State
     ): ControlFlow {
         if (clause.vParameters) {
-            this.pushScope(
-                clause,
-                rtt.zip(
-                    clause.vParameters.vParameters.map((d) => d.name),
-                    args
-                ),
-                state
-            );
+            this.pushScope(clause, rtt.zip(clause.vParameters.vParameters, args), state);
         } else {
             this.pushScope(clause, [], state);
         }
@@ -1003,7 +998,7 @@ export class Interpreter {
         if (gte(this.compilerVersion, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
             this.pushScope(
                 stmt,
-                stmt.vDeclarations.map((d) => [d.name, none]),
+                stmt.vDeclarations.map((d) => [d, none]),
                 state
             );
         }
@@ -1014,7 +1009,7 @@ export class Interpreter {
                 continue;
             }
 
-            const loc = state.scope.lookupLocation(stmt.vDeclarations[j].name);
+            const loc = state.scope.lookupLocation(stmt.vDeclarations[j]);
 
             if (loc === undefined) {
                 this.fail(NotDefined, ``);
@@ -1038,7 +1033,7 @@ export class Interpreter {
     private execBlock(block: sol.Block | sol.UncheckedBlock, state: State): ControlFlow {
         let flow: ControlFlow = ControlFlow.Fallthrough;
 
-        const localVals: Array<[string, Value]> = [];
+        const localVals: Array<[sol.VariableDeclaration, Value]> = [];
 
         // For Solidity <0.5.0 block locals are live for the whole block. So 0-init them at the start of the block
         if (lt(this.compilerVersion, "0.5.0")) {
@@ -1046,7 +1041,7 @@ export class Interpreter {
                 if (stmt instanceof sol.VariableDeclarationStatement) {
                     for (const decl of stmt.vDeclarations) {
                         const type = this.varDeclToRuntimeType(decl);
-                        localVals.push([decl.name, makeZeroValue(type, state)]);
+                        localVals.push([decl, makeZeroValue(type, state)]);
                     }
                 }
             }
@@ -1099,9 +1094,7 @@ export class Interpreter {
         );
 
         for (let i = 0; i < retVals.length; i++) {
-            const ret = frame.scope._lookupLocation(
-                LocalsScope.returnName(fun?.vReturnParameters.vParameters[i], i)
-            );
+            const ret = frame.scope._lookupLocation(fun.vReturnParameters.vParameters[i]);
             this.expect(ret !== undefined);
             this.assign(ret, retVals[i], state);
         }
@@ -1365,8 +1358,13 @@ export class Interpreter {
         let res: LValue;
 
         if (expr instanceof sol.Identifier) {
-            sol.assert(state.scope !== undefined, `Missing scope in evalLV({0})`, expr);
-            const scopeView = state.scope.lookupLocation(expr.name);
+            this.expect(state.scope !== undefined, `Missing scope in evalLV(${expr.name})`);
+            this.expect(
+                expr.vReferencedDeclaration instanceof sol.VariableDeclaration,
+                `Unexpected non-var LV identifier ${expr.name}`
+            );
+
+            const scopeView = state.scope.lookupLocation(expr.vReferencedDeclaration);
             if (scopeView === undefined) {
                 this.fail(NotDefined, ``);
             }
@@ -1420,11 +1418,7 @@ export class Interpreter {
                     nyi(`Unkown ArrayLikeView ${baseLV.constructor.name}`);
                 }
             } else if (baseLV instanceof MapStorageView) {
-                const key =
-                    indexVal instanceof View
-                        ? decodeView(indexVal, state)
-                        : (indexVal as PrimitiveValue);
-                idxView = baseLV.indexView(key);
+                idxView = this.mapIndexView(baseLV, indexVal, state);
             } else {
                 nyi(`Index access base ${ppLValue(baseLV)}`);
             }
@@ -1575,7 +1569,7 @@ export class Interpreter {
             return castStringViewToBytes(value);
         }
 
-        // bytes -> string cast 
+        // bytes -> string cast
         if (
             value instanceof View &&
             value.type instanceof rtt.BytesType &&
@@ -1751,7 +1745,7 @@ export class Interpreter {
                 lvalueLoc !== rvalueLoc ||
                 (lvalueLoc === sol.DataLocation.Storage &&
                     rvalueLoc === sol.DataLocation.Storage &&
-                    !(lvalue instanceof PointerLocalView));
+                    !(lvalue instanceof PointerLocalView || lvalue instanceof TempView));
 
             if (isCopy) {
                 // Types should be equal modulo location
@@ -1762,7 +1756,7 @@ export class Interpreter {
                 } else if (lvalue instanceof BaseStorageView) {
                     setStateStorage(state, lvalue.encode(complexRVal, getStateStorage(state)));
                 } else {
-                    this.expect(lvalue instanceof PointerLocalView);
+                    this.expect(lvalue instanceof PointerLocalView || lvalue instanceof TempView);
                     const memView = PointerMemView.allocMemFor(
                         complexRVal,
                         lvalue.type.toType,
@@ -1777,7 +1771,7 @@ export class Interpreter {
                     lvalue.encode(rvalue, state.memory, state.memAllocator);
                 } else {
                     this.expect(
-                        lvalue instanceof PointerLocalView &&
+                        (lvalue instanceof PointerLocalView || lvalue instanceof TempView) &&
                         lvalue.type.toType.pp() === rvalue.type.pp(),
                         `Unexpected assignment of ${ppValue(rvalue)} to local of type ${lvalue.type.pp()}`
                     );
@@ -1795,6 +1789,9 @@ export class Interpreter {
                 lvalue.encode(rvalue, state.memory, state.memAllocator);
             } else if (lvalue instanceof BaseLocalView) {
                 // 3. assigning to a local variable
+                lvalue.encode(rvalue);
+            } else if (lvalue instanceof TempView) {
+                // 4. assigning to a temp variable
                 lvalue.encode(rvalue);
             } else {
                 nyi(`assign(${lvalue}, ${rvalue}, ${state})`);
@@ -2057,7 +2054,7 @@ export class Interpreter {
                 }
 
                 this.expect(left instanceof Uint8Array);
-                nyi(`Bitshift of fixed bytes`);
+                return operator === "<<" ? bshl(left, right) : bshr(left, right);
             }
 
             [left, right] = this.coerceToSameType(left, lType, right, rType, state);
@@ -2200,7 +2197,7 @@ export class Interpreter {
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
-            return castStringViewToBytes(fromV)
+            return castStringViewToBytes(fromV);
         }
 
         // bytes ptr -> strings ptr
@@ -2521,17 +2518,6 @@ export class Interpreter {
         return res;
     }
 
-    private pushTempScope(tempTs: rtt.BaseRuntimeType[], state: State): TempsScope {
-        const newScope = new TempsScope(tempTs, state, state.scope);
-
-        for (const lv of newScope.temps) {
-            newScope.set(lv.name, none);
-        }
-
-        state.scope = newScope;
-        return newScope;
-    }
-
     private _evalMsgCall(
         expr: sol.FunctionCall,
         callee: ExternalCallDescription,
@@ -2560,10 +2546,8 @@ export class Interpreter {
 
             // Next compute the msg data
             const argVs = expr.vArguments.map((arg) => this.eval(arg, state));
-            const ts = this.pushTempScope(argTs, state);
-            this.assign(ts.temps, argVs, state);
-            const argData = encode(ts.tempVals, argTs, state);
-            this.popScope(state);
+            const castArgVs = this.castNTo(argVs, argTs, state);
+            const argData = encode(castArgVs, argTs, state);
 
             this.expect(argData instanceof Uint8Array);
             data = concatBytes(selector, argData);
@@ -2585,10 +2569,8 @@ export class Interpreter {
                 );
             }
 
-            const ts = this.pushTempScope(argTs, state);
-            this.assign(ts.temps, args, state);
-            const argData = encode(ts.tempVals, argTs, state);
-            this.popScope(state);
+            const castArgVs = this.castNTo(args, argTs, state);
+            const argData = encode(castArgVs, argTs, state);
 
             this.expect(argData instanceof Uint8Array, ``);
 
@@ -2751,7 +2733,11 @@ export class Interpreter {
             callee = callee.target;
         }
 
-        if (callee instanceof sol.FunctionDefinition || callee instanceof BuiltinFunction) {
+        if (callee instanceof BuiltinFunction) {
+            return callee.call(this, state, args, argTs);
+        }
+
+        if (callee instanceof sol.FunctionDefinition) {
             callTarget = callee;
             actualCallee = callee;
         } else if (callee instanceof rtt.InternalFunRef) {
@@ -2774,7 +2760,7 @@ export class Interpreter {
      * When target is `sol.FunctionDefinition` return the `Value[]`s returned by the function. For modifiers returns [].
      */
     _execCallInt(
-        target: sol.FunctionDefinition | sol.ModifierInvocation | BuiltinFunction,
+        target: sol.FunctionDefinition | sol.ModifierInvocation,
         calleeScope: BaseScope,
         state: State
     ): Value[] {
@@ -2785,7 +2771,7 @@ export class Interpreter {
         state.scope = calleeScope;
         this.nodes.push(target);
 
-        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
+        if (target instanceof sol.FunctionDefinition) {
             state.intCallStack.push({
                 callee: target,
                 scope: state.scope as LocalsScope,
@@ -2811,17 +2797,14 @@ export class Interpreter {
                 this.exec(target.vBody, state);
             }
 
-            res = target.vReturnParameters.vParameters.map((ret, i) => {
-                const res = (state.scope as BaseScope).lookup(LocalsScope.returnName(ret, i));
+            res = target.vReturnParameters.vParameters.map((ret) => {
+                const res = (state.scope as BaseScope).lookup(ret);
                 if (res === undefined) {
-                    this.fail(
-                        NotDefined,
-                        `Missing value for return ${LocalsScope.returnName(ret, i)}`
-                    );
+                    this.fail(NotDefined, `Missing value for return`);
                 }
                 return res;
             });
-        } else if (target instanceof sol.ModifierInvocation) {
+        } else {
             const mod = this.resolveCallee(target.vModifier as sol.ModifierDefinition, state);
             this.expect(
                 mod instanceof sol.ModifierDefinition && mod.vBody !== undefined,
@@ -2829,13 +2812,11 @@ export class Interpreter {
             );
             this.exec(mod.vBody, state);
             res = [];
-        } else {
-            res = target.call(this, state);
         }
 
         const frame = stackTop(state.intCallStack);
 
-        if (target instanceof sol.FunctionDefinition || target instanceof BuiltinFunction) {
+        if (target instanceof sol.FunctionDefinition) {
             state.intCallStack.pop();
         } else {
             frame.curModifier = savedCurModifier;
@@ -2971,6 +2952,22 @@ export class Interpreter {
         let callee: Value;
 
         if (
+            expr.kind === sol.FunctionCallKind.FunctionCall &&
+            expr.vReferencedDeclaration instanceof sol.EventDefinition
+        ) {
+            const evt = expr.vReferencedDeclaration;
+            const args = expr.vArguments.map((arg) => this.evalNP(arg, state));
+
+            const lowLevelEvent = buildEvent(evt, args, state);
+
+            for (const v of this.visitors) {
+                v.emit(this, state, lowLevelEvent);
+            }
+
+            return none;
+        }
+
+        if (
             expr.kind === sol.FunctionCallKind.TypeConversion ||
             expr.kind === sol.FunctionCallKind.StructConstructorCall
         ) {
@@ -3026,17 +3023,23 @@ export class Interpreter {
     }
 
     evalIdentifier(expr: sol.Identifier, state: State): Value {
-        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "this") {
-            return getThis(state);
-        }
+        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin) {
+            if (expr.name === "this") {
+                return getThis(state);
+            }
 
-        if (expr.vIdentifierType === sol.ExternalReferenceType.Builtin && expr.name === "super") {
-            const contract = getCodeContract(state);
-            this.expect(
-                contract.vLinearizedBaseContracts.length > 1,
-                `Unexpected call to super() in contract with no bases`
-            );
-            return new DefValue(contract.vLinearizedBaseContracts[1]);
+            if (expr.name === "super") {
+                const contract = getCodeContract(state);
+                this.expect(
+                    contract.vLinearizedBaseContracts.length > 1,
+                    `Unexpected call to super() in contract with no bases`
+                );
+                return new DefValue(contract.vLinearizedBaseContracts[1]);
+            }
+
+            const res = this.builtins.getField(expr.name);
+            this.expect(res !== undefined, `Uknown builtin ${expr.name}`);
+            return res;
         }
 
         // contract name
@@ -3069,11 +3072,25 @@ export class Interpreter {
             return new DefValue(expr.vReferencedDeclaration.vSourceUnit);
         }
 
+        if (
+            expr.vReferencedDeclaration instanceof sol.EnumDefinition ||
+            expr.vReferencedDeclaration instanceof sol.StructDefinition ||
+            expr.vReferencedDeclaration instanceof sol.EventDefinition ||
+            expr.vReferencedDeclaration instanceof sol.ErrorDefinition ||
+            expr.vReferencedDeclaration instanceof sol.UserDefinedValueTypeDefinition
+        ) {
+            return new DefValue(expr.vReferencedDeclaration);
+        }
+
         if (!state.scope) {
             this.fail(NoScope, ``);
         }
 
-        const res = state.scope.lookup(expr.name);
+        this.expect(
+            expr.vReferencedDeclaration instanceof sol.VariableDeclaration,
+            `Unexpected identifier ${expr.name}`
+        );
+        const res = state.scope.lookup(expr.vReferencedDeclaration);
 
         if (res === undefined) {
             this.fail(NotDefined, ``);
@@ -3126,11 +3143,7 @@ export class Interpreter {
 
             res = baseVal.slice(Number(indexVal), Number(indexVal + 1n));
         } else if (baseVal instanceof MapStorageView) {
-            const key =
-                indexVal instanceof View
-                    ? decodeView(indexVal, state)
-                    : (indexVal as PrimitiveValue);
-            const idxView = baseVal.indexView(key);
+            const idxView = this.mapIndexView(baseVal, indexVal, state);
             res = this.lvToValue(idxView, state);
         } else {
             nyi(`Index access base ${baseVal}`);
@@ -3230,16 +3243,7 @@ export class Interpreter {
     }
 
     private getBuiltin(state: State, ...path: string[]): Value {
-        let s = state.scope;
-
-        // @todo: stupid. fix
-        while (s !== undefined && !(s instanceof BuiltinsScope)) {
-            s = s._next;
-        }
-
-        this.expect(s !== undefined, `No builtin scope`);
-
-        let res: Value | undefined = s.builtins;
+        let res: Value | undefined = this.builtins;
 
         for (const id of path) {
             this.expect(res instanceof BuiltinStruct);
@@ -3355,28 +3359,9 @@ export class Interpreter {
             // - contract constants. We need to tweak how we built scope here
             // - base state vars called with the base notation Base.Var
             if (expr.vReferencedDeclaration instanceof sol.VariableDeclaration) {
-                let scope: BaseScope;
+                const scope = this.makeStaticScope(baseVal.def, state);
+                const res = scope.lookup(expr.vReferencedDeclaration);
 
-                if (expr.vReferencedDeclaration.mutability === sol.Mutability.Constant) {
-                    // Contract or Global scope constant vars
-                    this.expect(
-                        baseVal.def instanceof sol.SourceUnit ||
-                        baseVal.def instanceof sol.ContractDefinition
-                    );
-                    scope =
-                        baseVal.def instanceof sol.SourceUnit
-                            ? new GlobalScope(baseVal.def, state, undefined)
-                            : new ContractScope(baseVal.def, state, undefined);
-                } else {
-                    // Base contract state var
-                    this.expect(
-                        baseVal.def instanceof sol.ContractDefinition &&
-                        isBaseOf(baseVal.def, getCodeContract(state))
-                    );
-                    scope = this.makeStaticScope(baseVal.def, state);
-                }
-
-                const res = scope.lookup(expr.memberName);
                 this.expect(
                     res !== undefined,
                     `Couldnt find ${expr.memberName} in ${ppValue(baseVal)}`
@@ -3531,6 +3516,7 @@ export class Interpreter {
     evalUnaryOperation(expr: sol.UnaryOperation, state: State): Value {
         const typ = this.typeOf(expr);
 
+        // Constant Expression - avoid evaluating its sub-expressions
         if (typ instanceof RationalNumberType) {
             this.expect(typ.isInt());
             return typ.asInt();
@@ -3538,6 +3524,13 @@ export class Interpreter {
 
         if (expr.vUserFunction) {
             nyi(`Unary user functions`);
+        }
+
+        if (expr.operator === "delete") {
+            const subT = this.typeOf(expr.vSubExpression);
+            const zeroV = makeZeroValue(changeLocTo(subT, sol.DataLocation.Memory), state);
+            this.assign(this.evalLV(expr.vSubExpression, state), zeroV, state);
+            return none;
         }
 
         if (expr.operator === "!") {
@@ -3601,12 +3594,8 @@ export class Interpreter {
      * 1. Compute constant expressions
      * 2. As a basis for dynamic runtime scopes. Those build on this scope with LocalScopes for function args, locals, etc..
      */
-    public makeStaticScope(nd: sol.ASTNode | BuiltinFunction | undefined, state: State): BaseScope {
+    public makeStaticScope(nd: sol.ASTNode | undefined, state: State): BaseScope {
         const scopeNodes: Array<sol.SourceUnit | sol.ContractDefinition> = [];
-
-        if (nd instanceof BuiltinFunction) {
-            return makeBuiltinScope(state, this.compilerVersion);
-        }
 
         while (nd !== undefined) {
             if (nd instanceof sol.SourceUnit) {
@@ -3628,7 +3617,7 @@ export class Interpreter {
         }
 
         scopeNodes.reverse();
-        let scope: BaseScope = makeBuiltinScope(state, this.compilerVersion);
+        let scope: BaseScope | undefined = undefined;
 
         for (const nd of scopeNodes) {
             if (nd instanceof sol.SourceUnit) {
@@ -3638,7 +3627,7 @@ export class Interpreter {
             }
         }
 
-        return scope;
+        return scope as BaseScope;
     }
 
     /**
@@ -3651,7 +3640,7 @@ export class Interpreter {
      * @returns
      */
     makeScope(
-        target: sol.FunctionDefinition | sol.ModifierDefinition | BuiltinFunction | CurriedVal,
+        target: sol.FunctionDefinition | sol.ModifierDefinition | CurriedVal,
         args: Value[],
         argTs: BaseInterpType[],
         state: State
@@ -3660,25 +3649,21 @@ export class Interpreter {
 
         if (target instanceof CurriedVal) {
             nd = target.target instanceof rtt.InternalFunRef ? target.target.fun : target.target;
+            this.expect(!(nd instanceof BuiltinFunction));
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];
-        } else[(nd = target)];
+        } else {
+            nd = target;
+        }
 
         const staticScope = this.makeStaticScope(nd, state);
-        let localNames: string[];
-        const localVals: Value[] = args;
 
-        if (nd instanceof BuiltinFunction) {
-            localNames = args.map((_, i) => `arg_${i}`);
-        } else {
-            localNames = nd.vParameters.vParameters.map((d) => d.name);
-        }
+        const localDecls = [...nd.vParameters.vParameters];
+        const localVals: Value[] = args;
 
         // We keep the returns in the function scope as well
         if (nd instanceof sol.FunctionDefinition) {
-            localNames.push(
-                ...nd.vReturnParameters.vParameters.map((ret, i) => LocalsScope.returnName(ret, i))
-            );
+            localDecls.push(...nd.vReturnParameters.vParameters);
             localVals.push(
                 ...nd.vReturnParameters.vParameters.map((ret) => {
                     const type = this.varDeclToRuntimeType(ret);
@@ -3688,17 +3673,14 @@ export class Interpreter {
         }
 
         sol.assert(
-            localNames.length === localVals.length,
-            `Mismatch in args in call to ${nd.name} expected ${localNames.length} got ${localVals.length}`
+            localDecls.length === localVals.length,
+            `Mismatch in args in call to ${nd.name} expected ${localDecls.length} got ${localVals.length}`
         );
 
-        const res =
-            nd instanceof BuiltinFunction
-                ? new BuiltinScope(argTs, nd, state, staticScope)
-                : new LocalsScope(nd, state, this.compilerVersion, staticScope);
+        const res = new LocalsScope(nd, state, this.compilerVersion, staticScope);
 
-        for (let i = 0; i < localNames.length; i++) {
-            const v = res.lookupLocation(localNames[i]);
+        for (let i = 0; i < localDecls.length; i++) {
+            const v = res.lookupLocation(localDecls[i]);
             this.expect(v !== undefined, ``);
             this.assign(v, localVals[i], state);
         }
@@ -3733,14 +3715,40 @@ export class Interpreter {
     }
 
     castTo(val: Value, type: BaseInterpType, state: State): Value {
-        const oldScope = state.scope;
-        const temps = new TempsScope([type], state, oldScope);
-        state.scope = temps;
+        const lv = new TempView(type);
+        this.assign(lv, val, state);
+        return lv.val as Value;
+    }
 
-        this.assign(temps.temps[0], val, state);
-        const res = temps.tempVals[0];
-        state.scope = oldScope;
+    castNTo(vals: Value[], types: BaseInterpType[], state: State): Value[] {
+        sol.assert(vals.length === types.length, ``);
+        const res: Value[] = [];
+        for (let i = 0; i < vals.length; i++) {
+            res.push(this.castTo(vals[i], types[i], state));
+        }
 
         return res;
+    }
+
+    mapIndexView(
+        map: MapStorageView,
+        key: Value,
+        state: State
+    ): DecodingFailure | BaseStorageView<BaseValue, rtt.BaseRuntimeType> {
+        const keyT = map.type.keyType;
+        let decodedKey: BaseValue;
+
+        if (key instanceof View) {
+            const v = decodeView(key, state);
+            this.expect(v instanceof Uint8Array);
+            decodedKey = v;
+        } else {
+            this.expect(!(keyT instanceof rtt.PointerType));
+            const v = this.castTo(key, keyT, state);
+            this.expect(isPrimitiveValue(v));
+            decodedKey = v;
+        }
+
+        return map.indexView(decodedKey);
     }
 }

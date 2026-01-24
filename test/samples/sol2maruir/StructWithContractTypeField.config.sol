@@ -28,6 +28,10 @@ contract Test {
         map[0x0000] = Some(new A(uint256(10)), 10);
         map[0x0001] = Some(new A(uint256(15)), 20);
         map[0x0101] = Some(new A(uint256(20)), 30);
+
+        Some memory p = map[0x0000];
+        assert(p.val == 10);
+        
         (Infc x1, uint x2) = this.map(0x0000);
         assert(x1.doSomething() == 10);
         assert(x2 == 10);
