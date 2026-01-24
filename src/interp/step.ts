@@ -4,7 +4,7 @@ import { CallResult, SolMessage } from "./state";
 import { RuntimeError } from "./exceptions";
 import { EventDesc } from "sol-dbg";
 
-export abstract class BaseStep { }
+export abstract class BaseStep {}
 
 export type Trace = BaseStep[];
 

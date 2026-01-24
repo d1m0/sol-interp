@@ -30,17 +30,17 @@ import {
 } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
-import { Address } from "@ethereumjs/util";
+import { Address, setLengthLeft } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
 
 export function castBytesViewToString<
     T extends
-    | rtt.BytesCalldataView
-    | rtt.BytesMemView
-    | rtt.BytesStorageView
-    | rtt.BytesSliceCalldataView
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(stringT, v.offset, v.base) as T;
@@ -59,10 +59,10 @@ export function castBytesViewToString<
 
 export function castStringViewToBytes<
     T extends
-    | rtt.BytesCalldataView
-    | rtt.BytesMemView
-    | rtt.BytesStorageView
-    | rtt.BytesSliceCalldataView
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(bytesT, v.offset, v.base) as T;
@@ -735,12 +735,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -810,8 +810,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }
@@ -907,4 +907,9 @@ export function gatherStateVars(
     }
 
     return [constVars, normalVars, transientVars];
+}
+
+export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
+    const paddedLength = bs.length / 32 + (bs.length % 32) === 0 ? 0 : 32;
+    return setLengthLeft(bs, paddedLength);
 }

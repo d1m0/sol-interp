@@ -477,12 +477,11 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 args: [],
                 result: {
                     tag: "call_success",
-                    returns: [
-                    ]
+                    returns: []
                 }
             }
         ]
-    ],
+    ]
 ];
 
 /**

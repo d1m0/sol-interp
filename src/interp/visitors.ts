@@ -3,7 +3,15 @@ import { Interpreter } from "./interp";
 import { CallResult, SolMessage, State } from "./state";
 import * as sol from "solc-typed-ast";
 import { LValue, Value } from "./value";
-import { EmitStep, EvalStep, ExceptionStep, ExecStep, ExtCallStep, ExtReturnStep, Trace } from "./step";
+import {
+    EmitStep,
+    EvalStep,
+    ExceptionStep,
+    ExecStep,
+    ExtCallStep,
+    ExtReturnStep,
+    Trace
+} from "./step";
 import { EventDesc, ZERO_ADDRESS } from "sol-dbg";
 import { getThis } from "./utils";
 

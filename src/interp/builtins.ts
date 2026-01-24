@@ -208,7 +208,7 @@ export const popBuiltin = new BuiltinFunction(
     ): Value[] => {
         interp.expect(
             args.length === 1 &&
-                (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
+            (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
         );
         const arr = args[0];
 
@@ -922,9 +922,12 @@ const keccak256v05Builtin = new BuiltinFunction(
         self: BuiltinFunction
     ): Value[] => {
         interp.expect(
-            args.length === 1 && args[0] instanceof View && args[0].type instanceof rtt.BytesType
+            args.length === 1 && args[0] instanceof View,
+            `keccak256 expects a bytes array as argument`
         );
-        return [keccak256(decodeView(args[0], state) as Uint8Array)];
+        const bytes = decodeView(args[0], state);
+        interp.expect(bytes instanceof Uint8Array, `keccak256 expects a bytes array as argument`)
+        return [keccak256(bytes)];
     },
     false,
     false,

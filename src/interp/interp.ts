@@ -822,7 +822,7 @@ export class Interpreter {
             res = this.execThrow(stmt, state);
         } else if (stmt instanceof sol.EmitStatement) {
             this.evalFunctionCall(stmt.vEventCall, state);
-            res = ControlFlow.Continue;
+            res = ControlFlow.Fallthrough;
             /*
         } else if (stmt instanceof sol.InlineAssembly) {
             res = this.execInlineAssembly(stmt, state);
@@ -2951,16 +2951,19 @@ export class Interpreter {
     evalFunctionCall(expr: sol.FunctionCall, state: State): Value {
         let callee: Value;
 
-        if (expr.kind === sol.FunctionCallKind.FunctionCall &&
+        if (
+            expr.kind === sol.FunctionCallKind.FunctionCall &&
             expr.vReferencedDeclaration instanceof sol.EventDefinition
         ) {
             const evt = expr.vReferencedDeclaration;
             const args = expr.vArguments.map((arg) => this.evalNP(arg, state));
 
-            const lowLevelEvent = buildEvent(evt, args);
+            const lowLevelEvent = buildEvent(evt, args, state);
+
             for (const v of this.visitors) {
                 v.emit(this, state, lowLevelEvent);
             }
+
             return none;
         }
 
@@ -3727,12 +3730,16 @@ export class Interpreter {
         return res;
     }
 
-    mapIndexView(map: MapStorageView, key: Value, state: State): DecodingFailure | BaseStorageView<BaseValue, rtt.BaseRuntimeType> {
-        const keyT = map.type.keyType
+    mapIndexView(
+        map: MapStorageView,
+        key: Value,
+        state: State
+    ): DecodingFailure | BaseStorageView<BaseValue, rtt.BaseRuntimeType> {
+        const keyT = map.type.keyType;
         let decodedKey: BaseValue;
 
         if (key instanceof View) {
-            const v = decodeView(key, state)
+            const v = decodeView(key, state);
             this.expect(v instanceof Uint8Array);
             decodedKey = v;
         } else {

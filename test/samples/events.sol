@@ -14,7 +14,6 @@ contract Events {
 
     function main() public {
         emit E();
-        emit E1();
         emit E2(1);
         emit E3(2);
         emit E4("abc");
@@ -22,6 +21,7 @@ contract Events {
         emit E6(3, "hij");
         emit E7(4, "klm");
         emit E8(6, "nop");
+        emit E1();
         emit E9(7, "qrs");
     }
 } 
