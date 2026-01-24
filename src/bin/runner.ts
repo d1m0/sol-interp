@@ -186,7 +186,12 @@ export class Runner {
         let data: Uint8Array;
 
         if (step.kind === "Deploy") {
-            const bytecode = this.artifactManager.link(targetContract.bytecode, this.libMap);
+            const creationBytecode = targetContract.bytecode;
+            sol.assert(
+                creationBytecode !== undefined,
+                `Cannot create abstract contract ${targetContract.contractName}`
+            );
+            const bytecode = this.artifactManager.link(creationBytecode, this.libMap);
             data = concatBytes(bytecode, argData);
         } else {
             this.expect(target !== undefined);

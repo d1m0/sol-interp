@@ -182,7 +182,7 @@ export function getContract(state: State): sol.ContractDefinition {
 export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     if (state.codeAccount) {
         const info = state.codeAccount.contract;
-        sol.assert(info !== undefined, ``);
+        sol.assert(info !== undefined && info.deployedBytecode !== undefined, ``);
         return [info.deployedBytecode, state.codeAccount.deployedBytecode];
     }
 
@@ -190,10 +190,12 @@ export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     sol.assert(info !== undefined, ``);
 
     if (state.msg.to.equals(rtt.ZERO_ADDRESS)) {
+        sol.assert(info.bytecode !== undefined, ``);
         const creationBytecode = getMsg(state).slice(0, info.bytecode.bytecode.length);
         return [info.bytecode, creationBytecode];
     }
 
+    sol.assert(info.deployedBytecode !== undefined, ``);
     return [info.deployedBytecode, state.account.deployedBytecode];
 }
 

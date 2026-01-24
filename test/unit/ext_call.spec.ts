@@ -198,6 +198,11 @@ describe("Simple function call tests", () => {
             sol.assert(contractInfo !== undefined, `No info for contract ${contract}`);
 
             chain.makeEmptyAccount(SENDER, 1000000n);
+            sol.assert(
+                contractInfo.bytecode !== undefined && contractInfo.deployedBytecode !== undefined,
+                ``
+            );
+
             chain.setAccount(RECEIVER, {
                 address: RECEIVER,
                 contract: contractInfo,

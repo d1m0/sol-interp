@@ -346,17 +346,20 @@ export class Interpreter {
         const mdc = getContractInfo(state);
         this.expect(mdc.ast !== undefined, `Can't create a contract with no AST`);
         const bases = mdc.ast.vLinearizedBaseContracts.toReversed();
+        const creationBytecodeInfo = mdc.bytecode;
+        const runtimeBytecodeInfo = mdc.deployedBytecode;
+        this.expect(creationBytecodeInfo !== undefined && runtimeBytecodeInfo !== undefined);
 
         // Compute the link map from the artifact's bytecode and the actual msg.data
-        const linkMap = decodeLinkMap(mdc.bytecode, state.msg.data);
+        const linkMap = decodeLinkMap(creationBytecodeInfo, state.msg.data);
 
         // Compute the linked bytecode and deployed bytecode
-        state.partialDeployedBytecode = this.artifactManager.link(mdc.deployedBytecode, linkMap);
+        state.partialDeployedBytecode = this.artifactManager.link(runtimeBytecodeInfo, linkMap);
 
         // We assume that the caller has created and initialized state.account
         // If there are arguments to be passed, then the target MDC must have a constructor
         this.expect(
-            msg.data.length === mdc.bytecode.bytecode.length ||
+            msg.data.length === creationBytecodeInfo.bytecode.length ||
                 (mdc.ast.vConstructor !== undefined &&
                     mdc.ast.vConstructor.vParameters.vParameters.length > 0)
         );
@@ -365,7 +368,7 @@ export class Interpreter {
             const [calldataArgs, calldataArgTs] = this.getCalldataArgsAndTypes(
                 mdc.ast.vConstructor,
                 msg.data,
-                BigInt(mdc.bytecode.bytecode.length)
+                BigInt(creationBytecodeInfo.bytecode.length)
             );
 
             // As per:
@@ -2480,9 +2483,12 @@ export class Interpreter {
             args = [bytes, types];
             argTs = [memBytesT, new rtt.TypeType(types.type)];
         } else if (fun.name === "type") {
-            const argT = this.evalTypeExpr(expr.vArguments[0]);
-            args = [argT];
-            argTs = [new rtt.TypeType(argT.type)];
+            // We don't use evalTypeExpr here as it will convert solidity contract types to address,
+            // but the `type()` builtin needs the precise solidity type
+            const argSolT = sol.typeOf(expr.vArguments[0]);
+            const argT = new WrappedType(argSolT);
+            args = [new TypeValue(argT)];
+            argTs = [new rtt.TypeType(argSolT)];
         } else if (fun.name === "encodeCall") {
             // encodeCall is a special case builtin where the second argument is a tuple. Silently convert that to an elipsis
             // so we don't have to deal with non-primitive local variables in the interepter
@@ -2612,7 +2618,9 @@ export class Interpreter {
             // We need to fill in all the link references of the newly deployed contract from the current contract's refs
             const [curBytecodeInfo, curBytecode] = getBytecodeInfo(state);
             const linkMap = decodeLinkMap(curBytecodeInfo, curBytecode);
-            const creationBytecode = this.artifactManager.link(newContractInfo.bytecode, linkMap);
+            const creationBytecodeInfo = newContractInfo.bytecode;
+            this.expect(creationBytecodeInfo !== undefined);
+            const creationBytecode = this.artifactManager.link(creationBytecodeInfo, linkMap);
 
             data = concatBytes(creationBytecode, argData);
             isLibCall = false;

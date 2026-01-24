@@ -128,6 +128,7 @@ export class TransactionSet {
             argBytes = new Uint8Array(0);
         }
 
+        sol.assert(contract.bytecode !== undefined, ``);
         const bytecode = this._artifactManager.link(contract.bytecode, this.libMap);
         return concatBytes(bytecode, argBytes);
     }

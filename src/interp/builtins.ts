@@ -39,7 +39,10 @@ import {
     int256,
     isValueType,
     liftExtCalRef,
-    setStateStorage
+    memBytesT,
+    memStringT,
+    setStateStorage,
+    stringT
 } from "./utils";
 import { Address, bytesToUtf8, concatBytes } from "@ethereumjs/util";
 import { decode, encode, encodePacked, signatureToSelector } from "./abi";
@@ -47,7 +50,8 @@ import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
 import { satisfies } from "semver";
-import { BaseInterpType, RationalNumberType } from "./types";
+import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
+import { xor } from "./bitwise";
 
 /**
  * A version-dependent buitlin description. This is a recursive datatype with several cases:
@@ -775,6 +779,113 @@ const keccak256v05Builtin = new BuiltinFunction(
 
 const sha3 = keccak256v04Builtin.alias("sha3");
 
+function interfaceId(contract: sol.ContractDefinition): Uint8Array {
+    sol.assert(
+        contract.kind === sol.ContractKind.Interface ||
+            (contract.kind === sol.ContractKind.Contract && contract.abstract),
+        ``
+    );
+    const selectors: Uint8Array[] = contract.vFunctions.map((funDef) => sol.signatureHash(funDef));
+
+    for (const v of contract.vStateVariables) {
+        if (v.visibility === sol.StateVariableVisibility.Public) {
+            selectors.push(sol.signatureHash(v));
+        }
+    }
+    return selectors.reduce((x, y) => xor(x, y));
+}
+
+const typeBuiltin = new BuiltinFunction(
+    "type",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(
+            args.length === 1 &&
+                args[0] instanceof TypeValue &&
+                args[0].type instanceof WrappedType &&
+                args[0].type.innerT instanceof sol.TypeTypeId,
+            `keccak256 expects a bytes array as argument`
+        );
+
+        const solT = args[0].type.innerT.actualT;
+        const name = `<${solT.pp()} type info>`;
+        const curNode = interp.curNode;
+        interp.expect(curNode instanceof sol.ASTNode);
+        const ctx = curNode.requiredContext;
+
+        if (solT instanceof sol.IntTypeId) {
+            const rtT = typeIdToRuntimeType(solT, ctx) as rtt.IntType;
+            const structT = new rtt.StructType(name, [
+                ["min", rtT],
+                ["max", rtT]
+            ]);
+            return [
+                new BuiltinStruct(name, structT, [
+                    ["min", rtT.min()],
+                    ["max", rtT.max()]
+                ])
+            ];
+        }
+
+        if (solT instanceof sol.ContractTypeId) {
+            const contract = ctx.locate(solT.id);
+            interp.expect(contract instanceof sol.ContractDefinition);
+
+            const fields: Array<[string, BaseInterpType]> = [["name", memStringT]];
+
+            const nameView = PointerMemView.allocMemFor(
+                contract.name,
+                stringT,
+                state.memAllocator
+            ) as BytesMemView;
+            nameView.encodeStr(contract.name, state.memory);
+
+            const vals: Array<[string, Value]> = [["name", nameView]];
+
+            const artifact = interp.artifactManager.getContractInfo(contract);
+            interp.expect(artifact !== undefined);
+
+            const bytecodeInfo = artifact.bytecode;
+            const deployedBytecodeInfo = artifact.deployedBytecode;
+
+            if (bytecodeInfo !== undefined && deployedBytecodeInfo !== undefined) {
+                const creationCodeView = PointerMemView.allocMemFor(
+                    bytecodeInfo.bytecode,
+                    bytesT,
+                    state.memAllocator
+                ) as BytesMemView;
+                creationCodeView.encode(bytecodeInfo.bytecode, state.memory);
+
+                const runtimeCodeView = PointerMemView.allocMemFor(
+                    deployedBytecodeInfo.bytecode,
+                    bytesT,
+                    state.memAllocator
+                ) as BytesMemView;
+                runtimeCodeView.encode(deployedBytecodeInfo.bytecode, state.memory);
+
+                fields.push(["creationCode", memBytesT]);
+                fields.push(["runtimeCode", memBytesT]);
+                vals.push(["creationCode", creationCodeView]);
+                vals.push(["runtimeCode", runtimeCodeView]);
+            }
+
+            if (contract.kind === sol.ContractKind.Interface) {
+                fields.push(["interfaceId", rtt.bytes4]);
+                vals.push(["interfaceId", interfaceId(contract)]);
+            }
+
+            const structT = new rtt.StructType(name, fields);
+
+            return [new BuiltinStruct(name, structT, vals)];
+        }
+
+        rtt.nyi(`type(${solT.pp()})`);
+    },
+    false,
+    false,
+    false
+);
+
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
     [
@@ -789,7 +900,8 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
             [keccak256v04Builtin, "<0.5.0"],
             [keccak256v05Builtin, ">=0.5.0"]
         ],
-        msgBuiltinStructDesc
+        msgBuiltinStructDesc,
+        typeBuiltin
     ]
 ];
 

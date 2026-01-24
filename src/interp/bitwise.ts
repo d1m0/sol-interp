@@ -64,3 +64,13 @@ export function bshr(x: Uint8Array, y: bigint): Uint8Array {
 
     return res;
 }
+
+export function xor(x: Uint8Array, y: Uint8Array): Uint8Array {
+    sol.assert(x.length == y.length, ``);
+    const res = new Uint8Array(x.length);
+    for (let i = 0; i < x.length; i++) {
+        res[i] = x[i] ^ y[i];
+    }
+
+    return res;
+}
