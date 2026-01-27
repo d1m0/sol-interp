@@ -481,6 +481,28 @@ const samples: Array<[string, TransactionDesc[]]> = [
                 }
             }
         ]
+    ],
+    [
+        "test/samples/multi_transaction/immutables.sol",
+        [
+            {
+                type: "deploy",
+                contract: "Bar",
+                method: "",
+                args: [1n],
+                result: { tag: "create_success" }
+            },
+            {
+                type: "call",
+                contract: "Bar",
+                method: "main",
+                args: [],
+                result: {
+                    tag: "call_success",
+                    returns: [12n, hexToBytes("0x")]
+                }
+            }
+        ]
     ]
 ];
 

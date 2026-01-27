@@ -5,23 +5,14 @@ import {
     PrimitiveValue,
     PointerView,
     Value,
-    isPointerView as baseIsPointerView,
     ArrayLikeView,
-    isArrayLikeMemView,
-    isArrayLikeCalldataView,
-    isArrayLikeStorageView,
     BaseRuntimeType,
     FixedBytesType,
-    PointerType,
-    BaseCalldataView,
-    BytesType,
-    Memory,
-    SingleByteCalldataView
+    PointerType
 } from "sol-dbg";
-import { BaseScope } from "./scope";
+import { BaseScope } from "../scope";
 import { isFailure } from "sol-dbg/dist/debug/decoding/utils";
-import { bytes1, bytesT } from "./utils";
-import { ppValue } from "./pp";
+import { bytes1 } from "../utils";
 import * as sol from "solc-typed-ast";
 
 export abstract class BaseLocalView<
@@ -126,78 +117,4 @@ export class FixedBytesLocalView
 
         return new SingleByteLocalView(this.loc, Number(key));
     }
-}
-
-/**
- * A view to the entire msg.data. We cant just reuse a BytesCalldataView as that assumes a dynamic offset and length.
- */
-export class MsgDataView
-    extends BaseCalldataView<Uint8Array, BytesType>
-    implements ArrayLikeView<Memory, SingleByteCalldataView>
-{
-    constructor() {
-        super(bytesT, 0n, 0n);
-    }
-
-    size(state: Memory): bigint {
-        return BigInt(state.length);
-    }
-
-    indexView(key: bigint, state: Memory): DecodingFailure | SingleByteCalldataView {
-        if (key > this.size(state)) {
-            return new DecodingFailure(`OoB access in MsgDataView at ${key}`);
-        }
-
-        return new SingleByteCalldataView(key, 0n);
-    }
-
-    decode(state: Memory): Uint8Array<ArrayBufferLike> | DecodingFailure {
-        return state;
-    }
-}
-
-export class TempView<V extends PrimitiveValue, T extends BaseRuntimeType> extends View<
-    null,
-    V,
-    null,
-    T
-> {
-    val: V | undefined;
-
-    constructor(type: T) {
-        super(type, null);
-    }
-
-    decode(): V | DecodingFailure {
-        if (this.val === undefined) {
-            return new DecodingFailure(`Couldn't read an uninitialized temp`);
-        }
-
-        return this.val;
-    }
-
-    encode(v: V): void {
-        this.val = v;
-    }
-
-    pp(): string {
-        return `<temp ${this.type.pp()}: ${this.val === undefined ? "<uninitialized>" : ppValue(this.val)}>`;
-    }
-}
-
-export function isPointerView(v: any): v is PointerView<any, View> {
-    return (
-        v instanceof PointerLocalView ||
-        baseIsPointerView(v) ||
-        (v instanceof TempView && v.type instanceof PointerType)
-    );
-}
-
-export function isArrayLikeView(v: any): v is ArrayLikeView<any, View> {
-    return (
-        isArrayLikeMemView(v) ||
-        isArrayLikeCalldataView(v) ||
-        isArrayLikeStorageView(v) ||
-        v instanceof FixedBytesLocalView
-    );
 }

@@ -177,7 +177,7 @@ export const popBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         interp.expect(
             args.length === 1 &&
-                (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
+            (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
         );
         const arr = args[0];
 
@@ -782,7 +782,7 @@ const sha3 = keccak256v04Builtin.alias("sha3");
 function interfaceId(contract: sol.ContractDefinition): Uint8Array {
     sol.assert(
         contract.kind === sol.ContractKind.Interface ||
-            (contract.kind === sol.ContractKind.Contract && contract.abstract),
+        (contract.kind === sol.ContractKind.Contract && contract.abstract),
         ``
     );
     const selectors: Uint8Array[] = contract.vFunctions.map((funDef) => sol.signatureHash(funDef));
@@ -801,9 +801,9 @@ const typeBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         interp.expect(
             args.length === 1 &&
-                args[0] instanceof TypeValue &&
-                args[0].type instanceof WrappedType &&
-                args[0].type.innerT instanceof sol.TypeTypeId,
+            args[0] instanceof TypeValue &&
+            args[0].type instanceof WrappedType &&
+            args[0].type.innerT instanceof sol.TypeTypeId,
             `keccak256 expects a bytes array as argument`
         );
 

@@ -13,7 +13,12 @@ import {
 } from "sol-dbg";
 import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
-import { FixedBytesLocalView, PrimitiveLocalView, PointerLocalView, BaseLocalView } from "./view";
+import {
+    FixedBytesLocalView,
+    PrimitiveLocalView,
+    PointerLocalView,
+    BaseLocalView
+} from "./view/local";
 import { gatherStateVars, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
 import { typeIdToRuntimeType } from "./types";
 
