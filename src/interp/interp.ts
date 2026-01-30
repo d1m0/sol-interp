@@ -99,6 +99,7 @@ import {
     getModifiers,
     getMsg,
     getMsgSender,
+    getRuntimeBytecode,
     getStateStorage,
     getThis,
     indexOfEnumOption,
@@ -126,7 +127,8 @@ import {
     isPointerView,
     PointerLocalView,
     MsgDataView,
-    TempView
+    TempView,
+    CodeView
 } from "./view";
 import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
@@ -1814,6 +1816,10 @@ export class Interpreter {
             } else if (lvalue instanceof TempView) {
                 // 4. assigning to a temp variable
                 lvalue.encode(rvalue);
+            } else if (lvalue instanceof CodeView) {
+                // 5. assigning to an immutable var during construction
+                const bytecode = getRuntimeBytecode(state);
+                lvalue.encode(rvalue, bytecode);
             } else {
                 nyi(`assign(${lvalue}, ${rvalue}, ${state})`);
             }
@@ -3397,7 +3403,6 @@ export class Interpreter {
 
             // - source unit definitions/constants
             // - contract constants. We need to tweak how we built scope here
-            // - base state vars called with the base notation Base.Var
             if (expr.vReferencedDeclaration instanceof sol.VariableDeclaration) {
                 const scope = this.makeStaticScope(baseVal.def, state);
                 const res = scope.lookup(expr.vReferencedDeclaration);
@@ -3664,7 +3669,7 @@ export class Interpreter {
             if (nd instanceof sol.SourceUnit) {
                 scope = new GlobalScope(nd, state, scope);
             } else {
-                scope = new ContractScope(nd, state, scope);
+                scope = new ContractScope(nd, state, scope, this.artifactManager);
             }
         }
 

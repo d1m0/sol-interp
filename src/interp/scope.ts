@@ -19,8 +19,10 @@ import {
     PointerLocalView,
     BaseLocalView
 } from "./view/local";
-import { gatherStateVars, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
+import { decodeView, gatherStateVars, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
 import { typeIdToRuntimeType } from "./types";
+import { CodeView } from "./view";
+import { ArtifactManager } from "./artifactManager";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -49,7 +51,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<sol.VariableDeclaration, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) {}
+    ) { }
 
     abstract _lookup(decl: sol.VariableDeclaration): Value | undefined;
     abstract _lookupLocation(decl: sol.VariableDeclaration): View | undefined;
@@ -281,10 +283,11 @@ export class ContractScope extends BaseScope {
     constructor(
         protected readonly contract: sol.ContractDefinition,
         state: State,
-        _next: BaseScope | undefined
+        _next: BaseScope | undefined,
+        artifactManager: ArtifactManager
     ) {
         const ctx = contract.requiredContext;
-        const [constVars, normalVars] = gatherStateVars(contract);
+        const [constVars, immVars, normalVars] = gatherStateVars(contract);
         const [layoutType] = getContractLayoutType(contract);
         const layout = makeStorageView(layoutType, [0n, 32]) as StructStorageView;
 
@@ -311,15 +314,27 @@ export class ContractScope extends BaseScope {
             defTypes.set(v, typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory));
         }
 
+        const contractInfo = artifactManager.getContractInfo(contract);
+        sol.assert(contractInfo !== undefined && contractInfo.deployedBytecode !== undefined, ``)
+        for (const v of immVars) {
+            const ref = contractInfo.deployedBytecode.immutableReferences.get(v.id);
+            console.error(ref);
+            sol.assert(ref !== undefined && ref.length === 1, ``)
+
+            const type = typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory);
+            declToView.set(v, new CodeView(type, BigInt(ref[0].start)))
+            defTypes.set(v, type);
+        }
+
         super(`<contract ${contract.name}>`, defTypes, state, _next);
         this.declToView = declToView;
     }
 
     private stateVarViewToValue(view: View<any, rtt.BaseRuntimeType>): Value {
-        if (view instanceof BaseMemoryView) {
+        if (view instanceof BaseMemoryView || view instanceof CodeView) {
             // Constant/immutable var
             if (isValueType(view.type)) {
-                const res = view.decode(this.state.memory);
+                const res = decodeView(view, this.state);
                 sol.assert(
                     !(res instanceof DecodingFailure),
                     `Unexpected failure decoding constant at ${view.pp()}`
