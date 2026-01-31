@@ -26,7 +26,8 @@ import {
     BaseLocalView,
     PointerLocalView,
     PrimitiveLocalView,
-    TempView
+    TempView,
+    CodeView
 } from "./view";
 import { AccountInfo } from "./chain";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
@@ -200,6 +201,40 @@ export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
 }
 
 /**
+ * Get the `BytecodeInfo`for the currently context.
+ * This handles delegate calls, contract constructors (bytecode) and normal execution (deployed bytecode)
+ */
+export function getRuntimeBytecodeInfo(state: State): rtt.BytecodeInfo {
+    if (state.codeAccount) {
+        const info = state.codeAccount.contract;
+        sol.assert(info !== undefined && info.deployedBytecode !== undefined, ``);
+        return info.deployedBytecode;
+    }
+
+    const info = state.account.contract;
+    sol.assert(info !== undefined, ``);
+    sol.assert(info.deployedBytecode !== undefined, ``);
+    return info.deployedBytecode;
+}
+
+/**
+ * Get the actual running bytecode for the currently context.
+ * This handles delegate calls, contract constructors (bytecode) and normal execution (deployed bytecode)
+ */
+export function getRuntimeBytecode(state: State): Uint8Array {
+    if (state.codeAccount) {
+        return state.codeAccount.deployedBytecode;
+    }
+
+    if (state.msg.to.equals(rtt.ZERO_ADDRESS)) {
+        sol.assert(state.partialDeployedBytecode !== undefined, ``);
+        return state.partialDeployedBytecode;
+    }
+
+    return state.account.deployedBytecode;
+}
+
+/**
  * Given a library `ContractDefinition` and the current `State` get the linked address
  * for that library.
  */
@@ -290,6 +325,9 @@ export function decodeView(lv: View, state: State): BaseValue {
         return lv.decode(getMsg(state));
     } else if (lv instanceof PrimitiveLocalView) {
         return lv.decode();
+    } else if (lv instanceof CodeView) {
+        const bytecode = getRuntimeBytecode(state);
+        return lv.decode(bytecode);
     }
 
     nyi(`decode(${lv})`);
@@ -888,18 +926,23 @@ export function getUsingForDirectives(
  */
 export function gatherStateVars(
     c: sol.ContractDefinition
-): [sol.VariableDeclaration[], sol.VariableDeclaration[], sol.VariableDeclaration[]] {
+): [
+    sol.VariableDeclaration[],
+    sol.VariableDeclaration[],
+    sol.VariableDeclaration[],
+    sol.VariableDeclaration[]
+] {
     const constVars: sol.VariableDeclaration[] = [];
+    const immVars: sol.VariableDeclaration[] = [];
     const normalVars: sol.VariableDeclaration[] = [];
     const transientVars: sol.VariableDeclaration[] = [];
 
     for (const base of [...c.vLinearizedBaseContracts].reverse()) {
         for (const v of base.vStateVariables) {
-            if (
-                v.mutability === sol.Mutability.Constant ||
-                v.mutability === sol.Mutability.Immutable
-            ) {
+            if (v.mutability === sol.Mutability.Constant) {
                 constVars.push(v);
+            } else if (v.mutability === sol.Mutability.Immutable) {
+                immVars.push(v);
             } else if (v.storageLocation === sol.DataLocation.Transient) {
                 transientVars.push(v);
             } else {
@@ -908,7 +951,7 @@ export function gatherStateVars(
         }
     }
 
-    return [constVars, normalVars, transientVars];
+    return [constVars, immVars, normalVars, transientVars];
 }
 
 export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
