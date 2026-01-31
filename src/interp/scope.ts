@@ -19,7 +19,14 @@ import {
     PointerLocalView,
     BaseLocalView
 } from "./view/local";
-import { decodeView, gatherStateVars, getStateStorage, isValueType, panic, setStateStorage } from "./utils";
+import {
+    decodeView,
+    gatherStateVars,
+    getStateStorage,
+    isValueType,
+    panic,
+    setStateStorage
+} from "./utils";
 import { typeIdToRuntimeType } from "./types";
 import { CodeView } from "./view";
 import { ArtifactManager } from "./artifactManager";
@@ -51,7 +58,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<sol.VariableDeclaration, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) { }
+    ) {}
 
     abstract _lookup(decl: sol.VariableDeclaration): Value | undefined;
     abstract _lookupLocation(decl: sol.VariableDeclaration): View | undefined;
@@ -315,14 +322,13 @@ export class ContractScope extends BaseScope {
         }
 
         const contractInfo = artifactManager.getContractInfo(contract);
-        sol.assert(contractInfo !== undefined && contractInfo.deployedBytecode !== undefined, ``)
+        sol.assert(contractInfo !== undefined && contractInfo.deployedBytecode !== undefined, ``);
         for (const v of immVars) {
             const ref = contractInfo.deployedBytecode.immutableReferences.get(v.id);
-            console.error(ref);
-            sol.assert(ref !== undefined && ref.length === 1, ``)
+            sol.assert(ref !== undefined && ref.length >= 1, ``);
 
             const type = typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory);
-            declToView.set(v, new CodeView(type, BigInt(ref[0].start)))
+            declToView.set(v, new CodeView(type, BigInt(ref[0].start)));
             defTypes.set(v, type);
         }
 

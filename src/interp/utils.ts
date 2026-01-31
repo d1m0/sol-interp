@@ -38,10 +38,10 @@ import { NoPayloadError } from "./exceptions";
 
 export function castBytesViewToString<
     T extends
-    | rtt.BytesCalldataView
-    | rtt.BytesMemView
-    | rtt.BytesStorageView
-    | rtt.BytesSliceCalldataView
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(stringT, v.offset, v.base) as T;
@@ -60,10 +60,10 @@ export function castBytesViewToString<
 
 export function castStringViewToBytes<
     T extends
-    | rtt.BytesCalldataView
-    | rtt.BytesMemView
-    | rtt.BytesStorageView
-    | rtt.BytesSliceCalldataView
+        | rtt.BytesCalldataView
+        | rtt.BytesMemView
+        | rtt.BytesStorageView
+        | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(bytesT, v.offset, v.base) as T;
@@ -327,7 +327,7 @@ export function decodeView(lv: View, state: State): BaseValue {
         return lv.decode();
     } else if (lv instanceof CodeView) {
         const bytecode = getRuntimeBytecode(state);
-        return lv.decode(bytecode)
+        return lv.decode(bytecode);
     }
 
     nyi(`decode(${lv})`);
@@ -775,12 +775,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-        Address,
-        Uint8Array | undefined,
-        bigint | undefined,
-        bigint | undefined,
-        Uint8Array | undefined
-    ] {
+    Address,
+    Uint8Array | undefined,
+    bigint | undefined,
+    bigint | undefined,
+    Uint8Array | undefined
+] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -850,8 +850,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-                ? "contract_deployment"
-                : "call";
+              ? "contract_deployment"
+              : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }
@@ -926,7 +926,12 @@ export function getUsingForDirectives(
  */
 export function gatherStateVars(
     c: sol.ContractDefinition
-): [sol.VariableDeclaration[], sol.VariableDeclaration[], sol.VariableDeclaration[], sol.VariableDeclaration[]] {
+): [
+    sol.VariableDeclaration[],
+    sol.VariableDeclaration[],
+    sol.VariableDeclaration[],
+    sol.VariableDeclaration[]
+] {
     const constVars: sol.VariableDeclaration[] = [];
     const immVars: sol.VariableDeclaration[] = [];
     const normalVars: sol.VariableDeclaration[] = [];
@@ -934,9 +939,7 @@ export function gatherStateVars(
 
     for (const base of [...c.vLinearizedBaseContracts].reverse()) {
         for (const v of base.vStateVariables) {
-            if (
-                v.mutability === sol.Mutability.Constant
-            ) {
+            if (v.mutability === sol.Mutability.Constant) {
                 constVars.push(v);
             } else if (v.mutability === sol.Mutability.Immutable) {
                 immVars.push(v);
