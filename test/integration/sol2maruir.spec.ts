@@ -58,6 +58,9 @@ describe("Old Sol2Marir test", () => {
             const tset = new TransactionSet(artifactManager, txs);
             const res = tset.run();
 
+            // Uncomment the below line to generate scanrio files
+            // fse.writeJSONSync(`test/samples/sol2maruir/${sample.slice(0, -4)}.json`, tset.getScenario(), { spaces: 2 })
+
             if (!res) {
                 console.error(ppTrace(tset.getTrace(), artifactManager));
             }

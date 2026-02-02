@@ -1,5 +1,6 @@
 import {
     Address,
+    bigIntToHex,
     bytesToHex,
     concatBytes,
     createAddressFromString,
@@ -9,7 +10,9 @@ import {
     BaseRuntimeType,
     Value as BaseValue,
     ContractInfo,
+    Scenario,
     Struct,
+    TxDesc,
     typeIdToRuntimeType,
     ZERO_ADDRESS
 } from "sol-dbg";
@@ -75,6 +78,7 @@ export class TransactionSet {
     libMap = new Map<string, Address>();
     traceVisitor: TraceVisitor;
     chain: Chain;
+    msgs: SolMessage[] = [];
 
     constructor(
         public readonly _artifactManager: ArtifactManager,
@@ -256,6 +260,8 @@ export class TransactionSet {
             const [info, entrypoint] = this.getEntypoint(step);
             let res: CallResult;
 
+            this.msgs.push(msg);
+
             if (step.type === "call") {
                 res = this.chain.call(msg);
             } else {
@@ -316,5 +322,26 @@ export class TransactionSet {
 
     getTrace(): Trace {
         return this.traceVisitor.getTrace();
+    }
+
+    getScenario(): Scenario {
+        const steps: TxDesc[] = this.msgs.map((msg) => ({
+            "address": msg.to.toString(),
+            "gasLimit": "0xff0000",
+            "gasPrice": "0x1",
+            "input": bytesToHex(msg.data),
+            "origin": msg.from.toString(),
+            "value": bigIntToHex(msg.value),
+            "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
+            "blockDifficulty": "0xc",
+            "blockGasLimit": "0xff0000",
+            "blockNumber": "0x1",
+            "blockTime": "0x1",
+        }))
+
+        return {
+            initialState: { accounts: {} },
+            steps
+        }
     }
 }
