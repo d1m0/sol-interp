@@ -2,7 +2,7 @@ import { Struct, Value, View } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
 import { loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
-import { decodeView, worldFailMock } from "../../src/interp/utils";
+import { decodeView, envFailMock } from "../../src/interp/utils";
 import { ArtifactManager } from "../../src/interp/artifactManager";
 
 const samples: Array<[string, string, Array<[string, Value]>, Value]> = [
@@ -127,7 +127,7 @@ describe("Eval unit tests", () => {
             const sample = sampleMap.get(fileName) as SampleInfo;
             const contract = sample.units[0].vContracts[0];
             const interp = new Interpreter(
-                worldFailMock,
+                envFailMock,
                 artifactManager,
                 artifactManager.getArtifact(contract),
                 []

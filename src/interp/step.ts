@@ -1,8 +1,8 @@
 import * as sol from "solc-typed-ast";
 import { LValue, Value } from "./value";
-import { CallResult, SolMessage } from "./state";
 import { RuntimeError } from "./exceptions";
 import { EventDesc } from "sol-dbg";
+import { CallResult, SolMessage } from "./env";
 
 export abstract class BaseStep {}
 

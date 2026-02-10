@@ -20,7 +20,7 @@ import {
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { ExternalCallDescription, NewCall, none, Value } from "./value";
-import { CallResult, State, WorldInterface } from "./state";
+import { State } from "./state";
 import {
     FixedBytesLocalView,
     BaseLocalView,
@@ -29,7 +29,7 @@ import {
     TempView,
     CodeView
 } from "./view";
-import { AccountInfo } from "./chain";
+import { AccountInfo, CallResult, EnvInterface, SolMessage } from "./env";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
 import { Address, setLengthLeft } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
@@ -38,10 +38,10 @@ import { NoPayloadError } from "./exceptions";
 
 export function castBytesViewToString<
     T extends
-        | rtt.BytesCalldataView
-        | rtt.BytesMemView
-        | rtt.BytesStorageView
-        | rtt.BytesSliceCalldataView
+    | rtt.BytesCalldataView
+    | rtt.BytesMemView
+    | rtt.BytesStorageView
+    | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(stringT, v.offset, v.base) as T;
@@ -60,10 +60,10 @@ export function castBytesViewToString<
 
 export function castStringViewToBytes<
     T extends
-        | rtt.BytesCalldataView
-        | rtt.BytesMemView
-        | rtt.BytesStorageView
-        | rtt.BytesSliceCalldataView
+    | rtt.BytesCalldataView
+    | rtt.BytesMemView
+    | rtt.BytesStorageView
+    | rtt.BytesSliceCalldataView
 >(v: T): T {
     if (v instanceof rtt.BytesCalldataView) {
         return new rtt.BytesCalldataView(bytesT, v.offset, v.base) as T;
@@ -690,17 +690,8 @@ export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Se
     return res;
 }
 
-export const worldFailMock: WorldInterface = {
-    create: function (): CallResult {
-        throw new Error("Function not implemented.");
-    },
-    call: function (): CallResult {
-        throw new Error("Function not implemented.");
-    },
-    staticcall: function (): CallResult {
-        throw new Error("Function not implemented.");
-    },
-    delegatecall: function (): CallResult {
+export const envFailMock: EnvInterface = {
+    execMsg: function (msg: SolMessage): CallResult {
         throw new Error("Function not implemented.");
     },
     getAccount: function (): AccountInfo | undefined {
@@ -711,7 +702,7 @@ export const worldFailMock: WorldInterface = {
     },
     updateAccount: function (): void {
         throw new Error("Function not implemented.");
-    }
+    },
 };
 
 /**
@@ -775,12 +766,12 @@ export function getGetterArgAndReturnTs(
 export function getExternalCallComponents(
     arg: Value
 ): [
-    Address,
-    Uint8Array | undefined,
-    bigint | undefined,
-    bigint | undefined,
-    Uint8Array | undefined
-] {
+        Address,
+        Uint8Array | undefined,
+        bigint | undefined,
+        bigint | undefined,
+        Uint8Array | undefined
+    ] {
     let value: bigint | undefined;
     let gas: bigint | undefined;
     let salt: Uint8Array | undefined;
@@ -850,8 +841,8 @@ export function liftExtCalRef(
         arg instanceof rtt.ExternalFunRef
             ? "solidity_call"
             : arg instanceof NewCall
-              ? "contract_deployment"
-              : "call";
+                ? "contract_deployment"
+                : "call";
 
     return new ExternalCallDescription(arg, undefined, undefined, undefined, callKind);
 }
@@ -927,11 +918,11 @@ export function getUsingForDirectives(
 export function gatherStateVars(
     c: sol.ContractDefinition
 ): [
-    sol.VariableDeclaration[],
-    sol.VariableDeclaration[],
-    sol.VariableDeclaration[],
-    sol.VariableDeclaration[]
-] {
+        sol.VariableDeclaration[],
+        sol.VariableDeclaration[],
+        sol.VariableDeclaration[],
+        sol.VariableDeclaration[]
+    ] {
     const constVars: sol.VariableDeclaration[] = [];
     const immVars: sol.VariableDeclaration[] = [];
     const normalVars: sol.VariableDeclaration[] = [];

@@ -4,7 +4,7 @@ import * as sol from "solc-typed-ast";
 import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
 import { AssertError, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
-import { decodeView, worldFailMock } from "../../src/interp/utils";
+import { decodeView, envFailMock } from "../../src/interp/utils";
 import { ArtifactManager } from "../../src/interp/artifactManager";
 
 type ExceptionConstructors = typeof AssertError;
@@ -118,7 +118,7 @@ describe("Simple function call tests", () => {
 
             let fun: sol.FunctionDefinition | undefined = undefined;
             const interp: Interpreter = new Interpreter(
-                worldFailMock,
+                envFailMock,
                 artifactManager,
                 artifactManager.getArtifact(info.units[0]),
                 []

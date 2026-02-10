@@ -1,11 +1,11 @@
 /**
- * Class representing a call-tree with 2 aligned traces
+ * Class representing two aligned call-trees containing low-level and high-level traces
  */
 export class AlignedTraces<LowLevelStep, HighLevelStep> {
     constructor(
-        public readonly inner: [LowLevelStep[], HighLevelStep[], AlignedTraces<LowLevelStep, HighLevelStep>][],
-        public readonly final: [LowLevelStep[], HighLevelStep[]],
-    ) {
-
-    }
+        public readonly inner: Array<
+            [LowLevelStep[], HighLevelStep[], AlignedTraces<LowLevelStep, HighLevelStep>]
+        >,
+        public readonly final: [LowLevelStep[], HighLevelStep[]]
+    ) {}
 }

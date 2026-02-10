@@ -1,4 +1,4 @@
 export * from "./step";
 export { Interpreter } from "./interp";
 export * from "./builtins";
-export * from "./chain";
+export * from "./env";

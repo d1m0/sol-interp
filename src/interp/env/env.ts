@@ -1,24 +1,13 @@
-import { ContractInfo, Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
-import { CallResult, makeStateForAccount, SolMessage, WorldInterface } from "./state";
-import { Interpreter } from "./interp";
-import { ArtifactManager } from "./artifactManager";
+import { Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
+import { makeStateForAccount } from "../state";
+import { Interpreter } from "../interp";
+import { ArtifactManager } from "../artifactManager";
 import { Address, createContractAddress } from "@ethereumjs/util";
-import { InterpVisitor } from "./visitors";
-import { ppAccount } from "./pp";
+import { InterpVisitor } from "../visitors";
+import { ppAccount } from "../pp";
+import { AccountInfo, CallResult, EnvInterface, EVMStorage, SolMessage } from "./types";
 
-export interface AccountInfo {
-    address: Address;
-    contract: ContractInfo | undefined;
-    // Creation bytecode. May differ from the artifact bytecode by link references
-    bytecode: Uint8Array;
-    // Deployed bytecode. May differ from the artifact deployed bytecode by link and immtable references
-    deployedBytecode: Uint8Array;
-    storage: Storage;
-    balance: bigint;
-    nonce: bigint;
-}
-
-export function ppChainState(state: ImmMap<string, AccountInfo>): string {
+export function ppChainState(state: EVMStorage): string {
     const t: string[] = [];
 
     for (const [addr, account] of state.entries()) {
@@ -32,8 +21,8 @@ export function ppChainState(state: ImmMap<string, AccountInfo>): string {
 /**
  * Simple BlockChain implementation supporting only contracts with source artifacts.
  */
-export class Chain implements WorldInterface {
-    state: ImmMap<string, AccountInfo>;
+export class Chain implements EnvInterface {
+    state: EVMStorage;
     visitors: InterpVisitor[];
 
     constructor(public readonly artifactManager: ArtifactManager) {
@@ -45,23 +34,6 @@ export class Chain implements WorldInterface {
         this.visitors.push(v);
     }
 
-    create(msg: SolMessage): CallResult {
-        this.expect(msg.to.equals(ZERO_ADDRESS));
-        this.expect(msg.delegatingContract === undefined);
-        return this.execMsg(msg);
-    }
-
-    staticcall(msg: SolMessage): CallResult {
-        msg.isStaticCall = true;
-        return this.call(msg);
-    }
-
-    delegatecall(msg: SolMessage): CallResult {
-        this.expect(!msg.to.equals(ZERO_ADDRESS));
-        this.expect(msg.delegatingContract !== undefined);
-        return this.execMsg(msg);
-    }
-
     getAccount(address: string | Address): AccountInfo | undefined {
         const key = typeof address === "string" ? address : address.toString();
         const val = this.state.get(key);
@@ -71,14 +43,14 @@ export class Chain implements WorldInterface {
         return val === undefined
             ? val
             : {
-                  address: val.address,
-                  contract: val.contract,
-                  bytecode: val.bytecode,
-                  deployedBytecode: val.deployedBytecode,
-                  storage: val.storage,
-                  balance: val.balance,
-                  nonce: val.nonce
-              };
+                address: val.address,
+                contract: val.contract,
+                bytecode: val.bytecode,
+                deployedBytecode: val.deployedBytecode,
+                storage: val.storage,
+                balance: val.balance,
+                nonce: val.nonce
+            };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
@@ -119,12 +91,6 @@ export class Chain implements WorldInterface {
         }
     }
 
-    call(msg: SolMessage): CallResult {
-        this.expect(!msg.to.equals(ZERO_ADDRESS));
-        this.expect(msg.delegatingContract === undefined);
-        return this.execMsg(msg);
-    }
-
     private getAccountForMessage(msg: SolMessage): AccountInfo {
         // Normal call
         if (!msg.to.equals(ZERO_ADDRESS)) {
@@ -162,7 +128,7 @@ export class Chain implements WorldInterface {
         return { ...res };
     }
 
-    private execMsg(msg: SolMessage): CallResult {
+    execMsg(msg: SolMessage): CallResult {
         const checkpoint = this.state;
         const fromAccount = this.getAccount(msg.from);
         this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);

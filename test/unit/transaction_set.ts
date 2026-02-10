@@ -18,14 +18,13 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
-import { CallResult, SolMessage } from "../../src/interp/state";
 import { ArtifactManager } from "../../src/interp/artifactManager";
 import {
     abiTypeToCanonicalName,
     abiValueToBaseValue,
     toABIEncodedType
 } from "../../src/interp/abi";
-import { Chain, Trace } from "../../src";
+import { CallResult, Chain, SolMessage, Trace } from "../../src";
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
 import { TraceVisitor } from "../../src/interp/visitors";
 
@@ -258,22 +257,17 @@ export class TransactionSet {
         for (const step of this.steps) {
             const msg = this.messageFromStep(step);
             const [info, entrypoint] = this.getEntypoint(step);
-            let res: CallResult;
-
             this.msgs.push(msg);
 
-            if (step.type === "call") {
-                res = this.chain.call(msg);
-            } else {
-                res = this.chain.create(msg);
+            const res: CallResult = this.chain.execMsg(msg);
 
-                if (!res.reverted) {
-                    sol.assert(res.newContract !== undefined, ``);
-                    this.contractMap.set(info.contractName, res.newContract);
 
-                    if (info.ast && info.ast.kind === sol.ContractKind.Library) {
-                        this.libMap.set(`${info.fileName}:${info.contractName}`, res.newContract);
-                    }
+            if (step.type === "deploy" && !res.reverted) {
+                sol.assert(res.newContract !== undefined, ``);
+                this.contractMap.set(info.contractName, res.newContract);
+
+                if (info.ast && info.ast.kind === sol.ContractKind.Library) {
+                    this.libMap.set(`${info.fileName}:${info.contractName}`, res.newContract);
                 }
             }
 
@@ -326,22 +320,22 @@ export class TransactionSet {
 
     getScenario(): Scenario {
         const steps: TxDesc[] = this.msgs.map((msg) => ({
-            "address": msg.to.toString(),
-            "gasLimit": "0xff0000",
-            "gasPrice": "0x1",
-            "input": bytesToHex(msg.data),
-            "origin": msg.from.toString(),
-            "value": bigIntToHex(msg.value),
-            "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
-            "blockDifficulty": "0xc",
-            "blockGasLimit": "0xff0000",
-            "blockNumber": "0x1",
-            "blockTime": "0x1",
-        }))
+            address: msg.to.toString(),
+            gasLimit: "0xff0000",
+            gasPrice: "0x1",
+            input: bytesToHex(msg.data),
+            origin: msg.from.toString(),
+            value: bigIntToHex(msg.value),
+            blockCoinbase: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
+            blockDifficulty: "0xc",
+            blockGasLimit: "0xff0000",
+            blockNumber: "0x1",
+            blockTime: "0x1"
+        }));
 
         return {
             initialState: { accounts: {} },
             steps
-        }
+        };
     }
 }

@@ -1,4 +1,3 @@
-import { Address } from "@ethereumjs/util";
 import {
     BaseMemoryView,
     Memory,
@@ -13,34 +12,7 @@ import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction } from "./value";
 import { ArtifactManager } from "./artifactManager";
-import { AccountInfo } from "./chain";
-
-export interface CallResult {
-    reverted: boolean;
-    data: Uint8Array;
-    newContract?: Address;
-}
-
-export interface WorldInterface {
-    create(msg: SolMessage): CallResult;
-    call(msg: SolMessage): CallResult;
-    staticcall(msg: SolMessage): CallResult;
-    delegatecall(msg: SolMessage): CallResult;
-    getAccount(address: string | Address): AccountInfo | undefined;
-    setAccount(address: string | Address, account: AccountInfo): void;
-    updateAccount(account: AccountInfo): void;
-}
-
-export interface SolMessage {
-    from: Address;
-    delegatingContract: Address | undefined;
-    to: Address;
-    data: Uint8Array;
-    gas: bigint;
-    value: bigint;
-    salt: Uint8Array | undefined;
-    isStaticCall: boolean;
-}
+import { AccountInfo, SolMessage } from "./env";
 
 export interface InternalCallFrame {
     callee: sol.FunctionDefinition | sol.VariableDeclaration | BuiltinFunction;

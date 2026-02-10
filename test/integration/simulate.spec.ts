@@ -1,6 +1,6 @@
 import { loadSamples } from "../unit/utils";
 import * as fse from "fs-extra";
-import { Scenario, TxRunner, } from "sol-dbg";
+import { Scenario, TxRunner } from "sol-dbg";
 
 const sol2maruirTests: string[] = fse
     .readdirSync("test/samples/sol2maruir")
@@ -12,7 +12,7 @@ const sol2maruirTests: string[] = fse
 describe("Simulate test", () => {
     for (const sample of sol2maruirTests) {
         it(`${sample}`, async () => {
-            const solFile = sample.slice(0, -5) + ".sol"
+            const solFile = sample.slice(0, -5) + ".sol";
             const [artifactManager] = await loadSamples([solFile], "test/samples/sol2maruir");
             const runner = new TxRunner(artifactManager, false);
             const scenario: Scenario = fse.readJSONSync("test/samples/sol2maruir/" + sample);

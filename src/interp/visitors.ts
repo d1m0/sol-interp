@@ -1,6 +1,6 @@
 import { RuntimeError } from "./exceptions";
 import { Interpreter } from "./interp";
-import { CallResult, SolMessage, State } from "./state";
+import { State } from "./state";
 import * as sol from "solc-typed-ast";
 import { LValue, Value } from "./value";
 import {
@@ -14,6 +14,7 @@ import {
 } from "./step";
 import { EventDesc, ZERO_ADDRESS } from "sol-dbg";
 import { getThis } from "./utils";
+import { CallResult, SolMessage } from "./env";
 
 export interface InterpVisitor {
     call(interp: Interpreter, state: State, msg: SolMessage): void;

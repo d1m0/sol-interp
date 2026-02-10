@@ -5,9 +5,9 @@ import { PartialSolcOutput, Value as BaseValue, Struct } from "sol-dbg";
 import { ArtifactManager } from "../interp/artifactManager";
 import { Runner } from "./runner";
 import { parseStep, SyntaxError } from "./ast";
-import { CallResult } from "../interp/state";
 import { Address, bytesToUtf8 } from "@ethereumjs/util";
 import { ppTrace } from "../interp/pp";
+import { CallResult } from "../interp";
 
 function terminate(message?: string, exitCode = 0): never {
     if (message !== undefined) {

@@ -24,7 +24,7 @@ import { Address, bytesToHex } from "@ethereumjs/util";
 import { EvalStep, ExceptionStep, ExecStep, ExtCallStep, ExtReturnStep, Trace } from "./step";
 import { printNode } from "./utils";
 import { ArtifactManager } from "./artifactManager";
-import { AccountInfo } from "./chain";
+import { AccountInfo } from "./env";
 
 export function ppLValue(v: LValue): string {
     if (v instanceof View) {
