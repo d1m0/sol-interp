@@ -13,7 +13,7 @@ export interface AccountInfo {
     nonce: bigint;
 }
 
-export type EVMStorage = rtt.ImmMap<string, AccountInfo>;
+export type AccountMap = rtt.ImmMap<string, AccountInfo>;
 
 export interface CallResult {
     reverted: boolean;
@@ -33,7 +33,7 @@ export interface SolMessage {
 }
 
 export interface EnvInterface {
-    execMsg(msg: SolMessage): CallResult
+    execMsg(msg: SolMessage): CallResult;
     getAccount(address: string | Address): AccountInfo | undefined;
     setAccount(address: string | Address, account: AccountInfo): void;
     updateAccount(account: AccountInfo): void;

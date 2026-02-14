@@ -1,33 +1,35 @@
 {
-  "initialState": {
-    "accounts": {}
-  },
-  "steps": [
-    {
-      "address": "0x0000000000000000000000000000000000000000",
-      "gasLimit": "0xff0000",
-      "gasPrice": "0x1",
-      "input": "0x608060405234801561001057600080fd5b50610277806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c8063dffeadd014610030575b600080fd5b61003861003a565b005b6000604051610048906100d6565b604051809103906000f080158015610064573d6000803e3d6000fd5b50905061007081610073565b50565b8073ffffffffffffffffffffffffffffffffffffffff1663db65a6df6040518163ffffffff1660e01b8152600401600060405180830381600087803b1580156100bb57600080fd5b505af11580156100cf573d6000803e3d6000fd5b5050505050565b61015e806100e48339019056fe608060405234801561001057600080fd5b5061013e806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c8063db65a6df14610030575b600080fd5b61003861003a565b005b60007ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd905060006003905060007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe59050808261ffff16840a1461009957fe5b60007ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9905060006003905060007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa990508060000b8260000b8460000b0a60000b1461010057fe5b50505050505056fea2646970667358221220d3580e465873edfba9d7a8d28ebd22bcea7fbb57aec9ce1b2907fd51b0a3695364736f6c634300060a0033a2646970667358221220d3b1ccd2d0c419401678920728ae5bdecefb656de603bb923fdf0c2f7d61d8ba64736f6c634300060a0033",
-      "origin": "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97",
-      "value": "0x0",
-      "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
-      "blockDifficulty": "0xc",
-      "blockGasLimit": "0xff0000",
-      "blockNumber": "0x1",
-      "blockTime": "0x1"
+    "initialState": {
+        "accounts": {}
     },
-    {
-      "address": "0x93a5b04040b9d24ea0bb4aaa19967294bcbf44d2",
-      "gasLimit": "0xff0000",
-      "gasPrice": "0x1",
-      "input": "0xdffeadd0",
-      "origin": "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97",
-      "value": "0xf4240",
-      "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
-      "blockDifficulty": "0xc",
-      "blockGasLimit": "0xff0000",
-      "blockNumber": "0x1",
-      "blockTime": "0x1"
-    }
-  ]
+    "steps": [
+        {
+            "address": "0x0000000000000000000000000000000000000000",
+            "gasLimit": "0xff0000",
+            "gasPrice": "0x1",
+            "input": "0x608060405234801561001057600080fd5b50610277806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c8063dffeadd014610030575b600080fd5b61003861003a565b005b6000604051610048906100d6565b604051809103906000f080158015610064573d6000803e3d6000fd5b50905061007081610073565b50565b8073ffffffffffffffffffffffffffffffffffffffff1663db65a6df6040518163ffffffff1660e01b8152600401600060405180830381600087803b1580156100bb57600080fd5b505af11580156100cf573d6000803e3d6000fd5b5050505050565b61015e806100e48339019056fe608060405234801561001057600080fd5b5061013e806100206000396000f3fe608060405234801561001057600080fd5b506004361061002b5760003560e01c8063db65a6df14610030575b600080fd5b61003861003a565b005b60007ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffd905060006003905060007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe59050808261ffff16840a1461009957fe5b60007ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff9905060006003905060007fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffa990508060000b8260000b8460000b0a60000b1461010057fe5b50505050505056fea2646970667358221220d3580e465873edfba9d7a8d28ebd22bcea7fbb57aec9ce1b2907fd51b0a3695364736f6c634300060a0033a2646970667358221220d3b1ccd2d0c419401678920728ae5bdecefb656de603bb923fdf0c2f7d61d8ba64736f6c634300060a0033",
+            "origin": "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97",
+            "value": "0x0",
+            "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
+            "blockDifficulty": "0xc",
+            "blockGasLimit": "0xff0000",
+            "blockNumber": "0x1",
+            "blockTime": "0x1",
+            "nonce": 0
+        },
+        {
+            "address": "0x93a5b04040b9d24ea0bb4aaa19967294bcbf44d2",
+            "gasLimit": "0xff0000",
+            "gasPrice": "0x1",
+            "input": "0xdffeadd0",
+            "origin": "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97",
+            "value": "0xf4240",
+            "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
+            "blockDifficulty": "0xc",
+            "blockGasLimit": "0xff0000",
+            "blockNumber": "0x1",
+            "blockTime": "0x1",
+            "nonce": 1
+        }
+    ]
 }

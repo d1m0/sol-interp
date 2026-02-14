@@ -5,9 +5,9 @@ import { ArtifactManager } from "../artifactManager";
 import { Address, createContractAddress } from "@ethereumjs/util";
 import { InterpVisitor } from "../visitors";
 import { ppAccount } from "../pp";
-import { AccountInfo, CallResult, EnvInterface, EVMStorage, SolMessage } from "./types";
+import { AccountInfo, CallResult, EnvInterface, AccountMap, SolMessage } from "./types";
 
-export function ppChainState(state: EVMStorage): string {
+export function ppChainState(state: AccountMap): string {
     const t: string[] = [];
 
     for (const [addr, account] of state.entries()) {
@@ -22,11 +22,14 @@ export function ppChainState(state: EVMStorage): string {
  * Simple BlockChain implementation supporting only contracts with source artifacts.
  */
 export class Chain implements EnvInterface {
-    state: EVMStorage;
+    state: AccountMap;
     visitors: InterpVisitor[];
 
-    constructor(public readonly artifactManager: ArtifactManager) {
-        this.state = ImmMap.fromEntries([]);
+    constructor(
+        public readonly artifactManager: ArtifactManager,
+        initialState: AccountMap = ImmMap.fromEntries([])
+    ) {
+        this.state = initialState;
         this.visitors = [];
     }
 
@@ -43,14 +46,14 @@ export class Chain implements EnvInterface {
         return val === undefined
             ? val
             : {
-                address: val.address,
-                contract: val.contract,
-                bytecode: val.bytecode,
-                deployedBytecode: val.deployedBytecode,
-                storage: val.storage,
-                balance: val.balance,
-                nonce: val.nonce
-            };
+                  address: val.address,
+                  contract: val.contract,
+                  bytecode: val.bytecode,
+                  deployedBytecode: val.deployedBytecode,
+                  storage: val.storage,
+                  balance: val.balance,
+                  nonce: val.nonce
+              };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {

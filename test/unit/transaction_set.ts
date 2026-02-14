@@ -261,7 +261,6 @@ export class TransactionSet {
 
             const res: CallResult = this.chain.execMsg(msg);
 
-
             if (step.type === "deploy" && !res.reverted) {
                 sol.assert(res.newContract !== undefined, ``);
                 this.contractMap.set(info.contractName, res.newContract);
