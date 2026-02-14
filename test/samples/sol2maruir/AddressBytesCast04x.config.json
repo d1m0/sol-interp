@@ -1,6 +1,13 @@
 {
     "initialState": {
-        "accounts": {}
+        "accounts": {
+            "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97": {
+                "nonce": "0x0",
+                "balance": "0xf4240",
+                "code": "0x",
+                "storage": {}
+            }
+        }
     },
     "steps": [
         {
