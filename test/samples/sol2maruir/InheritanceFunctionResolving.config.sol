@@ -19,7 +19,7 @@ contract C is B {
 }
 
 contract Test {
-    function main() public {
+    function main() public payable {
         assert((new A()).test() == 1);
         assert((new B()).test() == 2);
         assert((new C()).test() == 7);
@@ -27,7 +27,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test();
         __testCase92__(__this__);
     }

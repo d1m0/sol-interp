@@ -29,7 +29,7 @@ contract UnknownVar is B {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         UnknownVar __this__ = new UnknownVar(int256(3), int256(4), int256(7));
         __testCase90__(__this__);
     }

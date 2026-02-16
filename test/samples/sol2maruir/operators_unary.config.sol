@@ -91,7 +91,7 @@ contract OperatorsUnary {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         OperatorsUnary __this__ = new OperatorsUnary();
         __testCase443__(__this__);
         __testCase457__(__this__);

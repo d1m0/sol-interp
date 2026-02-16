@@ -16,7 +16,7 @@ contract NoArgPush {
     Foo[] internal arr2;
     Boo[] internal arr3;
 
-    function main() public {
+    function main() public payable {
         arr.push();
         assert((arr.length == 1) && (arr[0] == 0));
         arr1.push();
@@ -30,7 +30,7 @@ contract NoArgPush {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         NoArgPush __this__ = new NoArgPush();
         __testCase141__(__this__);
     }

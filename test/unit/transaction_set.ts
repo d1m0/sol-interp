@@ -329,7 +329,8 @@ export class TransactionSet {
             blockDifficulty: "0xc",
             blockGasLimit: "0xff0000",
             blockNumber: "0x1",
-            blockTime: "0x1"
+            blockTime: "0x1",
+            nonce: 0
         }));
 
         return {

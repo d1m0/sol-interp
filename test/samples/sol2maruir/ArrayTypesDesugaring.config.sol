@@ -27,14 +27,14 @@ contract ArrayTypesDesugaring {
         assert(x.length == 1);
     }
 
-    function main() public {
+    function main() public payable {
         normalArrays();
         contractArrays();
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ArrayTypesDesugaring __this__ = new ArrayTypesDesugaring();
         __testCase158__(__this__);
     }

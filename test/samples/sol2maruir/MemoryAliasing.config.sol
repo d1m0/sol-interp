@@ -185,7 +185,7 @@ contract MemoryAliasing {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         MemoryAliasing __this__ = new MemoryAliasing();
         __testCase1229__(__this__);
         __testCase1243__(__this__);

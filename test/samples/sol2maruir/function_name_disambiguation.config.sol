@@ -13,7 +13,7 @@ contract FunctionNameDisambiguation {
         return 3;
     }
 
-    function main() public {
+    function main() public payable {
         assert(A() == 1);
         assert(A(uint(10)) == 2);
         assert(A(int128(10)) == 3);
@@ -21,7 +21,7 @@ contract FunctionNameDisambiguation {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         FunctionNameDisambiguation __this__ = new FunctionNameDisambiguation();
         __testCase75__(__this__);
     }

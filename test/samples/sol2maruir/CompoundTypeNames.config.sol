@@ -16,7 +16,7 @@ contract CompoundTypeNames {
     Structs.Record[] internal recs;
     Record internal recs2;
 
-    function main() public {
+    function main() public payable {
         recs.push(Structs.Record(1, "test"));
         assert(recs.length == 1);
         assert(recs[0].id == 1);
@@ -24,7 +24,7 @@ contract CompoundTypeNames {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         CompoundTypeNames __this__ = new CompoundTypeNames();
         __testCase63__(__this__);
     }

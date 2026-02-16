@@ -59,7 +59,7 @@ contract RationalTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         RationalTest __this__ = new RationalTest();
         __testCase359__(__this__);
         __testCase373__(__this__);

@@ -25,7 +25,7 @@ contract Child is Base {
 }
 
 contract DynamicDispatch {
-    function main() public {
+    function main() public payable {
         Base b = new Base();
         Base cb = new Child();
         Child c = new Child();
@@ -43,7 +43,7 @@ contract DynamicDispatch {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         DynamicDispatch __this__ = new DynamicDispatch();
         __testCase184__(__this__);
     }

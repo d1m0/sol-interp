@@ -74,7 +74,7 @@ contract Modifiers {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Modifiers __this__ = new Modifiers();
         __testCase271__(__this__);
         __testCase320__(__this__);

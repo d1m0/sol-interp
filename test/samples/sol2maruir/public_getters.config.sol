@@ -100,7 +100,7 @@ contract PublicGetters {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         PublicGetters __this__ = new PublicGetters();
         __testCase612__(__this__);
         __testCase626__(__this__);

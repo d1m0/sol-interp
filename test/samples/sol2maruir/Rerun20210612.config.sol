@@ -91,7 +91,7 @@ contract Rerun20210612 is Some {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Rerun20210612 __this__ = new Rerun20210612();
         __testCase298__(__this__);
     }

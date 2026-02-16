@@ -1,7 +1,7 @@
 pragma solidity 0.8.19;
 
 contract Test {
-    function main() public {
+    function main () public payable {
         uint a;
         uint b;
         (a, b) = abi.decode(bytes("0x01"), (uint, uint));
@@ -9,7 +9,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main () public payable {
         Test __this__ = new Test();
         __testCase43__(__this__);
     }

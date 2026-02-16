@@ -15,7 +15,7 @@ contract ReturnStorageRef {
         x = a;
     }
 
-    function main() public {
+    function main() public payable {
         a = [1, 2];
         uint[] storage x = getA1();
         x[0] = 42;
@@ -32,7 +32,7 @@ contract ReturnStorageRef {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ReturnStorageRef __this__ = new ReturnStorageRef();
         __testCase188__(__this__);
     }

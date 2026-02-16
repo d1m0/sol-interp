@@ -8,7 +8,7 @@ contract ArrayLengthUnaryOp {
     uint[] internal arr5 = [3, 4, 5, 6, 7];
     uint[] internal arr6 = [3, 4, 5, 6, 7];
 
-    function main() public {
+    function main() public payable {
         uint x = ((++arr1.length) + (++arr1.length)) + (++arr1.length);
         assert(x == 6);
         assert(arr1.length == 3);
@@ -31,7 +31,7 @@ contract ArrayLengthUnaryOp {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ArrayLengthUnaryOp __this__ = new ArrayLengthUnaryOp();
         __testCase218__(__this__);
     }

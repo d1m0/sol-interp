@@ -39,7 +39,7 @@ contract HashingTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         HashingTest __this__ = new HashingTest();
         __testCase238__(__this__);
         __testCase252__(__this__);

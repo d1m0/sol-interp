@@ -17,7 +17,7 @@ contract B {
 }
 
 contract CircularDefinitions {
-    function main() public {
+    function main() public payable {
         A a = new A();
         B b = new B();
         a.setB(b);
@@ -26,7 +26,7 @@ contract CircularDefinitions {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         CircularDefinitions __this__ = new CircularDefinitions();
         __testCase74__(__this__);
     }

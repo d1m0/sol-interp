@@ -85,7 +85,7 @@ contract Assignments {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Assignments __this__ = new Assignments();
         __testCase420__(__this__);
         __testCase434__(__this__);

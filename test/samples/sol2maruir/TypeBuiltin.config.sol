@@ -17,5 +17,5 @@ contract TypeBuiltin {
 }
 
 contract __IRTest__ {
-    function main() public {}
+    function main() public payable {}
 }

@@ -15,13 +15,13 @@ contract Test {
         assert(address(g1).balance == 42);
     }
 
-    function main() public {
+    function main() public payable {
         testCreationWithValue();
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test{value: 100}();
         __testCase73__(__this__);
     }

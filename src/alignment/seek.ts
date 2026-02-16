@@ -31,6 +31,10 @@ export function findCall(llTrace: StepState[], afterIdx: number): number {
     return -1;
 }
 
+function isReturnOp(op: number): boolean {
+    return op === OPCODES.RETURN || op === OPCODES.STOP;
+}
+
 /**
  * Scan `llTrace` starting at `afterIdx+1`.
  * If we hit a return, return the first index in the caller context.
@@ -42,9 +46,10 @@ export function findReturn(llTrace: StepState[], afterIdx: number): number {
 
     for (let i = afterIdx + 1; i < llTrace.length; i++) {
         const step = llTrace[i];
+
         if (step.depth === curDepth - 1) {
             // Don't match exceptions
-            if (llTrace[i - 1].op.opcode !== OPCODES.RETURN) {
+            if (!isReturnOp(llTrace[i - 1].op.opcode)) {
                 return -1;
             }
 
@@ -58,6 +63,13 @@ export function findReturn(llTrace: StepState[], afterIdx: number): number {
         if (step.emittedEvent !== undefined) {
             return -1;
         }
+    }
+
+    // If we hit the last step in the trace, return the "step" after it
+    const lastStep = llTrace[llTrace.length - 1];
+
+    if (isReturnOp(lastStep.op.opcode)) {
+        return llTrace.length;
     }
 
     return -1;

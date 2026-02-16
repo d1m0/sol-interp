@@ -42,7 +42,7 @@ contract Tuples {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Tuples __this__ = new Tuples();
         __testCase250__(__this__);
         __testCase264__(__this__);

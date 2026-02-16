@@ -87,7 +87,7 @@ contract Ifs {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Ifs __this__ = new Ifs();
         __testCase339__(__this__);
         __testCase353__(__this__);

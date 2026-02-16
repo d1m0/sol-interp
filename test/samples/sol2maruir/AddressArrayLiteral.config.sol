@@ -11,7 +11,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main () public payable {
         Test __this__ = new Test();
         __testCase54__(__this__);
     }

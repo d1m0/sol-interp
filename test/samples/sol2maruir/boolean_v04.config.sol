@@ -24,7 +24,7 @@ contract Boolean {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Boolean __this__ = new Boolean();
         __testCase109__(__this__);
     }

@@ -27,7 +27,7 @@ contract AddressLiteralMemberAccess {
         0xDeaDbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF.transfer(1 wei);
     }
 
-    function verify() public {
+    function verify() public payable {
         noAddrBalance();
         noAddrSend();
         noAddrCall();
@@ -37,12 +37,12 @@ contract AddressLiteralMemberAccess {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         AddressLiteralMemberAccess __this__ = new AddressLiteralMemberAccess();
         __testCase112__(__this__);
     }
 
     function __testCase112__(AddressLiteralMemberAccess __this__) internal {
-        __this__.verify();
+        __this__.verify{value: 10}();
     }
 }

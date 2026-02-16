@@ -24,14 +24,14 @@ contract AmbiguousFunctions is B {
         assert(x == 1);
     }
 
-    function main() public {
+    function main() public payable {
         test1();
         test2();
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         AmbiguousFunctions __this__ = new AmbiguousFunctions();
         __testCase97__(__this__);
     }

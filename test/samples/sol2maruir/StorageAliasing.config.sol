@@ -93,7 +93,7 @@ contract StorageAliasing {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         StorageAliasing __this__ = new StorageAliasing();
         __testCase716__(__this__);
         __testCase730__(__this__);

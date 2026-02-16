@@ -70,7 +70,7 @@ contract TryCatchState {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         TryCatchState __this__ = new TryCatchState();
         __testCase249__(__this__);
         __testCase263__(__this__);

@@ -40,7 +40,7 @@ contract Shadowing {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Shadowing __this__ = new Shadowing();
         __testCase237__(__this__);
         __testCase262__(__this__);

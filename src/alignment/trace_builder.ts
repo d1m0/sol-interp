@@ -1,11 +1,13 @@
 import {
     Address,
     bigIntToBytes,
+    bytesToHex,
     createAccount,
     createAddressFromString,
+    equalsBytes,
     setLengthLeft
 } from "@ethereumjs/util";
-import { AccountMap, CallResult, Chain, SolMessage } from "../interp/env";
+import { AccountMap, Chain, SolMessage } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { AlignedTracesPair, AlignedTraces } from "./aligned_traces";
 import { BaseStep, EmitStep, EvalStep, ExecStep } from "../interp/step";
@@ -62,7 +64,7 @@ async function makeStateManager(initialState: AccountMap): Promise<MerkleStateMa
 }
 
 export function getCommon(): Common {
-    return new Common({ chain: Mainnet, hardfork: Hardfork.Shanghai });
+    return new Common({ chain: Mainnet, hardfork: Hardfork.Cancun });
 }
 
 export function makeFakeTransaction(
@@ -93,7 +95,7 @@ async function replayEVM(
     const block = createBlock(blockData, { common });
     const stateManager = await makeStateManager(initialState);
 
-    const tracer = new SolTxDebugger(artifactManager, { strict: false });
+    const tracer = new SolTxDebugger(artifactManager, { strict: false, foundryCheatcodes: false });
     const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager);
 
     return [trace, res, stateAfter, tx];
@@ -127,7 +129,7 @@ export async function buildAlignedTraces(
     sender: Address,
     blockData: BlockData,
     artifactManager: ArtifactManager
-): Promise<[AlignedTraces<StepState, BaseStep>, CallResult, AccountMap]> {
+): Promise<[AlignedTraces<StepState, BaseStep>, AccountMap]> {
     // 1. Get the low-level trace
     const [trace, , , tx] = await replayEVM(
         artifactManager,
@@ -147,6 +149,8 @@ export async function buildAlignedTraces(
     return builder.buildAlignedTraces();
 }
 
+class MisalignmentError extends Error {}
+
 class AlignedTraceBuilder extends Chain {
     currentLLIdx = 0;
     highLevelTrace: BaseStep[] = [];
@@ -161,13 +165,62 @@ class AlignedTraceBuilder extends Chain {
         super(artifactManager, initialState);
     }
 
-    buildAlignedTraces(): [AlignedTraces<StepState, BaseStep>, CallResult, AccountMap] {
+    private foldOneTraceDown(): void {
+        if (this.alignedTracesStack.length > 1) {
+            const newTrace = this.alignedTracesStack.pop() as Array<
+                AlignedTracesPair<StepState, BaseStep>
+            >;
+            const stackTop = this.alignedTracesStack[this.alignedTracesStack.length - 1];
+            sol.assert(stackTop.length > 0, ``);
+            sol.assert(stackTop[stackTop.length - 1][2] === null, ``);
+
+            stackTop[stackTop.length - 1][2] = newTrace;
+        }
+    }
+
+    buildAlignedTraces(): [AlignedTraces<StepState, BaseStep>, AccountMap] {
         const env = this;
 
         const visitor = {
             call: function (interp: Interpreter, state: State, msg: SolMessage): void {
+                const curStep = env.lowLevelTrace[env.currentLLIdx];
+                const curDepth = curStep.depth;
+
+                // The first interpreter call corresponds to the start of the trace
+                if (
+                    env.currentLLIdx === 0 &&
+                    equalsBytes(msg.data, env.lowLevelTrace[0].stack[0].msgData)
+                ) {
+                    return;
+                }
+
                 const callIdx = findCall(env.lowLevelTrace, env.currentLLIdx);
-                sol.assert(callIdx !== undefined, `NYI failure handling`);
+
+                if (callIdx < 0) {
+                    console.error(
+                        `Look for call to ${bytesToHex(msg.data.slice(0, 4))} starting at step ${env.currentLLIdx} in lltrace at depth ${curDepth}`
+                    );
+                    //console.error(debugDumpTrace(env.lowLevelTrace.slice(env.currentLLIdx), interp.artifactManager))
+                    console.error(
+                        env.lowLevelTrace
+                            .map(
+                                (s) =>
+                                    `${s.astNode ? `${s.astNode.constructor.name}${s.astNode.id}` : " "}${s.pc}|${s.depth}:${s.op.mnemonic} ${s.gas}`
+                            )
+                            .join("\n")
+                    );
+
+                    const err = new MisalignmentError();
+
+                    env.alignedTracesStack[env.alignedTracesStack.length - 1].push([
+                        env.lowLevelTrace.slice(env.currentLLIdx),
+                        env.highLevelTrace,
+                        err
+                    ]);
+
+                    throw err;
+                }
+                sol.assert(callIdx >= 0, `NYI failure handling`);
 
                 const lowLevelTrace = env.lowLevelTrace.slice(env.currentLLIdx, callIdx);
                 const highLevelSlice = env.highLevelTrace;
@@ -184,7 +237,7 @@ class AlignedTraceBuilder extends Chain {
             },
             return: function (interp: Interpreter, state: State, res: Uint8Array): void {
                 const returnIdx = findReturn(env.lowLevelTrace, env.currentLLIdx);
-                sol.assert(returnIdx !== undefined, `NYI failure handling`);
+                sol.assert(returnIdx >= 0, `NYI failure handling`);
 
                 const lowLevelTrace = env.lowLevelTrace.slice(env.currentLLIdx, returnIdx);
                 const highLevelSlice = env.highLevelTrace;
@@ -195,23 +248,14 @@ class AlignedTraceBuilder extends Chain {
                     null
                 ]);
 
-                if (env.alignedTracesStack.length > 0) {
-                    const newTrace = env.alignedTracesStack.pop() as Array<
-                        AlignedTracesPair<StepState, BaseStep>
-                    >;
-                    const stackTop = env.alignedTracesStack[env.alignedTracesStack.length - 1];
-                    sol.assert(stackTop.length > 0, ``);
-                    sol.assert(stackTop[stackTop.length - 1][2] === null, ``);
-
-                    stackTop[stackTop.length - 1][2] = newTrace;
-                }
+                env.foldOneTraceDown();
 
                 env.highLevelTrace = [];
                 env.currentLLIdx = returnIdx;
             },
             exception: function (interp: Interpreter, state: State, err: RuntimeError): void {
                 const excIdx = findException(env.lowLevelTrace, env.currentLLIdx);
-                sol.assert(excIdx !== undefined, `NYI failure handling`);
+                sol.assert(excIdx >= 0, `NYI failure handling`);
 
                 const depthChange =
                     env.lowLevelTrace[excIdx - 1].depth - env.lowLevelTrace[excIdx].depth;
@@ -253,17 +297,26 @@ class AlignedTraceBuilder extends Chain {
             },
             emit: function (interp: Interpreter, state: State, event: EventDesc): void {
                 const emitIdx = findEmit(env.lowLevelTrace, env.currentLLIdx);
-                sol.assert(emitIdx !== undefined, `NYI failure handling`);
+                sol.assert(emitIdx >= 0, `NYI failure handling`);
                 env.currentLLIdx = emitIdx;
                 env.highLevelTrace.push(new EmitStep(event));
             }
         };
 
         this.addVisitor(visitor);
-        const interpRes = this.execMsg(this.msg);
-        console.error(interpRes);
+        try {
+            this.execMsg(this.msg);
+        } catch (e) {
+            if (!(e instanceof MisalignmentError)) {
+                throw e;
+            }
 
-        sol.assert(env.alignedTracesStack.length === 1, ``);
-        return [env.alignedTracesStack[0], interpRes, this.state];
+            while (this.alignedTracesStack.length > 1) {
+                this.foldOneTraceDown();
+            }
+        }
+
+        sol.assert(this.alignedTracesStack.length === 1, ``);
+        return [this.alignedTracesStack[0], this.state];
     }
 }

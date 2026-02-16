@@ -141,7 +141,7 @@ contract Validator {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Validator __this__ = new Validator();
         __testCase521__(__this__);
         __testCase535__(__this__);

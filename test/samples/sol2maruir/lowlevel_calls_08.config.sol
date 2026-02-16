@@ -296,7 +296,7 @@ contract Test {
         }
     }
 
-    function main() public {
+    function main() public payable {
         noContractTests();
         noFallbackTest();
         fallbackTests();
@@ -308,7 +308,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test{value: 20}();
         Test __this1__ = new Test();
         __testCase1600__(__this__, __this1__);

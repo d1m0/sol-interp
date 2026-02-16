@@ -8,7 +8,7 @@ import {
     TxDesc,
     ZERO_ADDRESS_STRING
 } from "sol-dbg";
-import { AccountInfo, AccountMap, buildAlignedTraces } from "../../src";
+import { AccountInfo, AccountMap, areAligned, buildAlignedTraces } from "../../src";
 import { TypedTxData } from "@ethereumjs/tx";
 import { Common, Hardfork } from "@ethereumjs/common";
 import { createAddressFromString, hexToBigInt, hexToBytes } from "@ethereumjs/util";
@@ -80,14 +80,17 @@ describe("Trace Alignment Tests", () => {
     for (const sample of sol2maruirScenarios) {
         it(`${sample}`, async () => {
             const scenario = fse.readJsonSync(`test/samples/sol2maruir/${sample}`) as Scenario;
-            const [artifactManager] = await loadSamples([sample.slice(0, -4) + "sol"], "test/samples/sol2maruir");
+            const [artifactManager] = await loadSamples(
+                [sample.slice(0, -4) + "sol"],
+                "test/samples/sol2maruir"
+            );
             const common = getCommon();
             let state = scenarioInitialStateToAccountMap(scenario.initialState);
 
             for (let i = 0; i < scenario.steps.length; i++) {
                 const txDesc = scenario.steps[i];
                 const sender = createAddressFromString(txDesc.origin);
-                const [alignedTraces, , stateAfter] = await buildAlignedTraces(
+                const [alignedTraces, stateAfter] = await buildAlignedTraces(
                     state,
                     txDescToTxData(txDesc),
                     sender,
@@ -95,7 +98,7 @@ describe("Trace Alignment Tests", () => {
                     artifactManager
                 );
                 state = stateAfter;
-                console.error(alignedTraces);
+                expect(areAligned(alignedTraces)).toBeTruthy();
             }
         });
     }

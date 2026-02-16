@@ -38,7 +38,7 @@ contract Mappings {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Mappings __this__ = new Mappings();
         __testCase165__(__this__);
     }

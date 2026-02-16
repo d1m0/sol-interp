@@ -1,14 +1,14 @@
 pragma solidity 0.5.0;
 
 contract CastInBraces {
-    function main() public {
+    function main() public payable {
         int8 a = (int8)(128 + 129);
         assert(a == 1);
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         CastInBraces __this__ = new CastInBraces();
         __testCase35__(__this__);
     }

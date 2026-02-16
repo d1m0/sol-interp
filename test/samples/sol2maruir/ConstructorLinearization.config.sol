@@ -71,7 +71,7 @@ contract Z is K1, K2, K3 {
 }
 
 contract ConstructorLinearization {
-    function main() public returns (uint, uint, uint, uint, uint, uint, uint, uint, uint, uint) {
+    function main() public payable returns (uint, uint, uint, uint, uint, uint, uint, uint, uint, uint) {
         Z z = new Z();
         assert(z.arrLen() == 10);
         assert(z.getArr(0) == 1);
@@ -89,7 +89,7 @@ contract ConstructorLinearization {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ConstructorLinearization __this__ = new ConstructorLinearization();
         __testCase352__(__this__);
     }

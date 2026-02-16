@@ -12,7 +12,7 @@ contract Base1 {
 contract Child1 is Base1 {
     constructor() public {}
 
-    function main() public {
+    function main() public payable {
         assert(x == 1);
     }
 }
@@ -21,7 +21,7 @@ contract Child1 is Base1 {
 contract Child2 is Base1 {
     constructor() public Base1() {}
 
-    function main() public {
+    function main() public payable {
         assert(x == 1);
     }
 }
@@ -30,7 +30,7 @@ contract Child2 is Base1 {
 contract Child3 is Base1 {
     constructor() public {}
 
-    function main() public {
+    function main() public payable {
         assert(x == 1);
     }
 }
@@ -47,7 +47,7 @@ contract Base2 {
 contract Child4 is Base1, Base2 {
     constructor() public {}
 
-    function main() public {
+    function main() public payable {
         assert((x == 1) && (y == 1));
     }
 }
@@ -56,7 +56,7 @@ contract Child4 is Base1, Base2 {
 contract Child5 is Base1, Base2 {
     constructor() public Base1() {}
 
-    function main() public {
+    function main() public payable {
         assert((x == 1) && (y == 1));
     }
 }
@@ -65,7 +65,7 @@ contract Child5 is Base1, Base2 {
 contract Child6 is Base1, Base2 {
     constructor() public Base1() Base2() {}
 
-    function main() public {
+    function main() public payable {
         assert((x == 1) && (y == 1));
     }
 }
@@ -82,7 +82,7 @@ contract Base3 is Base1 {
 contract Child7 is Base3 {
     constructor() public Base3() {}
 
-    function main() public {
+    function main() public payable {
         assert((x == 1) && (y == 1));
     }
 }
@@ -91,7 +91,7 @@ contract Child7 is Base3 {
 contract Child8 is Base1, Base3 {
     constructor() public Base3() {}
 
-    function main() public {
+    function main() public payable {
         assert((x == 1) && (y == 1));
     }
 }
@@ -100,7 +100,7 @@ contract Child8 is Base1, Base3 {
 contract Child9 is Base1, Base3 {
     constructor() public Base3() Base1() {}
 
-    function main() public {
+    function main() public payable {
         assert((x == 1) && (y == 1));
     }
 }
@@ -115,7 +115,7 @@ contract Base4 {
 contract Child10 is Base4(1) {}
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Child1 __this__ = new Child1();
         __testCase276__(__this__);
         Child2 __this2__ = new Child2();

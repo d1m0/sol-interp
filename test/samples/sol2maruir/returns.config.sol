@@ -61,7 +61,7 @@ contract Returns {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Returns __this__ = new Returns();
         __testCase211__(__this__);
         __testCase250__(__this__);

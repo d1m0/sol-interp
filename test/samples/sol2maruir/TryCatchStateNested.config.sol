@@ -76,7 +76,7 @@ contract TryCatchStateNested {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         TryCatchStateNested __this__ = new TryCatchStateNested();
         __testCase252__(__this__);
         __testCase266__(__this__);

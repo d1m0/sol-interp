@@ -35,7 +35,7 @@ contract Foo is Base1, Base2 {
 }
 
 contract Test {
-    function main() public {
+    function main() public payable {
         Base1 b1 = new Base1();
         Base1 bf1 = new Foo();
         Base2 b2 = new Base2();
@@ -51,7 +51,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test();
         __testCase160__(__this__);
     }

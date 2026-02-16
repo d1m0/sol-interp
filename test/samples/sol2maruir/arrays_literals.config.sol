@@ -14,7 +14,7 @@ contract ArrayLiterals {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ArrayLiterals __this__ = new ArrayLiterals();
         __testCase79__(__this__);
     }

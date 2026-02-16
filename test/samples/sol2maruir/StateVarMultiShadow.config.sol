@@ -35,7 +35,7 @@ contract C is A, B {
 }
 
 contract Main {
-    function main() public {
+    function main() public payable {
         C c = new C();
         (A(c)).asetA(10);
         (B(c)).bsetA(20);
@@ -46,7 +46,7 @@ contract Main {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Main __this__ = new Main();
         __testCase161__(__this__);
     }

@@ -7,7 +7,7 @@ contract CodeSize {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         CodeSize __this__ = new CodeSize();
         __testCase29__(__this__);
     }

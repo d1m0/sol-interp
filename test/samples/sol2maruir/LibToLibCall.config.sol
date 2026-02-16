@@ -11,13 +11,13 @@ library Test {
 }
 
 contract LibToLibCall {
-    function main() public {
+    function main() public payable {
         assert(Test.b() == 2);
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         LibToLibCall __this__ = new LibToLibCall();
         __testCase48__(__this__);
     }

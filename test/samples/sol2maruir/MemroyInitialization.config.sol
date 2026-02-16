@@ -47,7 +47,7 @@ contract MemoryInitialization {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         MemoryInitialization __this__ = new MemoryInitialization();
         __testCase453__(__this__);
         __testCase467__(__this__);

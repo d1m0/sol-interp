@@ -237,7 +237,7 @@ contract OperatorsBinary {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         OperatorsBinary __this__ = new OperatorsBinary();
         __testCase1238__(__this__);
         __testCase1252__(__this__);

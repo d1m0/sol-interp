@@ -7,7 +7,7 @@ contract EmptyArgNames {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         EmptyArgNames __this__ = new EmptyArgNames();
         __testCase34__(__this__);
     }

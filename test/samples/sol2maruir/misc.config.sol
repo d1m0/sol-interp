@@ -112,7 +112,7 @@ contract Misc {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Misc __this__ = new Misc();
         __testCase531__(__this__);
         __testCase545__(__this__);

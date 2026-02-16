@@ -27,7 +27,7 @@ contract Child2 is Child1 {
 }
 
 contract Test {
-    function main() public {
+    function main() public payable {
         Base b = new Base();
         Child1 c1 = new Child1();
         Child2 c2 = new Child2();
@@ -38,7 +38,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test();
         __testCase108__(__this__);
     }
