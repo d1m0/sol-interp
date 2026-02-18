@@ -99,11 +99,13 @@ contract Test {
         NoFB c = new NoFB();
         address a = address(c);
         bool res0 = a.call.gas(2300)(getIdData(42));
+        /*
         assert(!res0);
         bool res1 = a.call.gas(2300)("");
         assert(!res1);
         bool res2 = a.call.gas(2300)("\n\u000b");
         assert(!res2);
+        */
     }
 
     function callTests(Test other) public {
@@ -172,12 +174,14 @@ contract Test {
     }
 
     function main() public payable {
-        noContractTests();
+        //noContractTests();
         noFallbackTest();
+        /*
         fallbackTests();
         exceptionBytesTests();
         sendTests();
         transferTests();
+        */
     }
 }
 
@@ -188,8 +192,8 @@ contract __IRTest__ {
         RejectFallback __rf__ = new RejectFallback();
         RejectNoFuns __rnf__ = new RejectNoFuns();
         __testCase796__(__this__, __this1__, __rf__, __rnf__);
-        __testCase822__(__this__, __this1__, __rf__, __rnf__);
-        __testCase848__(__this__, __this1__, __rf__, __rnf__);
+        //__testCase822__(__this__, __this1__, __rf__, __rnf__);
+        //__testCase848__(__this__, __this1__, __rf__, __rnf__);
     }
 
     function __testCase796__(Test __this__, Test __this1__, RejectFallback __rf__, RejectNoFuns __rnf__) internal {

@@ -220,7 +220,6 @@ class AlignedTraceBuilder extends Chain {
 
                     throw err;
                 }
-                sol.assert(callIdx >= 0, `NYI failure handling`);
 
                 const lowLevelTrace = env.lowLevelTrace.slice(env.currentLLIdx, callIdx);
                 const highLevelSlice = env.highLevelTrace;
@@ -234,6 +233,7 @@ class AlignedTraceBuilder extends Chain {
 
                 env.highLevelTrace = [];
                 env.currentLLIdx = callIdx;
+                console.error(`Settign currenLLIdx to ${callIdx} on call`)
             },
             return: function (interp: Interpreter, state: State, res: Uint8Array): void {
                 const returnIdx = findReturn(env.lowLevelTrace, env.currentLLIdx);
@@ -252,10 +252,42 @@ class AlignedTraceBuilder extends Chain {
 
                 env.highLevelTrace = [];
                 env.currentLLIdx = returnIdx;
+                console.error(`Settign currenLLIdx to ${returnIdx} on return`)
             },
             exception: function (interp: Interpreter, state: State, err: RuntimeError): void {
                 const excIdx = findException(env.lowLevelTrace, env.currentLLIdx);
-                sol.assert(excIdx >= 0, `NYI failure handling`);
+
+                if (excIdx < 0) {
+                    /*
+                    console.error("Full trace: ",
+                        env.lowLevelTrace
+                            .map(
+                                (s) =>
+                                    `${s.astNode ? `${s.astNode.constructor.name}${s.astNode.id}` : " "}${s.pc}|${s.depth}:${s.op.mnemonic} ${s.gas}`
+                            )
+                            .join("\n")
+                    );
+                    */
+
+                    console.error("Couldn't find exception: ",
+                        env.lowLevelTrace.slice(env.currentLLIdx)
+                            .map(
+                                (s) =>
+                                    `${s.astNode ? `${s.astNode.constructor.name}${s.astNode.id}` : " "}${s.pc}|${s.depth}:${s.op.mnemonic} ${s.gas}`
+                            )
+                            .join("\n")
+                    );
+
+                    const err = new MisalignmentError();
+
+                    env.alignedTracesStack[env.alignedTracesStack.length - 1].push([
+                        env.lowLevelTrace.slice(env.currentLLIdx),
+                        env.highLevelTrace,
+                        err
+                    ]);
+
+                    throw err;
+                }
 
                 const depthChange =
                     env.lowLevelTrace[excIdx - 1].depth - env.lowLevelTrace[excIdx].depth;
@@ -283,6 +315,7 @@ class AlignedTraceBuilder extends Chain {
 
                 env.highLevelTrace = [];
                 env.currentLLIdx = excIdx;
+                console.error(`Settign currenLLIdx to ${excIdx} on exception`)
             },
             exec: function (interp: Interpreter, state: State, stmt: sol.Statement): void {
                 env.highLevelTrace.push(new ExecStep(stmt));
@@ -298,8 +331,9 @@ class AlignedTraceBuilder extends Chain {
             emit: function (interp: Interpreter, state: State, event: EventDesc): void {
                 const emitIdx = findEmit(env.lowLevelTrace, env.currentLLIdx);
                 sol.assert(emitIdx >= 0, `NYI failure handling`);
-                env.currentLLIdx = emitIdx;
                 env.highLevelTrace.push(new EmitStep(event));
+                env.currentLLIdx = emitIdx;
+                console.error(`Settign currenLLIdx to ${emitIdx} on emit`)
             }
         };
 

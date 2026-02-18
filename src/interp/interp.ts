@@ -40,7 +40,8 @@ import {
     ERROR_SELECTOR,
     PanicError,
     CustomError,
-    NoPayloadError
+    NoPayloadError,
+    NoMatchingMethod
 } from "./exceptions";
 import { gte, lt } from "semver";
 import {
@@ -497,7 +498,8 @@ export class Interpreter {
         const entryPoint = this.artifactManager.findEntryPoint(msg.data, codeInfo);
 
         if (entryPoint === undefined) {
-            return new NoPayloadError(codeInfo.ast);
+            this.nodes.push(codeInfo.ast);
+            this.runtimeError(NoMatchingMethod, state);
         }
 
         // Decode Arguments

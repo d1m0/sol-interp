@@ -265,6 +265,11 @@
 249 - cli for playing
 250 - implement computing the correct final deployed bytecode in the face of immutables
 
+- test multi-level exception
+- test alignment on contract creation with no constructor and no implicit initializers
+- test alignment on contract creation with no constructor and implicit initializers
+- test alignment on contract creation with constructor and implicit initializers
+
 - cleanup member access for builtin structs and the such
 - cleanup builtin function calls
 - on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?

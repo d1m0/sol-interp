@@ -91,7 +91,7 @@ export function findException(llTrace: StepState[], afterIdx: number): number {
         const step = llTrace[i];
         if (step.depth < curDepth) {
             // Don't match returns
-            if (llTrace[i - 1].op.opcode === OPCODES.RETURN) {
+            if (isReturnOp(llTrace[i - 1].op.opcode)) {
                 return -1;
             }
 
