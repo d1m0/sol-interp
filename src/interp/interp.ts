@@ -498,8 +498,7 @@ export class Interpreter {
         const entryPoint = this.artifactManager.findEntryPoint(msg.data, codeInfo);
 
         if (entryPoint === undefined) {
-            this.nodes.push(codeInfo.ast);
-            this.runtimeError(NoMatchingMethod, state);
+            return new NoMatchingMethod(codeInfo.ast);
         }
 
         // Decode Arguments

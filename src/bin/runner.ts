@@ -194,7 +194,7 @@ export class Runner {
             data = concatBytes(bytecode, argData);
         } else {
             this.expect(target !== undefined);
-            const selector = hexToBytes(`0x${sol.signatureHash(target)}`);
+            const selector = sol.signatureHash(target);
             data = concatBytes(selector, argData);
         }
 
