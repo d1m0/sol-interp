@@ -4,6 +4,7 @@ import {
     Poison,
     ppStorage,
     Slice,
+    StepState,
     toHexString,
     View
 } from "sol-dbg";
@@ -22,9 +23,10 @@ import {
 } from "./value";
 import { Address, bytesToHex } from "@ethereumjs/util";
 import { EvalStep, ExceptionStep, ExecStep, ExtCallStep, ExtReturnStep, Trace } from "./step";
-import { printNode } from "./utils";
+import { getFunDef, printNode } from "./utils";
 import { ArtifactManager } from "./artifactManager";
 import { AccountInfo } from "./env";
+import * as sol from "solc-typed-ast";
 
 export function ppLValue(v: LValue): string {
     if (v instanceof View) {
@@ -56,7 +58,7 @@ export function ppValue(v: Value): string {
     } else if (v instanceof ExternalFunRef) {
         return `<external fun ref to ${v.selector}@${v.address}>`;
     } else if (v instanceof InternalFunRef) {
-        return `<internal fun ref to ${v.fun.name}>`;
+        return `<internal fun ref to ${getFunDef(v).name}>`;
     } else if (v instanceof Slice) {
         return `<slice [${v.start}:${v.end}]>`;
     } else if (v instanceof DefValue || v instanceof TypeValue) {
@@ -143,4 +145,30 @@ export function ppAccount(a: AccountInfo): string {
         nonce: ${a.nonce},
         storage: ${ppStorage(a.storage)}
     }`;
+}
+
+export function dbgDescStep(s: StepState): string {
+    const nd = s.astNode;
+    if (nd === undefined) {
+        return "<unknown>";
+    }
+
+    const fun =
+        nd instanceof sol.FunctionDefinition
+            ? nd
+            : nd.getClosestParentByType(sol.FunctionDefinition);
+
+    if (fun) {
+        return `${fun.vScope instanceof sol.ContractDefinition ? fun.vScope.name + "." : ""}${fun.name}`;
+    }
+
+    const contract =
+        nd instanceof sol.ContractDefinition
+            ? nd
+            : nd.getClosestParentByType(sol.ContractDefinition);
+    if (contract) {
+        return contract.name;
+    }
+
+    return `${nd.constructor.name}${nd.id}`;
 }

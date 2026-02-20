@@ -14,8 +14,8 @@ contract ExternalCallModifiers {
         a = (new A).value(5)();
         a.arr();
         a.arr.value(5)();
-        a.arr.gas(100)();
-        a.arr.gas(200).value(10)();
+        a.arr.gas(3000)();
+        a.arr.gas(3000).value(10)();
     }
 }
 

@@ -29,7 +29,7 @@ import {
     TempView,
     CodeView
 } from "./view";
-import { AccountInfo, CallResult, EnvInterface, SolMessage } from "./env";
+import { AccountInfo, CallResult, EnvInterface } from "./env";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
 import { Address, setLengthLeft } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
@@ -691,7 +691,7 @@ export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Se
 }
 
 export const envFailMock: EnvInterface = {
-    execMsg: function (msg: SolMessage): CallResult {
+    execMsg: function (): CallResult {
         throw new Error("Function not implemented.");
     },
     getAccount: function (): AccountInfo | undefined {
@@ -948,4 +948,9 @@ export function gatherStateVars(
 export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
     const paddedLength = bs.length / 32 + (bs.length % 32) === 0 ? 0 : 32;
     return setLengthLeft(bs, paddedLength);
+}
+
+export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition {
+    sol.assert(ref.opaque instanceof sol.FunctionDefinition, ``);
+    return ref.opaque;
 }

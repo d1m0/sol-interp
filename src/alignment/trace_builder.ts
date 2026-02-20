@@ -1,7 +1,6 @@
 import {
     Address,
     bigIntToBytes,
-    bytesToHex,
     createAccount,
     createAddressFromString,
     equalsBytes,
@@ -183,9 +182,6 @@ class AlignedTraceBuilder extends Chain {
 
         const visitor = {
             call: function (interp: Interpreter, state: State, msg: SolMessage): void {
-                const curStep = env.lowLevelTrace[env.currentLLIdx];
-                const curDepth = curStep.depth;
-
                 // The first interpreter call corresponds to the start of the trace
                 if (
                     env.currentLLIdx === 0 &&
@@ -197,16 +193,6 @@ class AlignedTraceBuilder extends Chain {
                 const callIdx = findCall(env.lowLevelTrace, env.currentLLIdx);
 
                 if (callIdx < 0) {
-                    console.error(
-                        `Look for call to ${bytesToHex(msg.data.slice(0, 4))} starting at step ${env.currentLLIdx} in lltrace at depth ${curDepth}`,
-                        env.lowLevelTrace
-                            .map(
-                                (s) =>
-                                    `${s.astNode ? `${s.astNode.constructor.name}${s.astNode.id}` : " "}${s.pc}|${s.depth}:${s.op.mnemonic} ${s.gas}`
-                            )
-                            .join("\n")
-                    );
-
                     const err = new MisalignmentError();
 
                     env.alignedTracesStack[env.alignedTracesStack.length - 1].push([
@@ -253,17 +239,6 @@ class AlignedTraceBuilder extends Chain {
                 const excIdx = findException(env.lowLevelTrace, env.currentLLIdx);
 
                 if (excIdx < 0) {
-                    console.error(
-                        "Couldn't find exception: ",
-                        env.lowLevelTrace
-                            .slice(env.currentLLIdx)
-                            .map(
-                                (s) =>
-                                    `${s.astNode ? `${s.astNode.constructor.name}${s.astNode.id}` : " "}${s.pc}|${s.depth}:${s.op.mnemonic} ${s.gas}`
-                            )
-                            .join("\n")
-                    );
-
                     const err = new MisalignmentError();
 
                     env.alignedTracesStack[env.alignedTracesStack.length - 1].push([

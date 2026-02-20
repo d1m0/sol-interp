@@ -11,7 +11,7 @@ import {
     DecodingFailure,
     PrimitiveValue
 } from "sol-dbg";
-import { BaseStorageView, makeStorageView, StructStorageView } from "sol-dbg";
+import { makeStorageView, StructStorageView } from "sol-dbg";
 import { lt } from "semver";
 import {
     FixedBytesLocalView,
@@ -19,14 +19,7 @@ import {
     PointerLocalView,
     BaseLocalView
 } from "./view/local";
-import {
-    decodeView,
-    gatherStateVars,
-    getStateStorage,
-    isValueType,
-    panic,
-    setStateStorage
-} from "./utils";
+import { decodeView, gatherStateVars, getStateStorage, isValueType, panic } from "./utils";
 import { typeIdToRuntimeType } from "./types";
 import { CodeView } from "./view";
 import { ArtifactManager } from "./artifactManager";
@@ -58,7 +51,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<sol.VariableDeclaration, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) {}
+    ) { }
 
     abstract _lookup(decl: sol.VariableDeclaration): Value | undefined;
     abstract _lookupLocation(decl: sol.VariableDeclaration): View | undefined;
@@ -376,11 +369,8 @@ export class ContractScope extends BaseScope {
         return this.declToView.get(decl);
     }
 
-    // @todo is this method really necessary? Don't assignments to storage happen through Interpreter.assign?
-    _set(decl: sol.VariableDeclaration, v: Value): void {
-        const view = this.declToView.get(decl);
-        sol.assert(view instanceof BaseStorageView, `Uknown non-constant state var ${decl}`);
-        setStateStorage(this.state, view.encode(v, getStateStorage(this.state)));
+    _set(): void {
+        rtt.nyi(`Shouldnt be called`)
     }
 
     public setConst(

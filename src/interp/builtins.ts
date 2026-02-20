@@ -368,7 +368,7 @@ export const revertBuiltin = new BuiltinFunction(
     dummyFunT,
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         if (args.length === 0) {
-            throw new NoPayloadError(interp.curNode);
+            interp.runtimeError(NoPayloadError, state);
         }
 
         interp.expect(
@@ -378,7 +378,7 @@ export const revertBuiltin = new BuiltinFunction(
         const msgArg = args[0];
         const msg = msgArg.decode(state.memory);
         interp.expect(msg instanceof Uint8Array);
-        throw new ErrorError(interp.curNode, bytesToUtf8(msg));
+        interp.runtimeError(ErrorError, state, bytesToUtf8(msg));
     }
 );
 
@@ -395,14 +395,14 @@ export const requireBuiltin = new BuiltinFunction(
         }
 
         if (args.length === 1) {
-            throw new NoPayloadError(interp.curNode);
+            interp.runtimeError(NoPayloadError, state);
         }
 
         interp.expect(args[1] instanceof rtt.BytesMemView);
         const bs = args[1].decode(state.memory);
         interp.expect(bs instanceof Uint8Array);
 
-        throw new ErrorError(interp.curNode, bytesToUtf8(bs));
+        interp.runtimeError(ErrorError, state, bytesToUtf8(bs));
     }
 );
 

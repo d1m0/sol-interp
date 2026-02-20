@@ -95,6 +95,7 @@ import {
     getCodeContractInfo,
     getContractInfo,
     getExternalCallComponents,
+    getFunDef,
     getGetterArgAndReturnTs,
     getLibraryLinkedAddress,
     getModifiers,
@@ -498,7 +499,11 @@ export class Interpreter {
         const entryPoint = this.artifactManager.findEntryPoint(msg.data, codeInfo);
 
         if (entryPoint === undefined) {
-            return new NoMatchingMethod(codeInfo.ast);
+            const exc = new NoMatchingMethod(codeInfo.ast);
+            for (const v of this.visitors) {
+                v.exception(this, state, exc);
+            }
+            return exc;
         }
 
         // Decode Arguments
@@ -1367,11 +1372,7 @@ export class Interpreter {
         const res = this.eval(expr, state);
 
         if (res instanceof Poison) {
-            if (res instanceof DecodingFailure) {
-                this.fail(NoPayloadError, `DecodingFailure`, expr);
-            }
-
-            this.fail(InternalError, `Got poison`, expr);
+            this.runtimeError(NoPayloadError, state);
         }
 
         return res;
@@ -2550,7 +2551,7 @@ export class Interpreter {
         return results;
     }
 
-    private makeMsgCall(msg: SolMessage, state: State, isDelegate: boolean): CallResult {
+    private makeMsgCall(msg: SolMessage, state: State): CallResult {
         const address = getThis(state);
         // Pesist our state changes before calling out
         this.world.updateAccount(state.account);
@@ -2676,7 +2677,7 @@ export class Interpreter {
             isStaticCall: callee.callKind === "staticcall"
         };
 
-        return this.makeMsgCall(msg, state, isLibCall);
+        return this.makeMsgCall(msg, state);
     }
 
     private getValuesFromReturnedCalldata(
@@ -2791,8 +2792,9 @@ export class Interpreter {
             callTarget = callee;
             actualCallee = callee;
         } else if (callee instanceof rtt.InternalFunRef) {
-            callTarget = callee.fun;
-            actualCallee = callee.fun;
+            const fun = getFunDef(callee);
+            callTarget = fun;
+            actualCallee = fun;
         } else {
             callTarget = callee.vModifier as sol.ModifierDefinition;
             actualCallee = callee;
@@ -3698,7 +3700,10 @@ export class Interpreter {
         let nd;
 
         if (target instanceof CurriedVal) {
-            nd = target.target instanceof rtt.InternalFunRef ? target.target.fun : target.target;
+            nd =
+                target.target instanceof rtt.InternalFunRef
+                    ? getFunDef(target.target)
+                    : target.target;
             this.expect(!(nd instanceof BuiltinFunction));
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];
