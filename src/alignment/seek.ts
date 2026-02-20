@@ -4,31 +4,20 @@
 
 import { OPCODES, StepState } from "sol-dbg";
 
+export type BoundaryType = "call" | "return" | "exception" | "out-of-gas" | "event"
+export type Boundary = [BoundaryType, number]
+
 /**
- * Scan `llTrace` starting at `afterIdx+1`.
- * If we hit a call, return the first index in the new calling context.
- * Otherwise if the call depth changes, or we reach end of the trace, return -1
- * Also if we hit an event emission first return -1;
+ * Return true IFF the EVM runs out of gas on the given step.
+ * @todo in the presence of EIP-6800 or EIP-7864 its possible to for `lastStep.gasCost` to be less than the true gas cost.
+ * (see https://github.com/ethereumjs/ethereumjs-monorepo/blob/master/packages/evm/src/interpreter.ts#L399).
+ * In those cases we may miss an out-of-gas exception.
+ * 
+ * It seems that both are not yet on mainnet.
+ * @param step 
  */
-export function findCall(llTrace: StepState[], afterIdx: number): number {
-    const curDepth = llTrace[afterIdx].depth;
-
-    for (let i = afterIdx + 1; i < llTrace.length; i++) {
-        const step = llTrace[i];
-        if (step.depth === curDepth + 1) {
-            return i;
-        }
-
-        if (step.depth !== curDepth) {
-            return -1;
-        }
-
-        if (step.emittedEvent !== undefined) {
-            return -1;
-        }
-    }
-
-    return -1;
+function isOutOfGas(step: StepState): boolean {
+    return step.gasCost > step.gas;
 }
 
 function isReturnOp(op: number): boolean {
@@ -36,98 +25,50 @@ function isReturnOp(op: number): boolean {
 }
 
 /**
- * Scan `llTrace` starting at `afterIdx+1`.
- * If we hit a return, return the first index in the caller context.
- * Otherwise if the call depth changes, or we reach end of the trace, return -1
- * Also if we hit an event emission first return -1;
+ * Find the next trace alignment boundary in `llTrace` start after `afterIdx`.
  */
-export function findReturn(llTrace: StepState[], afterIdx: number): number {
+export function findNextBoundary(llTrace: StepState[], afterIdx: number): Boundary {
     const curDepth = llTrace[afterIdx].depth;
 
     for (let i = afterIdx + 1; i < llTrace.length; i++) {
+        const lastStep = llTrace[i - 1]
         const step = llTrace[i];
 
-        if (step.depth === curDepth - 1) {
-            // Don't match exceptions
-            if (!isReturnOp(llTrace[i - 1].op.opcode)) {
-                return -1;
+        // Call, return, exception or out-of-gas
+        if (step.depth !== curDepth) {
+            // Call
+            if (step.depth === curDepth + 1) {
+                return ["call", i]
             }
 
-            return i;
-        }
-
-        if (step.depth !== curDepth) {
-            return -1;
-        }
-
-        if (step.emittedEvent !== undefined) {
-            return -1;
-        }
-    }
-
-    // If we hit the last step in the trace, return the "step" after it
-    const lastStep = llTrace[llTrace.length - 1];
-
-    if (isReturnOp(lastStep.op.opcode)) {
-        return llTrace.length;
-    }
-
-    return -1;
-}
-
-/**
- * Scan `llTrace` starting at `afterIdx+1`.
- * If we hit an exception, return the first index in the catching context.
- * Otherwise if the call depth changes, or we reach end of the trace, return -1
- * Also if we hit an event emission first return -1;
- *
- * Note that we may have both explicit (revert, invalid) exceptions, as well as
- * implicit (gas, arithmetic, ...) exceptions.
- */
-export function findException(llTrace: StepState[], afterIdx: number): number {
-    const curDepth = llTrace[afterIdx].depth;
-
-    for (let i = afterIdx + 1; i < llTrace.length; i++) {
-        const step = llTrace[i];
-        if (step.depth < curDepth) {
-            // Don't match returns
-            if (isReturnOp(llTrace[i - 1].op.opcode)) {
-                return -1;
+            if (isOutOfGas(lastStep)) {
+                return ["out-of-gas", i]
             }
 
-            return i;
-        }
+            // Return
+            if (isReturnOp(lastStep.op.opcode) && step.depth === curDepth - 1) {
+                return ["return", i]
+            }
 
-        if (step.depth !== curDepth) {
-            return -1;
-        }
-
-        if (step.emittedEvent !== undefined) {
-            return -1;
-        }
-    }
-
-    return -1;
-}
-
-/**
- * Scan `llTrace` starting at `afterIdx+1`.
- * If we hit an event emission, return the index of the emit function.
- * If the call depth changes, or we reach end of the trace, return -1
- */
-export function findEmit(llTrace: StepState[], afterIdx: number): number {
-    const curDepth = llTrace[afterIdx].depth;
-
-    for (let i = afterIdx + 1; i < llTrace.length; i++) {
-        const step = llTrace[i];
-        if (step.depth !== curDepth) {
-            return -1;
+            // Exception. We don't explicitly check for a specific opcode as many
+            // opcodes may trigger an exception
+            return ["exception", i]
         }
 
         if (step.emittedEvent !== undefined) {
-            return i;
+            return ["event", i];
         }
     }
 
-    return -1;
+    const lastStep = llTrace[llTrace.length - 1]
+
+    if (isOutOfGas(lastStep)) {
+        return ["out-of-gas", llTrace.length]
+    }
+
+    if (isReturnOp(lastStep.op.opcode) && lastStep.depth === 1) {
+        return ["return", llTrace.length]
+    }
+
+    return ["exception", llTrace.length]
 }
