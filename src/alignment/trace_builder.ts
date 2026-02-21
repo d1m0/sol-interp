@@ -22,6 +22,7 @@ import { RuntimeError } from "../interp/exceptions";
 import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
 import { findNextBoundary } from "./seek";
+import { statesMatch } from "./state_equality";
 
 /**
  * Build a `MerkleStateManager` corresponding to the provided `initialState`.
@@ -150,7 +151,7 @@ export async function buildAlignedTraces(
 
 class MisalignmentError extends Error { }
 
-type InterpVisitorEvent =
+export type InterpVisitorEvent =
     | ["call", SolMessage]
     | ["return", Uint8Array]
     | ["exception", RuntimeError]
@@ -200,6 +201,17 @@ class AlignedTraceBuilder extends Chain {
         const [llType, llIdx] = findNextBoundary(this.lowLevelTrace, this.currentLLIdx)
 
         if (llType !== hlType) {
+            const err = new MisalignmentError();
+            this.alignedTracesStack[this.alignedTracesStack.length - 1].push([
+                this.lowLevelTrace.slice(this.currentLLIdx),
+                this.highLevelTrace,
+                err
+            ]);
+
+            throw err;
+        }
+
+        if (!statesMatch(event, interp, state, this.lowLevelTrace, llIdx)) {
             const err = new MisalignmentError();
             this.alignedTracesStack[this.alignedTracesStack.length - 1].push([
                 this.lowLevelTrace.slice(this.currentLLIdx),
