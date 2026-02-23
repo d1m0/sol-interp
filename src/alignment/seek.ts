@@ -3,26 +3,10 @@
  */
 
 import { OPCODES, StepState } from "sol-dbg";
+import * as sol from "solc-typed-ast"
 
 export type BoundaryType = "call" | "return" | "exception" | "out-of-gas" | "event"
 export type Boundary = [BoundaryType, number]
-
-/**
- * Return true IFF the EVM runs out of gas on the given step.
- * @todo in the presence of EIP-6800 or EIP-7864 its possible to for `lastStep.gasCost` to be less than the true gas cost.
- * (see https://github.com/ethereumjs/ethereumjs-monorepo/blob/master/packages/evm/src/interpreter.ts#L399).
- * In those cases we may miss an out-of-gas exception.
- * 
- * It seems that both are not yet on mainnet.
- * @param step 
- */
-function isOutOfGas(step: StepState): boolean {
-    return step.gasCost > step.gas;
-}
-
-function isReturnOp(op: number): boolean {
-    return op === OPCODES.RETURN || op === OPCODES.STOP;
-}
 
 /**
  * Find the next trace alignment boundary in `llTrace` start after `afterIdx`.
@@ -71,4 +55,23 @@ export function findNextBoundary(llTrace: StepState[], afterIdx: number): Bounda
     }
 
     return ["exception", llTrace.length]
+}
+
+/**
+ * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
+ * reaching `depth`, or we never reach `depth` return -1.
+ */
+export function findFirstIdxAtDepthAfter(llTrace: StepState[], depth: number, afterIdx: number): number {
+    sol.assert(llTrace[afterIdx].depth > depth, `After idx must be at a higher depth`);
+    for (let i = afterIdx + 1; i < llTrace.length; i++) {
+        if (llTrace[i].depth < depth) {
+            return -1
+        }
+
+        if (llTrace[i].depth == depth) {
+            return i;
+        }
+    }
+
+    return -1;
 }

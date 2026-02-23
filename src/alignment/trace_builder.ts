@@ -6,7 +6,7 @@ import {
     equalsBytes,
     setLengthLeft
 } from "@ethereumjs/util";
-import { AccountMap, Chain, SolMessage } from "../interp/env";
+import { AccountMap, CallResult, Chain, SolMessage } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { AlignedTracesPair, AlignedTraces } from "./aligned_traces";
 import { BaseStep, EmitStep, EvalStep, ExecStep } from "../interp/step";
@@ -21,8 +21,9 @@ import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
 import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
-import { findNextBoundary } from "./seek";
+import { findFirstIdxAtDepthAfter, findNextBoundary } from "./seek";
 import { statesMatch } from "./state_equality";
+import { getResultFromStep } from "./translation";
 
 /**
  * Build a `MerkleStateManager` corresponding to the provided `initialState`.
@@ -184,6 +185,38 @@ class AlignedTraceBuilder extends Chain {
 
             stackTop[stackTop.length - 1][2] = newTrace;
         }
+    }
+
+    execMsg(msg: SolMessage): CallResult {
+        // Find matching low-level call. If no call found, throw mismatch
+        const [llType, llIdx] = findNextBoundary(this.lowLevelTrace, this.currentLLIdx)
+
+        // @todo If index doesn't match the call, throw Mismatch
+
+        const curDepth = this.lowLevelTrace[llIdx].depth;
+        this.currentLLIdx = llIdx;
+        let res: CallResult
+
+        try {
+            res = super.execMsg(msg);
+        } catch (e) {
+            if (!(e instanceof MisalignmentError)) {
+                throw e;
+            }
+
+            // Find the return location at this level in the low-level trace
+            const retIdx = findFirstIdxAtDepthAfter(this.lowLevelTrace, curDepth, this.currentLLIdx);
+
+            if (retIdx < 0) {
+                throw e;
+            }
+
+            res = getResultFromStep(this.lowLevelTrace, retIdx)
+            this.currentLLIdx = retIdx;
+
+        }
+
+        return res;
     }
 
     handleInterpEvent(interp: Interpreter, state: State, event: InterpVisitorEvent): void {
