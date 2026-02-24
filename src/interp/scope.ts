@@ -51,7 +51,7 @@ export abstract class BaseScope {
         protected readonly knownIds: Map<sol.VariableDeclaration, rtt.BaseRuntimeType>,
         protected readonly state: State,
         public readonly _next: BaseScope | undefined
-    ) { }
+    ) {}
 
     abstract _lookup(decl: sol.VariableDeclaration): Value | undefined;
     abstract _lookupLocation(decl: sol.VariableDeclaration): View | undefined;
@@ -370,7 +370,7 @@ export class ContractScope extends BaseScope {
     }
 
     _set(): void {
-        rtt.nyi(`Shouldnt be called`)
+        rtt.nyi(`Shouldnt be called`);
     }
 
     public setConst(

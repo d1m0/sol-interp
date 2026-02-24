@@ -2138,7 +2138,7 @@ export class Interpreter {
         }
 
         // Note: for logical operations LVal evaluates first. For other ops RVal evaluates first
-        let rVal: Value
+        let rVal: Value;
         let lVal: Value;
 
         if (expr.operator === "||" || expr.operator === "&&") {

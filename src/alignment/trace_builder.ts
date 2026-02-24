@@ -150,7 +150,7 @@ export async function buildAlignedTraces(
     return builder.buildAlignedTraces();
 }
 
-class MisalignmentError extends Error { }
+class MisalignmentError extends Error {}
 
 export type InterpVisitorEvent =
     | ["call", SolMessage]
@@ -158,7 +158,7 @@ export type InterpVisitorEvent =
     | ["exception", RuntimeError]
     | ["event", EventDesc]
     | ["eval", sol.Expression, Value | LValue]
-    | ["exec", sol.Statement]
+    | ["exec", sol.Statement];
 
 class AlignedTraceBuilder extends Chain {
     currentLLIdx = 0;
@@ -191,7 +191,7 @@ class AlignedTraceBuilder extends Chain {
         // Find matching low-level call. If no call found, throw mismatch
         // @todo If index doesn't match the call, throw Mismatch
 
-        let res: CallResult
+        let res: CallResult;
 
         try {
             res = super.execMsg(msg);
@@ -212,13 +212,13 @@ class AlignedTraceBuilder extends Chain {
         if (hlType === "eval") {
             const [expr, val] = hlArgs as [sol.Expression, Value | LValue];
             this.highLevelTrace.push(new EvalStep(expr, val));
-            return
+            return;
         } else if (hlType === "exec") {
             this.highLevelTrace.push(new ExecStep(hlArgs[0] as sol.Statement));
-            return
+            return;
         }
 
-        const [llType, llIdx] = findNextBoundary(this.lowLevelTrace, this.currentLLIdx)
+        const [llType, llIdx] = findNextBoundary(this.lowLevelTrace, this.currentLLIdx);
 
         if (llType !== hlType) {
             const err = new MisalignmentError();
@@ -277,7 +277,7 @@ class AlignedTraceBuilder extends Chain {
         } else if (llType === "event") {
             this.highLevelTrace.push(new EmitStep(hlArgs[0] as EventDesc));
         } else {
-            nyi(`Low-level trace event ${llType}`)
+            nyi(`Low-level trace event ${llType}`);
         }
 
         this.highLevelTrace = [];
@@ -300,13 +300,13 @@ class AlignedTraceBuilder extends Chain {
                 env.handleInterpEvent(interp, state, ["call", msg]);
             },
             return: function (interp: Interpreter, state: State, res: Uint8Array): void {
-                env.handleInterpEvent(interp, state, ["return", res])
+                env.handleInterpEvent(interp, state, ["return", res]);
             },
             exception: function (interp: Interpreter, state: State, err: RuntimeError): void {
-                env.handleInterpEvent(interp, state, ["exception", err])
+                env.handleInterpEvent(interp, state, ["exception", err]);
             },
             exec: function (interp: Interpreter, state: State, stmt: sol.Statement): void {
-                env.handleInterpEvent(interp, state, ["exec", stmt])
+                env.handleInterpEvent(interp, state, ["exec", stmt]);
             },
             eval: function (
                 interp: Interpreter,
@@ -314,10 +314,10 @@ class AlignedTraceBuilder extends Chain {
                 expr: sol.Expression,
                 val: Value | LValue
             ): void {
-                env.handleInterpEvent(interp, state, ["eval", expr, val])
+                env.handleInterpEvent(interp, state, ["eval", expr, val]);
             },
             emit: function (interp: Interpreter, state: State, event: EventDesc): void {
-                env.handleInterpEvent(interp, state, ["event", event])
+                env.handleInterpEvent(interp, state, ["event", event]);
             }
         };
 

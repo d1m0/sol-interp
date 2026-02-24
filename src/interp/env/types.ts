@@ -30,7 +30,7 @@ export interface SolMessage {
     value: bigint;
     salt: Uint8Array | undefined;
     isStaticCall: boolean;
-    depth: number
+    depth: number;
 }
 
 export interface EnvInterface {

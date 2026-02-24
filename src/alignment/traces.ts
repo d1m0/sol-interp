@@ -5,9 +5,9 @@ import { OPCODES, StepState } from "sol-dbg";
  * @todo in the presence of EIP-6800 or EIP-7864 its possible to for `lastStep.gasCost` to be less than the true gas cost.
  * (see https://github.com/ethereumjs/ethereumjs-monorepo/blob/master/packages/evm/src/interpreter.ts#L399).
  * In those cases we may miss an out-of-gas exception.
- * 
+ *
  * It seems that both are not yet on mainnet.
- * @param step 
+ * @param step
  */
 export function isOutOfGas(step: StepState): boolean {
     return step.gasCost > step.gas;
@@ -33,5 +33,5 @@ export function throwsException(llTrace: StepState[], idx: number): boolean {
     }
 
     // Otherwise if depth is decreasing, and this is not a return op, assume its an exception
-    return llTrace[idx].depth > llTrace[idx + 1].depth && !isRet
+    return llTrace[idx].depth > llTrace[idx + 1].depth && !isRet;
 }

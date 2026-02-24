@@ -2,7 +2,7 @@ import { decodeCall, OPCODES, StepState } from "sol-dbg";
 import { Interpreter, SolMessage } from "../interp";
 import { State } from "../interp/state";
 import { InterpVisitorEvent } from "./trace_builder";
-import * as sol from "solc-typed-ast"
+import * as sol from "solc-typed-ast";
 import { bytesToHex } from "@ethereumjs/util";
 
 /**
@@ -23,17 +23,23 @@ function msgDataEq(hlData: Uint8Array, llData: Uint8Array): boolean {
 
     for (let i = hlData.length; i < llData.length; i++) {
         if (llData[i] !== 0) {
-            return false
+            return false;
         }
     }
 
     return true;
 }
 
-export function statesMatch(interpEvent: InterpVisitorEvent, intepr: Interpreter, state: State, llTrace: StepState[], llIdx: number): boolean {
+export function statesMatch(
+    interpEvent: InterpVisitorEvent,
+    intepr: Interpreter,
+    state: State,
+    llTrace: StepState[],
+    llIdx: number
+): boolean {
     sol.assert(llIdx > 1, ``);
     const [hlType, ...hlArgs] = interpEvent;
-    const lastLLStep = llTrace[llIdx - 1]
+    const lastLLStep = llTrace[llIdx - 1];
 
     if (hlType === "call") {
         if (lastLLStep.op.opcode === OPCODES.CREATE || lastLLStep.op.opcode === OPCODES.CREATE2) {
@@ -41,27 +47,39 @@ export function statesMatch(interpEvent: InterpVisitorEvent, intepr: Interpreter
             return true;
         }
 
-        const hlMsg = hlArgs[0] as SolMessage
+        const hlMsg = hlArgs[0] as SolMessage;
         const [receiver, codeAddr, msgData, , llValue] = decodeCall(lastLLStep);
 
-        const hlReceiver = hlMsg.delegatingContract !== undefined ? hlMsg.delegatingContract : hlMsg.to;
+        const hlReceiver =
+            hlMsg.delegatingContract !== undefined ? hlMsg.delegatingContract : hlMsg.to;
         const hlCodeAddr = hlMsg.to;
 
         if (!hlReceiver.equals(receiver)) {
-            console.error(`Receivers mismatch(${hlMsg.delegatingContract !== undefined}): ${hlReceiver.toString()} llReceiver: ${receiver.toString()}`)
+            console.error(
+                `Receivers mismatch(${hlMsg.delegatingContract !== undefined}): ${hlReceiver.toString()} llReceiver: ${receiver.toString()}`
+            );
         }
 
         if (!hlCodeAddr.equals(codeAddr)) {
-            console.error(`code adddr mismatch(${hlMsg.delegatingContract !== undefined}): ${hlCodeAddr.toString()} llCodeAddr: ${codeAddr.toString()}`)
+            console.error(
+                `code adddr mismatch(${hlMsg.delegatingContract !== undefined}): ${hlCodeAddr.toString()} llCodeAddr: ${codeAddr.toString()}`
+            );
         }
 
-        if (!msgDataEq(hlMsg.data, msgData, )) {
-            console.error(`msg data mismatch - hldata: ${bytesToHex(hlMsg.data)} lldata: ${bytesToHex(msgData)}`)
+        if (!msgDataEq(hlMsg.data, msgData)) {
+            console.error(
+                `msg data mismatch - hldata: ${bytesToHex(hlMsg.data)} lldata: ${bytesToHex(msgData)}`
+            );
         }
 
         // @todo compare gas as well.
 
-        return hlReceiver.equals(receiver) && hlCodeAddr.equals(codeAddr) && msgDataEq(hlMsg.data, msgData) && hlMsg.value === llValue;
+        return (
+            hlReceiver.equals(receiver) &&
+            hlCodeAddr.equals(codeAddr) &&
+            msgDataEq(hlMsg.data, msgData) &&
+            hlMsg.value === llValue
+        );
     } else {
         return true;
     }
