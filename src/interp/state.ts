@@ -63,7 +63,8 @@ export function makeNoContractState(): State {
             gas: 0n,
             value: 0n,
             salt: undefined,
-            isStaticCall: false
+            isStaticCall: false,
+            depth: 0
         },
         intCallStack: [],
         scope: undefined,
@@ -105,7 +106,8 @@ export function makeStateForAccount(
             gas: 0n,
             value: 0n,
             salt: undefined,
-            isStaticCall: false
+            isStaticCall: false,
+            depth: 0
         },
         intCallStack: [],
         scope: undefined,

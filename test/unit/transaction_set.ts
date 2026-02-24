@@ -241,7 +241,8 @@ export class TransactionSet {
             gas: 0n,
             value: step.value === undefined ? 0n : step.value,
             salt: undefined,
-            isStaticCall: false
+            isStaticCall: false,
+            depth: 0
         };
     }
 

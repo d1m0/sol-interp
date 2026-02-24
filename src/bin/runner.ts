@@ -207,7 +207,8 @@ export class Runner {
                 gas: 0n,
                 value: 1000n,
                 salt: undefined,
-                isStaticCall: false
+                isStaticCall: false,
+                depth: 0
             },
             targetContract
         ];

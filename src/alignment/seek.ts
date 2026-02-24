@@ -2,8 +2,9 @@
  * Helpers to search for steps in a low-level EVM trace
  */
 
-import { OPCODES, StepState } from "sol-dbg";
+import { StepState } from "sol-dbg";
 import * as sol from "solc-typed-ast"
+import { isOutOfGas, isReturn } from "./traces";
 
 export type BoundaryType = "call" | "return" | "exception" | "out-of-gas" | "event"
 export type Boundary = [BoundaryType, number]
@@ -30,7 +31,7 @@ export function findNextBoundary(llTrace: StepState[], afterIdx: number): Bounda
             }
 
             // Return
-            if (isReturnOp(lastStep.op.opcode) && step.depth === curDepth - 1) {
+            if (isReturn(lastStep) && step.depth === curDepth - 1) {
                 return ["return", i]
             }
 
@@ -50,7 +51,7 @@ export function findNextBoundary(llTrace: StepState[], afterIdx: number): Bounda
         return ["out-of-gas", llTrace.length]
     }
 
-    if (isReturnOp(lastStep.op.opcode) && lastStep.depth === 1) {
+    if (isReturn(lastStep) && lastStep.depth === 1) {
         return ["return", llTrace.length]
     }
 

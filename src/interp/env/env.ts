@@ -111,7 +111,7 @@ export class Chain implements EnvInterface {
         const sender = this.getAccount(msg.from);
         this.expect(sender !== undefined);
 
-        const address = createContractAddress(sender.address, sender.nonce);
+        const address = createContractAddress(sender.address, sender.nonce - 1n);
         const contract = this.artifactManager.getContractFromCreationBytecode(msg.data);
         this.expect(contract !== undefined);
 
@@ -122,7 +122,7 @@ export class Chain implements EnvInterface {
             deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]) as Storage,
             balance: 0n,
-            nonce: 0n,
+            nonce: 1n, // Since EIP-161 the nonce is increased by 1 before init code runs
             gen: 0n
         };
 
@@ -139,8 +139,17 @@ export class Chain implements EnvInterface {
             msg.delegatingContract === undefined
                 ? undefined
                 : this.getAccount(msg.delegatingContract);
-        const toAccount = this.getAccountForMessage(msg);
 
+        const valueSendingAccount =
+            delegatingAccount !== undefined ? delegatingAccount : fromAccount;
+
+        // Increment sender nonce
+        if (msg.depth === 0) {
+            valueSendingAccount.nonce++;
+            this.updateAccount(valueSendingAccount);
+        }
+
+        const toAccount = this.getAccountForMessage(msg);
         const contract = toAccount.contract;
 
         // Calls to contracts with no code succeed.
@@ -151,17 +160,14 @@ export class Chain implements EnvInterface {
             };
         }
 
-        const valueSendingAccount =
-            delegatingAccount !== undefined ? delegatingAccount : fromAccount;
         const valueReceivingAccount =
             delegatingAccount !== undefined ? delegatingAccount : toAccount;
 
         if (msg.value > valueSendingAccount.balance) {
+            this.state = checkpoint;
             return { reverted: true, data: new Uint8Array() };
         }
 
-        // Increment sender nonce
-        valueSendingAccount.nonce++;
         valueSendingAccount.balance -= msg.value;
         // @todo what about overflow here?
         valueReceivingAccount.balance += msg.value;

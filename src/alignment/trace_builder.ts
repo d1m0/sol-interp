@@ -21,9 +21,8 @@ import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
 import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
-import { findFirstIdxAtDepthAfter, findNextBoundary } from "./seek";
+import { findNextBoundary } from "./seek";
 import { statesMatch } from "./state_equality";
-import { getResultFromStep } from "./translation";
 
 /**
  * Build a `MerkleStateManager` corresponding to the provided `initialState`.
@@ -114,7 +113,8 @@ function makeSolMessage(tx: TypedTransaction, sender: Address): SolMessage {
         gas: tx.gasLimit,
         value: tx.value,
         salt: undefined,
-        isStaticCall: false
+        isStaticCall: false,
+        depth: 0
     };
 }
 
@@ -189,12 +189,8 @@ class AlignedTraceBuilder extends Chain {
 
     execMsg(msg: SolMessage): CallResult {
         // Find matching low-level call. If no call found, throw mismatch
-        const [llType, llIdx] = findNextBoundary(this.lowLevelTrace, this.currentLLIdx)
-
         // @todo If index doesn't match the call, throw Mismatch
 
-        const curDepth = this.lowLevelTrace[llIdx].depth;
-        this.currentLLIdx = llIdx;
         let res: CallResult
 
         try {
@@ -204,16 +200,7 @@ class AlignedTraceBuilder extends Chain {
                 throw e;
             }
 
-            // Find the return location at this level in the low-level trace
-            const retIdx = findFirstIdxAtDepthAfter(this.lowLevelTrace, curDepth, this.currentLLIdx);
-
-            if (retIdx < 0) {
-                throw e;
-            }
-
-            res = getResultFromStep(this.lowLevelTrace, retIdx)
-            this.currentLLIdx = retIdx;
-
+            throw e;
         }
 
         return res;

@@ -2137,9 +2137,17 @@ export class Interpreter {
             return typ.asInt();
         }
 
-        // Note: RHS evaluates first.
-        const rVal = this.evalNP(expr.vRightExpression, state);
-        const lVal = this.evalNP(expr.vLeftExpression, state);
+        // Note: for logical operations LVal evaluates first. For other ops RVal evaluates first
+        let rVal: Value
+        let lVal: Value;
+
+        if (expr.operator === "||" || expr.operator === "&&") {
+            lVal = this.evalNP(expr.vLeftExpression, state);
+            rVal = this.evalNP(expr.vRightExpression, state);
+        } else {
+            rVal = this.evalNP(expr.vRightExpression, state);
+            lVal = this.evalNP(expr.vLeftExpression, state);
+        }
 
         return this.computeBinary(
             lVal,
@@ -2556,6 +2564,13 @@ export class Interpreter {
         // Pesist our state changes before calling out
         this.world.updateAccount(state.account);
 
+        if (msg.to.equals(rtt.ZERO_ADDRESS)) {
+            // Increment caller nonce. Note that we do this here, since increments
+            // persist even if the new contract constructor reverts
+            state.account.nonce++;
+            this.world.updateAccount(state.account);
+        }
+
         // Call out
         const res: CallResult = this.world.execMsg(msg);
 
@@ -2674,7 +2689,8 @@ export class Interpreter {
             gas: gas === undefined ? 0n : gas,
             value: value === undefined ? 0n : value,
             salt: salt,
-            isStaticCall: callee.callKind === "staticcall"
+            isStaticCall: callee.callKind === "staticcall",
+            depth: state.msg.depth + 1
         };
 
         return this.makeMsgCall(msg, state);
