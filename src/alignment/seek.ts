@@ -4,7 +4,7 @@
 
 import { StepState } from "sol-dbg";
 import * as sol from "solc-typed-ast";
-import { isOutOfGas, isReturn } from "./traces";
+import { isOutOfGas, isReturn } from "./evm_trace";
 
 export type BoundaryType = "call" | "return" | "exception" | "out-of-gas" | "event";
 export type Boundary = [BoundaryType, number];

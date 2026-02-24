@@ -265,6 +265,17 @@
 249 - cli for playing
 250 - implement computing the correct final deployed bytecode in the face of immutables
 
+Trace alignment refactor:
+ - custom tracer
+    - basic info, event desc tracers
+    - decode calls/returns
+        - nonces on create
+        - msg.data/return data
+    - detect and decode exceptions
+    - get storage copies on calls, returns
+    - new contract address at both creation and return step
+ - adapt seek code to new tracer
+
 - test multi-level exception
 - test alignment on contract creation with no constructor and no implicit initializers
 - test alignment on contract creation with no constructor and implicit initializers
