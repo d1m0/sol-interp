@@ -12,7 +12,7 @@ export interface ReturnInfo {
 }
 
 interface WithReturnInfo {
-    returnInfo: ReturnInfo | undefined
+    returnInfo: ReturnInfo | undefined;
 }
 
 /**
@@ -21,7 +21,7 @@ interface WithReturnInfo {
 export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
-    state: T,
+    state: T
 ): Promise<T & WithReturnInfo> {
     const op = state.op;
 
@@ -29,7 +29,7 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         return {
             ...state,
             returnInfo: undefined
-        }
+        };
     }
 
     const stateManager = vm.stateManager.shallowCopy();
@@ -41,7 +41,7 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
                 retData: new Uint8Array(),
                 state: stateManager
             }
-        }
+        };
     }
 
     const stackTop = state.evmStack.length - 1;
@@ -55,5 +55,5 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
             retData,
             state: stateManager
         }
-    }
+    };
 }

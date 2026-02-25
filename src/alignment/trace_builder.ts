@@ -1,21 +1,11 @@
-import {
-    Address,
-    bigIntToBytes,
-    createAccount,
-    createAddressFromString,
-    equalsBytes,
-    setLengthLeft
-} from "@ethereumjs/util";
+import { Address, equalsBytes } from "@ethereumjs/util";
 import { AccountMap, CallResult, Chain, SolMessage } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { AlignedTracesPair, AlignedTraces } from "./aligned_traces";
 import { BaseStep, EmitStep, EvalStep, ExecStep } from "../interp/step";
-import { createTx, TypedTransaction, TypedTxData } from "@ethereumjs/tx";
-import { BlockData, createBlock } from "@ethereumjs/block";
-import { EventDesc, nyi, SolTxDebugger, StepState, ZERO_ADDRESS } from "sol-dbg";
-import { Common, Hardfork, Mainnet, StateManagerInterface } from "@ethereumjs/common";
-import { MerkleStateManager } from "@ethereumjs/statemanager";
-import { RunTxResult } from "@ethereumjs/vm";
+import { TypedTransaction, TypedTxData } from "@ethereumjs/tx";
+import { BlockData } from "@ethereumjs/block";
+import { EventDesc, ExceptionInfo, nyi, ReturnInfo, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
@@ -23,83 +13,8 @@ import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
 import { findNextBoundary } from "./seek";
 import { statesMatch } from "./state_equality";
-
-/**
- * Build a `MerkleStateManager` corresponding to the provided `initialState`.
- * @param initialState
- * @returns
- */
-async function makeStateManager(initialState: AccountMap): Promise<MerkleStateManager> {
-    const state = new MerkleStateManager();
-    await state.checkpoint();
-
-    for (const [addressStr, accountInfo] of initialState.entries()) {
-        const nonce = accountInfo.nonce;
-        const balance = accountInfo.balance;
-        const codeBuf = accountInfo.deployedBytecode;
-        const storage = accountInfo.storage;
-
-        const address = createAddressFromString(addressStr);
-
-        const acct = createAccount({
-            nonce: BigInt(nonce),
-            balance: BigInt(balance)
-        });
-
-        await state.putAccount(address, acct);
-
-        for (const [key, valBuf] of storage.entries()) {
-            const keyBuf = setLengthLeft(bigIntToBytes(key), 32);
-
-            await state.putStorage(address, keyBuf, valBuf);
-        }
-
-        await state.putCode(address, codeBuf);
-    }
-
-    await state.commit();
-    await state.flush();
-
-    return state;
-}
-
-export function getCommon(): Common {
-    return new Common({ chain: Mainnet, hardfork: Hardfork.Cancun });
-}
-
-export function makeFakeTransaction(
-    txData: TypedTxData,
-    sender: Address,
-    common: Common
-): TypedTransaction {
-    const tx = createTx(txData, { common, freeze: false });
-
-    /**
-     *  Fake the signature
-     */
-    tx.getSenderAddress = () => sender;
-    tx.isSigned = () => true;
-    return tx;
-}
-
-async function replayEVM(
-    artifactManager: ArtifactManager,
-    initialState: AccountMap,
-    txData: TypedTxData,
-    blockData: BlockData,
-    sender: Address
-): Promise<[StepState[], RunTxResult, StateManagerInterface, TypedTransaction]> {
-    const common = getCommon();
-    const tx = makeFakeTransaction(txData, sender, common);
-
-    const block = createBlock(blockData, { common });
-    const stateManager = await makeStateManager(initialState);
-
-    const tracer = new SolTxDebugger(artifactManager, { strict: false, foundryCheatcodes: false });
-    const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager);
-
-    return [trace, res, stateAfter, tx];
-}
+import { EVMStep, replayEVM } from "./evm_trace";
+import { CallInfo, CreateInfo } from "./evm_trace/transformers";
 
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
@@ -130,7 +45,7 @@ export async function buildAlignedTraces(
     sender: Address,
     blockData: BlockData,
     artifactManager: ArtifactManager
-): Promise<[AlignedTraces<StepState, BaseStep>, AccountMap]> {
+): Promise<[AlignedTraces<EVMStep, BaseStep>, AccountMap]> {
     // 1. Get the low-level trace
     const [trace, , , tx] = await replayEVM(
         artifactManager,
@@ -150,6 +65,14 @@ export async function buildAlignedTraces(
     return builder.buildAlignedTraces();
 }
 
+export type EVMObservableEvent = CallInfo | CreateInfo | ReturnInfo | ExceptionInfo;
+export type SolObservableEvent = SolMessage | CallResult | RuntimeError;
+
+export type MatchedTracePair = [EVMStep[], BaseStep[], [EVMObservableEvent, SolObservableEvent]];
+export type UnmachedTracePair = [EVMStep[], undefined, [EVMObservableEvent, undefined]];
+export type TracePair = MatchedTracePair | UnmachedTracePair;
+export type AlignedTraces = TracePair[];
+
 class MisalignmentError extends Error {}
 
 export type InterpVisitorEvent =
@@ -163,12 +86,12 @@ export type InterpVisitorEvent =
 class AlignedTraceBuilder extends Chain {
     currentLLIdx = 0;
     highLevelTrace: BaseStep[] = [];
-    alignedTracesStack: Array<Array<AlignedTracesPair<StepState, BaseStep>>> = [[]];
+    alignedTracesStack: Array<Array<AlignedTracesPair<EVMStep, BaseStep>>> = [[]];
 
     constructor(
         artifactManager: ArtifactManager,
         initialState: AccountMap,
-        private readonly lowLevelTrace: StepState[],
+        private readonly lowLevelTrace: EVMStep[],
         private readonly msg: SolMessage
     ) {
         super(artifactManager, initialState);
@@ -177,7 +100,7 @@ class AlignedTraceBuilder extends Chain {
     private foldOneTraceDown(): void {
         if (this.alignedTracesStack.length > 1) {
             const newTrace = this.alignedTracesStack.pop() as Array<
-                AlignedTracesPair<StepState, BaseStep>
+                AlignedTracesPair<EVMStep, BaseStep>
             >;
             const stackTop = this.alignedTracesStack[this.alignedTracesStack.length - 1];
             sol.assert(stackTop.length > 0, ``);
@@ -284,7 +207,7 @@ class AlignedTraceBuilder extends Chain {
         this.currentLLIdx = llIdx;
     }
 
-    buildAlignedTraces(): [AlignedTraces<StepState, BaseStep>, AccountMap] {
+    buildAlignedTraces(): [AlignedTraces<EVMStep, BaseStep>, AccountMap] {
         const env = this;
 
         const visitor = {

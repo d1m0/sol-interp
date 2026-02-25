@@ -1,1 +1,1 @@
-export { assert } from "solc-typed-ast"
+export { assert } from "solc-typed-ast";

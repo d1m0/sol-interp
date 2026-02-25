@@ -1,10 +1,15 @@
 import {
     BaseMemoryView,
     BaseStorageView,
+    hexStrToBuf32,
+    ImmMap,
+    InitialState,
     nyi,
     PartialSolcOutput,
     PrimitiveValue,
-    Value
+    TxDesc,
+    Value,
+    ZERO_ADDRESS_STRING
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
@@ -13,7 +18,11 @@ import { makeStateWithConstants, State } from "../../src/interp/state";
 import { Value as InterpValue } from "../../src/interp/value";
 import { getStateStorage, isValueType, setStateStorage } from "../../src/interp/utils";
 import { addSources, ArtifactManager } from "../../src/interp/artifactManager";
-import { Interpreter } from "../../src";
+import { AccountInfo, AccountMap, Interpreter } from "../../src";
+import { BlockData } from "@ethereumjs/block";
+import { Common } from "@ethereumjs/common";
+import { TypedTxData } from "@ethereumjs/tx";
+import { hexToBigInt, hexToBytes, createAddressFromString } from "@ethereumjs/util";
 
 export function makeState(
     loc: sol.ASTNode,
@@ -148,4 +157,58 @@ export async function loadSamples(
     }
 
     return [artifactManager, res];
+}
+
+export function txDescToTxData(step: TxDesc): TypedTxData {
+    const txData: TypedTxData = {
+        value: hexToBigInt(step.value),
+        gasLimit: hexToBigInt(step.gasLimit),
+        gasPrice: 8,
+        data: hexToBytes(step.input),
+        nonce: step.nonce
+    };
+
+    if (step.address !== ZERO_ADDRESS_STRING) {
+        txData.to = createAddressFromString(step.address);
+    }
+
+    return txData;
+}
+
+export function txDescToBlockData(step: TxDesc, common: Common): BlockData {
+    return {
+        header: {
+            coinbase: step.origin,
+            difficulty: 0,
+            gasLimit: step.blockGasLimit,
+            number: step.blockNumber,
+            timestamp: step.blockTime
+        }
+    };
+}
+
+export function scenarioInitialStateToAccountMap(initalState: InitialState): AccountMap {
+    const accEntries: Array<[string, AccountInfo]> = [];
+    for (const addrStr in initalState.accounts) {
+        const accountDesc = initalState.accounts[addrStr as `0x{string}`];
+        const storageEntries: Array<[bigint, Uint8Array]> = [];
+        for (const [key, val] of Object.entries(accountDesc.storage)) {
+            storageEntries.push([hexToBigInt(key as `0x{string}`), hexStrToBuf32(val)]);
+        }
+
+        accEntries.push([
+            addrStr,
+            {
+                address: createAddressFromString(addrStr),
+                contract: undefined,
+                bytecode: new Uint8Array(),
+                deployedBytecode: hexToBytes(accountDesc.code),
+                storage: ImmMap.fromEntries(storageEntries),
+                balance: hexToBigInt(accountDesc.balance),
+                nonce: BigInt(accountDesc.nonce)
+            }
+        ]);
+    }
+
+    return ImmMap.fromEntries(accEntries);
 }

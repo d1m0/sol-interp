@@ -1,9 +1,17 @@
 import { StateManagerInterface } from "@ethereumjs/common";
 import { Address } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
-import { BasicStepInfo, bigEndianBufToBigint, bigEndianBufToNumber, mustReadMem, OPCODES, OpInfo, wordToAddress } from "sol-dbg";
+import {
+    BasicStepInfo,
+    bigEndianBufToBigint,
+    bigEndianBufToNumber,
+    mustReadMem,
+    OPCODES,
+    OpInfo,
+    wordToAddress
+} from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
-import * as sol from "solc-typed-ast"
+import * as sol from "solc-typed-ast";
 
 /**
  * Interface with additional data regarding a *CALL* op
@@ -19,10 +27,15 @@ export interface CallInfo {
 }
 
 interface WithCallInfo {
-    callInfo: CallInfo | undefined
+    callInfo: CallInfo | undefined;
 }
 
-const CALL_OPS = new Set([OPCODES.CALL, OPCODES.CALLCODE, OPCODES.DELEGATECALL, OPCODES.STATICCALL])
+const CALL_OPS = new Set([
+    OPCODES.CALL,
+    OPCODES.CALLCODE,
+    OPCODES.DELEGATECALL,
+    OPCODES.STATICCALL
+]);
 
 /**
  * Adds call info for steps that are about to do an external call
@@ -30,7 +43,7 @@ const CALL_OPS = new Set([OPCODES.CALL, OPCODES.CALLCODE, OPCODES.DELEGATECALL, 
 export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
-    state: T,
+    state: T
 ): Promise<T & WithCallInfo> {
     const op = state.op;
 
@@ -38,7 +51,7 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
         return {
             ...state,
             callInfo: undefined
-        }
+        };
     }
 
     const stackTop = state.evmStack.length - 1;
@@ -61,10 +74,10 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     const size = bigEndianBufToNumber(state.evmStack[stackTop - argSizeStackOff]);
     const msgData = size === 0 ? new Uint8Array() : mustReadMem(start, size, state.memory);
 
-    const stateManager = vm.stateManager.shallowCopy()
-    const callerAccount = await stateManager.getAccount(step.address)
+    const stateManager = vm.stateManager.shallowCopy();
+    const callerAccount = await stateManager.getAccount(step.address);
 
-    sol.assert(callerAccount !== undefined, ``)
+    sol.assert(callerAccount !== undefined, ``);
 
     const callInfo: CallInfo = {
         address,
@@ -74,10 +87,10 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
         msgData,
         nonce: callerAccount.nonce,
         state: stateManager
-    }
+    };
 
     return {
         ...state,
         callInfo
-    }
+    };
 }

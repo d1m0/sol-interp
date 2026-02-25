@@ -1,9 +1,16 @@
 import { StateManagerInterface } from "@ethereumjs/common";
 import { Address, createContractAddress, createContractAddress2 } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
-import { BasicStepInfo, OpInfo, OPCODES, bigEndianBufToNumber, bigEndianBufToBigint, mustReadMem } from "sol-dbg";
+import {
+    BasicStepInfo,
+    OpInfo,
+    OPCODES,
+    bigEndianBufToNumber,
+    bigEndianBufToBigint,
+    mustReadMem
+} from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
-import { assert } from "../../../utils"
+import { assert } from "../../../utils";
 
 /**
  * Interface with additional data regarding a CREATE/CREATE2 op
@@ -12,7 +19,7 @@ export interface CreateInfo {
     address: Address; // New contract address to be created
     value: bigint | undefined; // value sent. undefined for staticcall
     msgData: Uint8Array; // msg data
-    salt: Uint8Array | undefined
+    salt: Uint8Array | undefined;
     nonce: bigint; // caller nonce
     state: StateManagerInterface; // copy of the state before the call instruction executes
 }
@@ -27,7 +34,7 @@ interface WithCreateInfo {
 export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
-    state: T,
+    state: T
 ): Promise<T & WithCreateInfo> {
     const op = state.op;
 
@@ -35,11 +42,11 @@ export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
         return {
             ...state,
             createInfo: undefined
-        }
+        };
     }
 
     const stateManger = await vm.stateManager.shallowCopy();
-    const callerAccount = await stateManger.getAccount(step.address)
+    const callerAccount = await stateManger.getAccount(step.address);
     assert(callerAccount !== undefined, ``);
 
     const stackTop = state.evmStack.length - 1;
@@ -54,19 +61,22 @@ export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
         salt = new Uint8Array(state.evmStack[stackTop - 3]);
     }
 
-    const address = op.opcode === OPCODES.CREATE ? createContractAddress(step.address, callerAccount.nonce) : createContractAddress2(step.address, salt as Uint8Array, msgData)
+    const address =
+        op.opcode === OPCODES.CREATE
+            ? createContractAddress(step.address, callerAccount.nonce)
+            : createContractAddress2(step.address, salt as Uint8Array, msgData);
 
-    let createInfo: CreateInfo = {
+    const createInfo: CreateInfo = {
         address,
         value,
         msgData,
         salt,
         nonce: callerAccount.nonce,
         state: stateManger
-    }
+    };
 
     return {
         ...state,
         createInfo
-    }
+    };
 }
