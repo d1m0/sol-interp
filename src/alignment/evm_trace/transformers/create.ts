@@ -1,9 +1,9 @@
 import { StateManagerInterface } from "@ethereumjs/common";
-import { TypedTransaction } from "@ethereumjs/tx";
-import { Address } from "@ethereumjs/util";
+import { Address, createContractAddress, createContractAddress2 } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
-import { BasicStepInfo, OpInfo, IArtifactManager, OPCODES } from "sol-dbg";
+import { BasicStepInfo, OpInfo, OPCODES, bigEndianBufToNumber, bigEndianBufToBigint, mustReadMem } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
+import { assert } from "../../../utils"
 
 /**
  * Interface with additional data regarding a CREATE/CREATE2 op
@@ -22,15 +22,12 @@ interface WithCreateInfo {
 }
 
 /**
- * Adds external frame info for each step
+ * Adds deployment info for steps that are about to deploy a contract
  */
 export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
     state: T,
-    trace: Array<T & WithCreateInfo>,
-    artifactManager: IArtifactManager,
-    tx: TypedTransaction
 ): Promise<T & WithCreateInfo> {
     const op = state.op;
 
@@ -39,5 +36,37 @@ export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
             ...state,
             createInfo: undefined
         }
+    }
+
+    const stateManger = await vm.stateManager.shallowCopy();
+    const callerAccount = await stateManger.getAccount(step.address)
+    assert(callerAccount !== undefined, ``);
+
+    const stackTop = state.evmStack.length - 1;
+    const value = bigEndianBufToBigint(state.evmStack[stackTop]);
+    const start = bigEndianBufToNumber(state.evmStack[stackTop - 1]);
+    const size = bigEndianBufToNumber(state.evmStack[stackTop - 2]);
+
+    const msgData = size === 0 ? new Uint8Array() : mustReadMem(start, size, state.memory);
+
+    let salt: Uint8Array | undefined;
+    if (op.opcode === OPCODES.CREATE2) {
+        salt = new Uint8Array(state.evmStack[stackTop - 3]);
+    }
+
+    const address = op.opcode === OPCODES.CREATE ? createContractAddress(step.address, callerAccount.nonce) : createContractAddress2(step.address, salt as Uint8Array, msgData)
+
+    let createInfo: CreateInfo = {
+        address,
+        value,
+        msgData,
+        salt,
+        nonce: callerAccount.nonce,
+        state: stateManger
+    }
+
+    return {
+        ...state,
+        createInfo
     }
 }

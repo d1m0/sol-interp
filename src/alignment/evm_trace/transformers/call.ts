@@ -1,8 +1,7 @@
 import { StateManagerInterface } from "@ethereumjs/common";
-import { TypedTransaction } from "@ethereumjs/tx";
 import { Address } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
-import { BasicStepInfo, bigEndianBufToBigint, bigEndianBufToNumber, IArtifactManager, mustReadMem, OPCODES, OpInfo, wordToAddress } from "sol-dbg";
+import { BasicStepInfo, bigEndianBufToBigint, bigEndianBufToNumber, mustReadMem, OPCODES, OpInfo, wordToAddress } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import * as sol from "solc-typed-ast"
 
@@ -26,15 +25,12 @@ interface WithCallInfo {
 const CALL_OPS = new Set([OPCODES.CALL, OPCODES.CALLCODE, OPCODES.DELEGATECALL, OPCODES.STATICCALL])
 
 /**
- * Adds external frame info for each step
+ * Adds call info for steps that are about to do an external call
  */
 export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
     state: T,
-    trace: Array<T & WithCallInfo>,
-    artifactManager: IArtifactManager,
-    tx: TypedTransaction
 ): Promise<T & WithCallInfo> {
     const op = state.op;
 

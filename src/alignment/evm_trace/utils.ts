@@ -1,4 +1,4 @@
-import { OPCODES, StepState } from "sol-dbg";
+import { OPCODES, OpInfo, StepState } from "sol-dbg";
 
 /**
  * Return true IFF the EVM runs out of gas on the given step.
@@ -13,7 +13,7 @@ export function isOutOfGas(step: StepState): boolean {
     return step.gasCost > step.gas;
 }
 
-export function isReturn(step: StepState): boolean {
+export function isReturn(step: OpInfo): boolean {
     return step.op.opcode === OPCODES.RETURN || step.op.opcode === OPCODES.STOP;
 }
 

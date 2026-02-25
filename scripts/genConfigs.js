@@ -4,10 +4,12 @@ const util = require("@ethereumjs/util");
 const { assert } = require("console");
 const { json } = require("stream/consumers");
 
+/*
 const samples = fse
     .readdirSync("test/samples/sol2maruir")
     .filter((name) => name.endsWith("config.sol"));
-//const samples = ["bcd.config.sol"]
+    */
+const samples = ["out_of_gas.config.sol"]
 
 const libDependencies = new Map([
     ["PackedEncodingTest.config.sol", ["BytesLib"]],
@@ -43,7 +45,7 @@ const addrsToNonce = [
 const libToAddr = new Map();
 
 (async () => {
-    for(const f of samples) {
+    for (const f of samples) {
         const fName = `test/samples/sol2maruir/${f}`
         console.error(fName)
         const res = await sol.compileSol(fName, "auto", undefined, [sol.CompilationOutput.ALL])
@@ -69,7 +71,7 @@ const libToAddr = new Map();
 
         const deps = libDependencies.get(f);
         if (deps !== undefined) {
-            for(const cName of deps) {
+            for (const cName of deps) {
                 for (const libFName in res.data.contracts) {
                     const lib = res.data.contracts[libFName][cName];
                     if (lib !== undefined) {
@@ -129,9 +131,9 @@ const libToAddr = new Map();
                 "nonce": nonce++
             }
         )
-        
+
         const jsonFile = fName.slice(0, -3) + "json"
         console.error(`Overwriting ${jsonFile}`)
-        fse.writeJsonSync(jsonFile, config, {spaces: 4});
+        fse.writeJsonSync(jsonFile, config, { spaces: 4 });
     }
 })();
