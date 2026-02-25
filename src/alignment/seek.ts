@@ -2,9 +2,8 @@
  * Helpers to search for steps in a low-level EVM trace
  */
 
-import { StepState } from "sol-dbg";
-import * as sol from "solc-typed-ast";
-import { isOutOfGas, isReturn } from "./evm_trace";
+import { assert } from "../utils"
+import { EVMStep, isOutOfGas, isReturn } from "./evm_trace";
 
 export type BoundaryType = "call" | "return" | "exception" | "out-of-gas" | "event";
 export type Boundary = [BoundaryType, number];
@@ -12,7 +11,7 @@ export type Boundary = [BoundaryType, number];
 /**
  * Find the next trace alignment boundary in `llTrace` start after `afterIdx`.
  */
-export function findNextBoundary(llTrace: StepState[], afterIdx: number): Boundary {
+export function findNextBoundary(llTrace: EVMStep[], afterIdx: number): Boundary {
     const curDepth = llTrace[afterIdx].depth;
 
     for (let i = afterIdx + 1; i < llTrace.length; i++) {
@@ -63,11 +62,11 @@ export function findNextBoundary(llTrace: StepState[], afterIdx: number): Bounda
  * reaching `depth`, or we never reach `depth` return -1.
  */
 export function findFirstIdxAtDepthAfter(
-    llTrace: StepState[],
+    llTrace: EVMStep[],
     depth: number,
     afterIdx: number
 ): number {
-    sol.assert(llTrace[afterIdx].depth > depth, `After idx must be at a higher depth`);
+    assert(afterIdx >= llTrace.length - 1 || llTrace[afterIdx + 1].depth > depth, `After idx must be at a higher depth`);
     for (let i = afterIdx + 1; i < llTrace.length; i++) {
         if (llTrace[i].depth < depth) {
             return -1;

@@ -1,7 +1,6 @@
 import { Address, equalsBytes } from "@ethereumjs/util";
 import { AccountMap, CallResult, Chain, SolMessage } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
-import { AlignedTracesPair, AlignedTraces } from "./aligned_traces";
 import { BaseStep, EmitStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction, TypedTxData } from "@ethereumjs/tx";
 import { BlockData } from "@ethereumjs/block";
@@ -45,7 +44,7 @@ export async function buildAlignedTraces(
     sender: Address,
     blockData: BlockData,
     artifactManager: ArtifactManager
-): Promise<[AlignedTraces<EVMStep, BaseStep>, AccountMap]> {
+): Promise<[AlignedTraces, AccountMap]> {
     // 1. Get the low-level trace
     const [trace, , , tx] = await replayEVM(
         artifactManager,
@@ -86,7 +85,7 @@ export type InterpVisitorEvent =
 class AlignedTraceBuilder extends Chain {
     currentLLIdx = 0;
     highLevelTrace: BaseStep[] = [];
-    alignedTracesStack: Array<Array<AlignedTracesPair<EVMStep, BaseStep>>> = [[]];
+    alignedTraces: AlignedTraces = []
 
     constructor(
         artifactManager: ArtifactManager,
@@ -97,21 +96,9 @@ class AlignedTraceBuilder extends Chain {
         super(artifactManager, initialState);
     }
 
-    private foldOneTraceDown(): void {
-        if (this.alignedTracesStack.length > 1) {
-            const newTrace = this.alignedTracesStack.pop() as Array<
-                AlignedTracesPair<EVMStep, BaseStep>
-            >;
-            const stackTop = this.alignedTracesStack[this.alignedTracesStack.length - 1];
-            sol.assert(stackTop.length > 0, ``);
-            sol.assert(stackTop[stackTop.length - 1][2] === null, ``);
-
-            stackTop[stackTop.length - 1][2] = newTrace;
-        }
-    }
-
     execMsg(msg: SolMessage): CallResult {
         // Find matching low-level call. If no call found, throw mismatch
+        const nextBounady = findNextBoundary(this.lowLevelTrace, this.currentLLIdx);
         // @todo If index doesn't match the call, throw Mismatch
 
         let res: CallResult;

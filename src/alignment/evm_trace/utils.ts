@@ -1,4 +1,4 @@
-import { OPCODES, OpInfo, StepState } from "sol-dbg";
+import { BasicStepInfo, OPCODES, OpInfo, StepState } from "sol-dbg";
 
 /**
  * Return true IFF the EVM runs out of gas on the given step.
@@ -9,7 +9,7 @@ import { OPCODES, OpInfo, StepState } from "sol-dbg";
  * It seems that both are not yet on mainnet.
  * @param step
  */
-export function isOutOfGas(step: StepState): boolean {
+export function isOutOfGas(step: BasicStepInfo): boolean {
     return step.gasCost > step.gas;
 }
 
