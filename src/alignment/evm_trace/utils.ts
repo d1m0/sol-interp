@@ -17,6 +17,15 @@ export function isReturn(step: OpInfo): boolean {
     return step.op.opcode === OPCODES.RETURN || step.op.opcode === OPCODES.STOP;
 }
 
+export function isCall(step: OpInfo): boolean {
+    return (
+        step.op.opcode === OPCODES.CALL ||
+        step.op.opcode === OPCODES.CALLCODE ||
+        step.op.opcode === OPCODES.STATICCALL ||
+        step.op.opcode === OPCODES.DELEGATECALL
+    );
+}
+
 /**
  * Return true IIF the `idx`-th step of `llTrace` throws an exception.
  */

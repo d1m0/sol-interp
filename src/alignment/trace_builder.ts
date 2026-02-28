@@ -1,19 +1,55 @@
-import { Address, equalsBytes } from "@ethereumjs/util";
+import { Address } from "@ethereumjs/util";
 import { AccountMap, CallResult, Chain, SolMessage } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
-import { BaseStep, EmitStep, EvalStep, ExecStep } from "../interp/step";
+import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction, TypedTxData } from "@ethereumjs/tx";
 import { BlockData } from "@ethereumjs/block";
-import { EventDesc, ExceptionInfo, nyi, ReturnInfo, ZERO_ADDRESS } from "sol-dbg";
+import { EventDesc, nyi, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
 import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
-import { findNextBoundary } from "./seek";
-import { statesMatch } from "./state_equality";
-import { EVMStep, replayEVM } from "./evm_trace";
-import { CallInfo, CreateInfo } from "./evm_trace/transformers";
+import { EVMStep, isCall, replayEVM } from "./evm_trace";
+import { assert } from "../utils";
+import {
+    eventsMatch,
+    EVMExceptionEvent,
+    EVMObservableEvent,
+    EVMReturnEvent,
+    findNextEvent,
+    SolCallEvent,
+    SolCreateEvent,
+    SolExceptionEvent,
+    SolObservableEvent,
+    SolReturnEvent
+} from "./observable_events";
+
+/**
+ * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
+ * reaching `depth`, or we never reach `depth` return -1.
+ */
+export function findFirstIdxAtDepthAfter(
+    llTrace: EVMStep[],
+    depth: number,
+    afterIdx: number
+): number {
+    assert(
+        afterIdx >= llTrace.length - 1 || llTrace[afterIdx + 1].depth > depth,
+        `After idx must be at a higher depth`
+    );
+    for (let i = afterIdx + 1; i < llTrace.length; i++) {
+        if (llTrace[i].depth < depth) {
+            return -1;
+        }
+
+        if (llTrace[i].depth == depth) {
+            return i;
+        }
+    }
+
+    return -1;
+}
 
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
@@ -64,28 +100,31 @@ export async function buildAlignedTraces(
     return builder.buildAlignedTraces();
 }
 
-export type EVMObservableEvent = CallInfo | CreateInfo | ReturnInfo | ExceptionInfo;
-export type SolObservableEvent = SolMessage | CallResult | RuntimeError;
-
 export type MatchedTracePair = [EVMStep[], BaseStep[], [EVMObservableEvent, SolObservableEvent]];
-export type UnmachedTracePair = [EVMStep[], undefined, [EVMObservableEvent, undefined]];
+export type UnmachedTracePair = [EVMStep[], undefined, [EVMObservableEvent, SolObservableEvent]];
 export type TracePair = MatchedTracePair | UnmachedTracePair;
 export type AlignedTraces = TracePair[];
 
-class MisalignmentError extends Error {}
+function isUnmached(p: TracePair): p is UnmachedTracePair {
+    return p[1] === undefined;
+}
 
-export type InterpVisitorEvent =
-    | ["call", SolMessage]
-    | ["return", Uint8Array]
-    | ["exception", RuntimeError]
-    | ["event", EventDesc]
-    | ["eval", sol.Expression, Value | LValue]
-    | ["exec", sol.Statement];
+export function hasUnmached(ps: AlignedTraces): boolean {
+    for (const p of ps) {
+        if (isUnmached(p)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+class MisalignmentError extends Error { }
 
 class AlignedTraceBuilder extends Chain {
     currentLLIdx = 0;
     highLevelTrace: BaseStep[] = [];
-    alignedTraces: AlignedTraces = []
+    alignedTraces: AlignedTraces = [];
 
     constructor(
         artifactManager: ArtifactManager,
@@ -96,10 +135,50 @@ class AlignedTraceBuilder extends Chain {
         super(artifactManager, initialState);
     }
 
+    private misalignment(): never {
+        nyi(``);
+    }
+
+    private addAlignedSegment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): void {
+        this.alignedTraces.push([
+            this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
+            this.highLevelTrace,
+            [llEvent, hlEvent]
+        ]);
+        this.highLevelTrace = [];
+        this.currentLLIdx = llEvent.idx + 1;
+    }
+
+    private tryMatchObservableEvents(
+        llEvent: EVMObservableEvent,
+        hlEvent: SolObservableEvent
+    ): void {
+        // If the next boundary doesn't match the expected call, throw a misalignment error
+        if (!eventsMatch(llEvent, hlEvent)) {
+            this.misalignment();
+        }
+
+        // Add new aligned trace segments
+        this.addAlignedSegment(llEvent, hlEvent);
+    }
+
     execMsg(msg: SolMessage): CallResult {
-        // Find matching low-level call. If no call found, throw mismatch
-        const nextBounady = findNextBoundary(this.lowLevelTrace, this.currentLLIdx);
-        // @todo If index doesn't match the call, throw Mismatch
+        let oldCurIdx = this.currentLLIdx;
+        const curDepth = this.lowLevelTrace[this.currentLLIdx].depth;
+        let llEvent: EVMObservableEvent | undefined;
+
+        if (!(msg.depth === 0 && this.currentLLIdx === 0 && this.highLevelTrace.length === 0)) {
+            llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+            assert(llEvent !== undefined, ``);
+            const hlEvent: SolObservableEvent = msg.to.equals(ZERO_ADDRESS)
+                ? new SolCreateEvent(msg)
+                : new SolCallEvent(msg);
+
+            this.tryMatchObservableEvents(llEvent, hlEvent);
+            oldCurIdx = this.currentLLIdx;
+        }
+
+        // Find next low-level trace boundary
 
         let res: CallResult;
 
@@ -110,113 +189,79 @@ class AlignedTraceBuilder extends Chain {
                 throw e;
             }
 
-            throw e;
+            const resyncLLIdx = findFirstIdxAtDepthAfter(
+                this.lowLevelTrace,
+                curDepth,
+                this.currentLLIdx
+            );
+            assert(resyncLLIdx > 0, ``);
+            const lastStep = this.lowLevelTrace[resyncLLIdx - 1];
+
+            let evmEvent: EVMObservableEvent;
+
+            if (lastStep.returnInfo) {
+                evmEvent = new EVMReturnEvent(resyncLLIdx - 1, lastStep);
+            } else {
+                assert(lastStep.exceptionInfo !== undefined, ``);
+                evmEvent = new EVMExceptionEvent(resyncLLIdx - 1, lastStep);
+            }
+
+            //this.alignedTraces.push([this.lowLevelTrace.slice(this.currentLLIdx, resyncLLIdx), undefined, [evmEvent,]])
+            nyi(`Re-syncing after a misalignment error: ${evmEvent}`);
         }
+
+        if (res.reverted) {
+            sol.assert(this.highLevelTrace.length === 0, `High-level exception should be matched already if we got here`);
+            return res;
+        }
+
+        // Special case - call to a contract with no code succeeds, but has no corresponding RETURN instruction
+        if (
+            this.currentLLIdx === oldCurIdx &&
+            this.currentLLIdx > 0 &&
+            isCall(this.lowLevelTrace[this.currentLLIdx - 1]) &&
+            this.lowLevelTrace[this.currentLLIdx - 1].depth ===
+            this.lowLevelTrace[this.currentLLIdx].depth
+        ) {
+            // This should push an empty low-level and high-level traces and leave currentLLIdx unchanged
+            this.addAlignedSegment(
+                new EVMReturnEvent(
+                    this.currentLLIdx - 1,
+                    this.lowLevelTrace[this.currentLLIdx - 1]
+                ),
+                new SolReturnEvent(res)
+            );
+
+            return res;
+        }
+
+        const solEndEvt = new SolReturnEvent(res);
+
+        llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+        assert(llEvent !== undefined, ``);
+        this.tryMatchObservableEvents(llEvent, solEndEvt);
 
         return res;
     }
 
-    handleInterpEvent(interp: Interpreter, state: State, event: InterpVisitorEvent): void {
-        const [hlType, ...hlArgs] = event;
-
-        if (hlType === "eval") {
-            const [expr, val] = hlArgs as [sol.Expression, Value | LValue];
-            this.highLevelTrace.push(new EvalStep(expr, val));
-            return;
-        } else if (hlType === "exec") {
-            this.highLevelTrace.push(new ExecStep(hlArgs[0] as sol.Statement));
-            return;
-        }
-
-        const [llType, llIdx] = findNextBoundary(this.lowLevelTrace, this.currentLLIdx);
-
-        if (llType !== hlType) {
-            const err = new MisalignmentError();
-            this.alignedTracesStack[this.alignedTracesStack.length - 1].push([
-                this.lowLevelTrace.slice(this.currentLLIdx),
-                this.highLevelTrace,
-                err
-            ]);
-
-            throw err;
-        }
-
-        if (!statesMatch(event, interp, state, this.lowLevelTrace, llIdx)) {
-            const err = new MisalignmentError();
-            this.alignedTracesStack[this.alignedTracesStack.length - 1].push([
-                this.lowLevelTrace.slice(this.currentLLIdx),
-                this.highLevelTrace,
-                err
-            ]);
-
-            throw err;
-        }
-
-        const lowLevelTrace = this.lowLevelTrace.slice(this.currentLLIdx, llIdx);
-        const highLevelSlice = this.highLevelTrace;
-
-        if (llType === "call") {
-            this.alignedTracesStack[this.alignedTracesStack.length - 1].push([
-                lowLevelTrace,
-                highLevelSlice,
-                null
-            ]);
-            this.alignedTracesStack.push([]);
-        } else if (llType === "return") {
-            this.alignedTracesStack[this.alignedTracesStack.length - 1].push([
-                lowLevelTrace,
-                highLevelSlice,
-                null
-            ]);
-
-            this.foldOneTraceDown();
-        } else if (llType === "exception") {
-            const depthChange =
-                this.lowLevelTrace[llIdx - 1].depth - this.lowLevelTrace[llIdx].depth;
-            const highLevelSlice = this.highLevelTrace;
-
-            this.alignedTracesStack[this.alignedTracesStack.length - 1].push([
-                lowLevelTrace,
-                highLevelSlice,
-                null
-            ]);
-
-            for (let i = 0; i < depthChange; i++) {
-                this.foldOneTraceDown();
-            }
-        } else if (llType === "event") {
-            this.highLevelTrace.push(new EmitStep(hlArgs[0] as EventDesc));
-        } else {
-            nyi(`Low-level trace event ${llType}`);
-        }
-
-        this.highLevelTrace = [];
-        this.currentLLIdx = llIdx;
-    }
-
-    buildAlignedTraces(): [AlignedTraces<EVMStep, BaseStep>, AccountMap] {
+    buildAlignedTraces(): [AlignedTraces, AccountMap] {
         const env = this;
 
         const visitor = {
             call: function (interp: Interpreter, state: State, msg: SolMessage): void {
-                // The first interpreter call corresponds to the start of the trace
-                if (
-                    env.currentLLIdx === 0 &&
-                    equalsBytes(msg.data, env.lowLevelTrace[0].stack[0].msgData)
-                ) {
-                    return;
-                }
-
-                env.handleInterpEvent(interp, state, ["call", msg]);
+                // Nothing to do
             },
             return: function (interp: Interpreter, state: State, res: Uint8Array): void {
-                env.handleInterpEvent(interp, state, ["return", res]);
+                // Nothing to do
             },
             exception: function (interp: Interpreter, state: State, err: RuntimeError): void {
-                env.handleInterpEvent(interp, state, ["exception", err]);
+                const hlEvent = new SolExceptionEvent(err.payload);
+                const llEvent = findNextEvent(env.lowLevelTrace, env.currentLLIdx);
+                assert(llEvent !== undefined, ``);
+                env.tryMatchObservableEvents(llEvent, hlEvent);
             },
             exec: function (interp: Interpreter, state: State, stmt: sol.Statement): void {
-                env.handleInterpEvent(interp, state, ["exec", stmt]);
+                env.highLevelTrace.push(new ExecStep(stmt));
             },
             eval: function (
                 interp: Interpreter,
@@ -224,27 +269,16 @@ class AlignedTraceBuilder extends Chain {
                 expr: sol.Expression,
                 val: Value | LValue
             ): void {
-                env.handleInterpEvent(interp, state, ["eval", expr, val]);
+                env.highLevelTrace.push(new EvalStep(expr, val));
             },
             emit: function (interp: Interpreter, state: State, event: EventDesc): void {
-                env.handleInterpEvent(interp, state, ["event", event]);
+                // @todo match events
             }
         };
 
         this.addVisitor(visitor);
-        try {
-            this.execMsg(this.msg);
-        } catch (e) {
-            if (!(e instanceof MisalignmentError)) {
-                throw e;
-            }
+        this.execMsg(this.msg);
 
-            while (this.alignedTracesStack.length > 1) {
-                this.foldOneTraceDown();
-            }
-        }
-
-        sol.assert(this.alignedTracesStack.length === 1, ``);
-        return [this.alignedTracesStack[0], this.state];
+        return [this.alignedTraces, this.state];
     }
 }

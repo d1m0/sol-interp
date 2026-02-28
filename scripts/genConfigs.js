@@ -2,14 +2,11 @@ const fse = require("fs-extra");
 const sol = require("solc-typed-ast")
 const util = require("@ethereumjs/util");
 const { assert } = require("console");
-const { json } = require("stream/consumers");
 
-/*
 const samples = fse
     .readdirSync("test/samples/sol2maruir")
     .filter((name) => name.endsWith("config.sol"));
-    */
-const samples = ["out_of_gas.config.sol"]
+//const samples = ["SelectorTest062.config.sol"]
 
 const libDependencies = new Map([
     ["PackedEncodingTest.config.sol", ["BytesLib"]],

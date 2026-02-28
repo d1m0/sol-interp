@@ -49,7 +49,7 @@ import { decode, encode, encodePacked, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
-import { satisfies } from "semver";
+import { lt, satisfies } from "semver";
 import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
 import { xor } from "./bitwise";
 
@@ -124,7 +124,11 @@ export const assertBuiltin = new BuiltinFunction(
         const flag = interp.castTo(args[0], rtt.bool, state);
 
         if (!flag) {
-            interp.runtimeError(AssertError, state);
+            if (lt(interp.compilerVersion, "0.8.0")) {
+                interp.runtimeError(NoPayloadError, state);
+            } else {
+                interp.runtimeError(AssertError, state);
+            }
         }
 
         return [];
@@ -177,7 +181,7 @@ export const popBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         interp.expect(
             args.length === 1 &&
-                (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
+            (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
         );
         const arr = args[0];
 
@@ -782,7 +786,7 @@ const sha3 = keccak256v04Builtin.alias("sha3");
 function interfaceId(contract: sol.ContractDefinition): Uint8Array {
     sol.assert(
         contract.kind === sol.ContractKind.Interface ||
-            (contract.kind === sol.ContractKind.Contract && contract.abstract),
+        (contract.kind === sol.ContractKind.Contract && contract.abstract),
         ``
     );
     const selectors: Uint8Array[] = contract.vFunctions.map((funDef) => sol.signatureHash(funDef));
@@ -801,9 +805,9 @@ const typeBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         interp.expect(
             args.length === 1 &&
-                args[0] instanceof TypeValue &&
-                args[0].type instanceof WrappedType &&
-                args[0].type.innerT instanceof sol.TypeTypeId,
+            args[0] instanceof TypeValue &&
+            args[0].type instanceof WrappedType &&
+            args[0].type.innerT instanceof sol.TypeTypeId,
             `keccak256 expects a bytes array as argument`
         );
 

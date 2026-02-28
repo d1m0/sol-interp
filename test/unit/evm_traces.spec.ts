@@ -4,11 +4,10 @@ import { Scenario } from "sol-dbg";
 import {} from "@ethereumjs/tx";
 import {} from "@ethereumjs/common";
 import { createAddressFromString } from "@ethereumjs/util";
-import { getCommon } from "../../src/alignment/trace_builder";
 import {} from "@ethereumjs/block";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
-import { isReturn, replayEVM } from "../../src/alignment/evm_trace";
-import { CreateInfo, ReturnInfo } from "../../src/alignment/evm_trace/transformers";
+import { getCommon, isReturn, replayEVM } from "../../src/alignment/evm_trace";
+import { CallInfo, CreateInfo, ReturnInfo } from "../../src/alignment/evm_trace/transformers";
 
 const sol2maruirScenarios: string[] = fse
     .readdirSync("test/samples/sol2maruir")
@@ -41,13 +40,27 @@ describe("EVM Tracer tests", () => {
                     sender
                 );
 
+                const stack: Array<CreateInfo | CallInfo> = [];
+
                 for (let i = 0; i < evmTrace.length; i++) {
                     if (i > 0 && evmTrace[i].depth > evmTrace[i - 1].depth) {
-                        const createInfo = evmTrace[i - 1].createInfo as CreateInfo;
-                        expect(createInfo).toBeDefined();
-                        expect(createInfo.address.toString()).toEqual(
-                            evmTrace[i].address.toString()
-                        );
+                        expect(evmTrace[i].depth === evmTrace[i - 1].depth - 1);
+
+                        const createInfo = evmTrace[i - 1].createInfo;
+                        const callInfo = evmTrace[i - 1].callInfo;
+                        if (createInfo) {
+                            expect(createInfo.address.toString()).toEqual(
+                                evmTrace[i].address.toString()
+                            );
+                            stack.push(createInfo);
+                        } else if (callInfo) {
+                            expect(callInfo.address.toString()).toEqual(
+                                evmTrace[i].address.toString()
+                            );
+                            stack.push(callInfo);
+                        } else {
+                            expect(false).toBeTruthy();
+                        }
                     }
 
                     if (isReturn(evmTrace[i])) {
@@ -57,6 +70,8 @@ describe("EVM Tracer tests", () => {
                             i === evmTrace.length - 1 ||
                                 evmTrace[i + 1].depth === evmTrace[i].depth - 1
                         ).toBeTruthy();
+                        expect(stack.length > 0);
+                        stack.pop();
                     }
 
                     if (
@@ -65,12 +80,12 @@ describe("EVM Tracer tests", () => {
                         !isReturn(evmTrace[i - 1])
                     ) {
                         expect(evmTrace[i - 1].exceptionInfo).toBeDefined();
-                    }
-
-                    if (i > 0 && evmTrace[i - 1].depth > evmTrace[i].depth) {
-                        expect(evmTrace[i].depth === evmTrace[i - 1].depth - 1);
+                        expect(stack.length > 0);
+                        stack.pop();
                     }
                 }
+
+                expect(stack.length === 0);
             }
         });
     }

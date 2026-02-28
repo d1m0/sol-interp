@@ -1,4 +1,4 @@
-import { StateManagerInterface } from "@ethereumjs/common";
+import { StorageDump } from "@ethereumjs/common";
 import { VM } from "@ethereumjs/vm";
 import { BasicStepInfo, OpInfo, OPCODES, bigEndianBufToNumber, mustReadMem } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
@@ -8,7 +8,7 @@ import { InterpreterStep } from "@ethereumjs/evm";
  */
 export interface ReturnInfo {
     retData: Uint8Array; // return data
-    state: StateManagerInterface; // copy of the state before the return instruction executes
+    state: StorageDump; // copy of the state before the return instruction executes
 }
 
 interface WithReturnInfo {
@@ -21,7 +21,8 @@ interface WithReturnInfo {
 export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
-    state: T
+    state: T,
+    trace: Array<T & WithReturnInfo>
 ): Promise<T & WithReturnInfo> {
     const op = state.op;
 
@@ -32,14 +33,14 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         };
     }
 
-    const stateManager = vm.stateManager.shallowCopy();
+    const storageDump = (vm.stateManager.dumpStorage as any)(step.address);
 
     if (op.opcode === OPCODES.STOP) {
         return {
             ...state,
             returnInfo: {
                 retData: new Uint8Array(),
-                state: stateManager
+                state: storageDump
             }
         };
     }
@@ -53,7 +54,7 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         ...state,
         returnInfo: {
             retData,
-            state: stateManager
+            state: storageDump
         }
     };
 }

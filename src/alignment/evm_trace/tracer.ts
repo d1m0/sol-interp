@@ -43,7 +43,7 @@ export class EVMTracer extends MapOnlyTracer<EVMStep> {
         const events = await addEventInfo(vm, step, basicInfo, this.artifactManager);
         const withCreate = await addCreateInfo(vm, step, events);
         const withCall = await addCallInfo(vm, step, withCreate);
-        const withRet = await addReturnInfo(vm, step, withCall);
+        const withRet = await addReturnInfo(vm, step, withCall, trace);
         const withExceptions = await addExceptionInfo(vm, step, withRet, trace);
 
         return [withExceptions, null];

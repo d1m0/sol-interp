@@ -1,4 +1,4 @@
-import { StateManagerInterface } from "@ethereumjs/common";
+import { StorageDump } from "@ethereumjs/common";
 import { Address } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
 import {
@@ -23,7 +23,7 @@ export interface CallInfo {
     gas: bigint; // gas forwarded
     msgData: Uint8Array; // msg data
     nonce: bigint; // caller nonce
-    state: StateManagerInterface; // copy of the state before the call instruction executes
+    state: StorageDump; // copy of the state before the call instruction executes
 }
 
 interface WithCallInfo {
@@ -74,10 +74,9 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     const size = bigEndianBufToNumber(state.evmStack[stackTop - argSizeStackOff]);
     const msgData = size === 0 ? new Uint8Array() : mustReadMem(start, size, state.memory);
 
-    const stateManager = vm.stateManager.shallowCopy();
-    const callerAccount = await stateManager.getAccount(step.address);
-
+    const callerAccount = await vm.stateManager.getAccount(step.address);
     sol.assert(callerAccount !== undefined, ``);
+    const storageDump: StorageDump = await (vm.stateManager.dumpStorage as any)(step.address);
 
     const callInfo: CallInfo = {
         address,
@@ -86,7 +85,7 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
         gas,
         msgData,
         nonce: callerAccount.nonce,
-        state: stateManager
+        state: storageDump
     };
 
     return {

@@ -2,7 +2,7 @@ import { Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
 import { makeStateForAccount } from "../state";
 import { Interpreter } from "../interp";
 import { ArtifactManager } from "../artifactManager";
-import { Address, createContractAddress } from "@ethereumjs/util";
+import { Address, createContractAddress, createContractAddress2 } from "@ethereumjs/util";
 import { InterpVisitor } from "../visitors";
 import { ppAccount } from "../pp";
 import { AccountInfo, CallResult, EnvInterface, AccountMap, SolMessage } from "./types";
@@ -46,14 +46,14 @@ export class Chain implements EnvInterface {
         return val === undefined
             ? val
             : {
-                  address: val.address,
-                  contract: val.contract,
-                  bytecode: val.bytecode,
-                  deployedBytecode: val.deployedBytecode,
-                  storage: val.storage,
-                  balance: val.balance,
-                  nonce: val.nonce
-              };
+                address: val.address,
+                contract: val.contract,
+                bytecode: val.bytecode,
+                deployedBytecode: val.deployedBytecode,
+                storage: val.storage,
+                balance: val.balance,
+                nonce: val.nonce
+            };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
@@ -111,12 +111,18 @@ export class Chain implements EnvInterface {
         const sender = this.getAccount(msg.from);
         this.expect(sender !== undefined);
 
-        const address = createContractAddress(sender.address, sender.nonce - 1n);
+        let newAddress;
+        if (msg.salt === undefined) {
+            newAddress = createContractAddress(sender.address, sender.nonce - 1n);
+        } else {
+            newAddress = createContractAddress2(sender.address, msg.salt, msg.data);
+        }
+
         const contract = this.artifactManager.getContractFromCreationBytecode(msg.data);
         this.expect(contract !== undefined);
 
         const res = {
-            address,
+            address: newAddress,
             contract,
             bytecode: msg.data,
             deployedBytecode: new Uint8Array(),
@@ -126,7 +132,7 @@ export class Chain implements EnvInterface {
             gen: 0n
         };
 
-        this.setAccount(address, res);
+        this.setAccount(newAddress, res);
 
         return { ...res };
     }

@@ -1,10 +1,11 @@
 import { loadSamples, txDescToBlockData, txDescToTxData } from "../unit/utils";
 import * as fse from "fs-extra";
 import { Scenario } from "sol-dbg";
-import { areAligned, buildAlignedTraces } from "../../src";
+import { buildAlignedTraces } from "../../src";
 import { createAddressFromString } from "@ethereumjs/util";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
 import { getCommon } from "../../src/alignment/evm_trace";
+import { hasUnmached } from "../../src/alignment/trace_builder";
 
 const sol2maruirScenarios: string[] = fse
     .readdirSync("test/samples/sol2maruir")
@@ -35,7 +36,7 @@ describe("Trace Alignment Tests", () => {
                     artifactManager
                 );
                 state = stateAfter;
-                expect(areAligned(alignedTraces)).toBeTruthy();
+                expect(!hasUnmached(alignedTraces)).toBeTruthy();
             }
         });
     }
