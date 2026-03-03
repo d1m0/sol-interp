@@ -24,7 +24,7 @@ export interface CreateInfo {
     state: StorageDump; // copy of the state before the call instruction executes
 }
 
-interface WithCreateInfo {
+export interface WithCreateInfo {
     createInfo: CreateInfo | undefined;
 }
 
@@ -34,7 +34,9 @@ interface WithCreateInfo {
 export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
-    state: T
+    state: T,
+    trace: Array<T & WithCreateInfo>,
+    callStack: number[]
 ): Promise<T & WithCreateInfo> {
     const op = state.op;
 
@@ -44,6 +46,8 @@ export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
             createInfo: undefined
         };
     }
+
+    callStack.push(trace.length);
 
     const callerAccount = await vm.stateManager.getAccount(step.address);
     assert(callerAccount !== undefined, ``);

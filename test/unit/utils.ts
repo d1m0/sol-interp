@@ -20,7 +20,6 @@ import { getStateStorage, isValueType, setStateStorage } from "../../src/interp/
 import { addSources, ArtifactManager } from "../../src/interp/artifactManager";
 import { AccountInfo, AccountMap, Interpreter } from "../../src";
 import { BlockData } from "@ethereumjs/block";
-import { Common } from "@ethereumjs/common";
 import { TypedTxData } from "@ethereumjs/tx";
 import { hexToBigInt, hexToBytes, createAddressFromString } from "@ethereumjs/util";
 
@@ -175,7 +174,7 @@ export function txDescToTxData(step: TxDesc): TypedTxData {
     return txData;
 }
 
-export function txDescToBlockData(step: TxDesc, common: Common): BlockData {
+export function txDescToBlockData(step: TxDesc): BlockData {
     return {
         header: {
             coinbase: step.origin,

@@ -11,7 +11,7 @@ export interface ReturnInfo {
     state: StorageDump; // copy of the state before the return instruction executes
 }
 
-interface WithReturnInfo {
+export interface WithReturnInfo {
     returnInfo: ReturnInfo | undefined;
 }
 
@@ -22,7 +22,8 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
     state: T,
-    trace: Array<T & WithReturnInfo>
+    trace: Array<T & WithReturnInfo>,
+    callStack: number[]
 ): Promise<T & WithReturnInfo> {
     const op = state.op;
 
@@ -32,6 +33,8 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
             returnInfo: undefined
         };
     }
+
+    callStack.pop();
 
     const storageDump = (vm.stateManager.dumpStorage as any)(step.address);
 

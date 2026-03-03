@@ -86,7 +86,9 @@ export async function replayEVM(
     const stateManager = await makeStateManager(initialState);
 
     const tracer = new EVMTracer(artifactManager, { strict: false, foundryCheatcodes: false });
-    const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager);
+    const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager, {
+        callStack: [-1]
+    });
 
     await (stateAfter as MerkleStateManager).flush();
 

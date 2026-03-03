@@ -26,7 +26,7 @@ export interface CallInfo {
     state: StorageDump; // copy of the state before the call instruction executes
 }
 
-interface WithCallInfo {
+export interface WithCallInfo {
     callInfo: CallInfo | undefined;
 }
 
@@ -43,7 +43,9 @@ const CALL_OPS = new Set([
 export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     vm: VM,
     step: InterpreterStep,
-    state: T
+    state: T,
+    trace: Array<T & WithCallInfo>,
+    callStack: number[]
 ): Promise<T & WithCallInfo> {
     const op = state.op;
 
@@ -53,6 +55,8 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
             callInfo: undefined
         };
     }
+
+    callStack.push(trace.length);
 
     const stackTop = state.evmStack.length - 1;
     const argStackOff = op.opcode === OPCODES.CALL || op.opcode === OPCODES.CALLCODE ? 3 : 2;

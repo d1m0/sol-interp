@@ -6,7 +6,7 @@ import {} from "@ethereumjs/common";
 import { createAddressFromString } from "@ethereumjs/util";
 import {} from "@ethereumjs/block";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
-import { getCommon, isReturn, replayEVM } from "../../src/alignment/evm_trace";
+import { isReturn, replayEVM } from "../../src/alignment/evm_trace";
 import { CallInfo, CreateInfo, ReturnInfo } from "../../src/alignment/evm_trace/transformers";
 
 const sol2maruirScenarios: string[] = fse
@@ -24,14 +24,13 @@ describe("EVM Tracer tests", () => {
                 [sample.slice(0, -4) + "sol"],
                 "test/samples/sol2maruir"
             );
-            const common = getCommon();
             const state = scenarioInitialStateToAccountMap(scenario.initialState);
 
             for (let i = 0; i < scenario.steps.length; i++) {
                 const txDesc = scenario.steps[i];
                 const sender = createAddressFromString(txDesc.origin);
                 const txData = txDescToTxData(txDesc);
-                const blockData = txDescToBlockData(txDesc, common);
+                const blockData = txDescToBlockData(txDesc);
                 const [evmTrace] = await replayEVM(
                     artifactManager,
                     state,

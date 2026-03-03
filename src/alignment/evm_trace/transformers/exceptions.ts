@@ -7,11 +7,16 @@ import { isOutOfGas, isReturn } from "../utils";
  * Interface with additional data regarding a RETURN/STOP op
  */
 export interface ExceptionInfo {
+    // Exception bytes
     excData: Uint8Array;
-    isImplicit: boolean; // True if this is an exception not raised by REVERT/INVALID
+    // True if this is an exception not raised by REVERT/INVALID
+    isImplicit: boolean;
+    // Index of the corresponding *CALL*/CREATE* instruction to whom's context we are reverting
+    // -1 for top-level reverts
+    correspCallIdx: number;
 }
 
-interface WithExceptionInfo {
+export interface WithExceptionInfo {
     exceptionInfo: ExceptionInfo | undefined;
 }
 
@@ -22,44 +27,55 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
     vm: VM,
     step: InterpreterStep,
     state: T,
-    trace: Array<T & WithExceptionInfo>
+    trace: Array<T & WithExceptionInfo>,
+    callStack: number[]
 ): Promise<T & WithExceptionInfo> {
+    const correspCallIdx = callStack[callStack.length - 1];
+
     // Explicit revert
     if (state.op.opcode === OPCODES.REVERT) {
         const stackTop = state.evmStack.length - 1;
         const start = bigEndianBufToNumber(state.evmStack[stackTop]);
         const size = bigEndianBufToNumber(state.evmStack[stackTop - 1]);
         const excData = size === 0 ? new Uint8Array() : mustReadMem(start, size, state.memory);
+
+        callStack.pop();
         return {
             ...state,
             exceptionInfo: {
                 excData,
-                isImplicit: true
+                isImplicit: true,
+                correspCallIdx
             }
         };
     }
 
     // Explicit invalid excepetion (old-style assert)
     if (!state.op.valid) {
+        callStack.pop();
         return {
             ...state,
             exceptionInfo: {
                 excData: new Uint8Array(),
-                isImplicit: true
+                isImplicit: true,
+                correspCallIdx
             }
         };
     }
 
     // Out-of-gas
     if (isOutOfGas(state)) {
+        callStack.pop();
         return {
             ...state,
             exceptionInfo: {
                 excData: new Uint8Array(),
-                isImplicit: false
+                isImplicit: false,
+                correspCallIdx
             }
         };
     }
+
     /**
      * There are other possible implicit exceptions:
      *  - stack over/under flow
@@ -88,7 +104,11 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     const lastStep = trace[trace.length - 1];
 
-    if (lastStep.depth <= state.depth || isReturn(lastStep) || lastStep.exceptionInfo !== undefined) {
+    if (
+        lastStep.depth <= state.depth ||
+        isReturn(lastStep) ||
+        lastStep.exceptionInfo !== undefined
+    ) {
         return {
             ...state,
             exceptionInfo: undefined
@@ -97,9 +117,11 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     lastStep.exceptionInfo = {
         excData: new Uint8Array(),
-        isImplicit: true
+        isImplicit: true,
+        correspCallIdx
     };
 
+    callStack.pop();
     return {
         ...state,
         exceptionInfo: undefined

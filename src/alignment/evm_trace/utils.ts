@@ -1,4 +1,7 @@
-import { BasicStepInfo, OPCODES, OpInfo, StepState } from "sol-dbg";
+import { BasicStepInfo, OPCODES, OpInfo } from "sol-dbg";
+import { EVMStep } from "./tracer";
+import { AccountMap } from "../../interp";
+import { assert } from "../../utils";
 
 /**
  * Return true IFF the EVM runs out of gas on the given step.
@@ -8,15 +11,18 @@ import { BasicStepInfo, OPCODES, OpInfo, StepState } from "sol-dbg";
  *
  * It seems that both are not yet on mainnet.
  * @param step
+ * @todo move to sol-dbg
  */
 export function isOutOfGas(step: BasicStepInfo): boolean {
     return step.gasCost > step.gas;
 }
 
+// @todo move to sol-dbg
 export function isReturn(step: OpInfo): boolean {
     return step.op.opcode === OPCODES.RETURN || step.op.opcode === OPCODES.STOP;
 }
 
+// @todo move to sol-dbg
 export function isCall(step: OpInfo): boolean {
     return (
         step.op.opcode === OPCODES.CALL ||
@@ -27,20 +33,43 @@ export function isCall(step: OpInfo): boolean {
 }
 
 /**
- * Return true IIF the `idx`-th step of `llTrace` throws an exception.
+ * Given an `initialState` and a trace, rebuild the state of all accounts up to (and including) index `idx` of the trace.
  */
-export function throwsException(llTrace: StepState[], idx: number): boolean {
-    const isRet = isReturn(llTrace[idx]);
-    // If this is the last step, assume that anything that is not a normal return must be an exception
-    if (idx === llTrace.length - 1) {
-        return !isRet;
+export function rebuildStateFromTrace(
+    trace: EVMStep[],
+    initialState: AccountMap,
+    idx: number
+): AccountMap {
+    let state = initialState;
+    const stateMap = new Map<number, AccountMap>();
+
+    stateMap.set(-1, initialState);
+
+    for (let i = 0; i <= idx; i++) {
+        const step = trace[i];
+        const lastStep = trace.length > 0 ? trace[trace.length - 1] : undefined;
+
+        if (step.callInfo || step.createInfo || step.returnInfo) {
+            assert(step.snapshot !== undefined, ``);
+            state = state.set(step.address.toString(), step.snapshot);
+            stateMap.set(i, state);
+        } else if (lastStep && lastStep.exceptionInfo) {
+            const oldState = stateMap.get(lastStep.exceptionInfo.correspCallIdx);
+            assert(oldState !== undefined && step.snapshot !== undefined, ``);
+            // Restore the caller contract to the recorded state right after the exception.
+            // This is mostly to get the right nonce after a failed contract creation.
+            state = oldState.set(step.address.toString(), step.snapshot);
+        }
+
+        // Right after SELFDESTRUCT delete the destroyed contract
+        if (
+            lastStep &&
+            lastStep.op.opcode === OPCODES.SELFDESTRUCT &&
+            lastStep.exceptionInfo === undefined
+        ) {
+            state = state.delete(lastStep.address.toString());
+        }
     }
 
-    // Out-of-gas is always an exception
-    if (isOutOfGas(llTrace[idx])) {
-        return true;
-    }
-
-    // Otherwise if depth is decreasing, and this is not a return op, assume its an exception
-    return llTrace[idx].depth > llTrace[idx + 1].depth && !isRet;
+    return state;
 }
