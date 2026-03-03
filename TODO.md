@@ -245,37 +245,46 @@
 229 - get debugging to work with new binary
 230 - implement abi.encodePacked 
 231 - keccak256
+232 - remove all references of infer and typenode
+233 - fix type errors
+234    - make sure & fix LocalScopes.detectIds
+235 - restore infer just for resolving
+236 - remove string from Value
+237 - fix type errors
+238 - get to clean test run
+239 - remove resolving dependency
+240 - finally kill infer
+241 - do a pass cleaning up old code
+242 - do a pass over coverage
+243 - do a pass over refactor
+244 - test remaining sol2maruir tests to determine readiness level
+245 - implement emit
+246 - implement storage for immutable state vars
+247 - implement type(Contract), type(Interface), type(IntType)
+248     - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
+249 - cli for playing
+250 - implement computing the correct final deployed bytecode in the face of immutables
 
-Goals:
-    - convert to using TypeIdentifiers everywhere
-    - convert string runtime values to uint8array
+Trace alignment refactor:
+ - custom tracer
+    - basic info, event desc tracers
+    - decode calls/returns
+        - nonces on create
+        - msg.data/return data
+    - detect and decode exceptions
+    - get storage copies on calls, returns
+    - new contract address at both creation and return step
+ - adapt seek code to new tracer
 
-Stages:
-- remove all references of infer and typenode
-- fix type errors
-    - make sure & fix LocalScopes.detectIds
-- restore infer just for resolving
-- remove string from Value
-- fix type errors
-- get to clean test run
-- remove resolving dependency
-- finally kill infer
-- do a pass cleaning up old code
-- do a pass over coverage
-- do a pass over refactor
+- test multi-level exception
+- test alignment on contract creation with no constructor and no implicit initializers
+- test alignment on contract creation with no constructor and implicit initializers
+- test alignment on contract creation with constructor and implicit initializers
 
-Pitfalls:
-    - wrapping and unrwapping TypeTypeId for decode(), type(), type conversion, struct constructor, new callee
-    - cleanup member access for builtin structs and the such
-    - cleanup builtin function calls
-    - concretize
-
-
-- add a new polymorpic TVar type TMovedTo(N, Location) saying that it matches any type, but it moves it to the given location.
-Use this type for abi.encode. Can we also use it for push?
+- cleanup member access for builtin structs and the such
+- cleanup builtin function calls
 - on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?
 - is "foo".length byte length or uncode code points?
-- test remaining sol2maruir tests to determine readiness level
 - address.callcode
 - implement block builtins
     - store block in state
@@ -286,12 +295,6 @@ Use this type for abi.encode. Can we also use it for push?
 
 - implement math builtins 
 - implement selfdestruct
-- implement type(Contract), type(Interface), type(IntType)
-    - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
-- cli for playing
-- implement emit
-- implement storage for immutable state vars
-- implement computing the correct final deployed bytecode in the face of immutables
 - do a pass over contract scopes
 
 Issue: ContractScope seems wrong
@@ -313,15 +316,8 @@ Constructors:
 - add test with external calls where an inner one fails (should propagate up)
 - gatherDefs across ContractScope and UnitScope can be unified. Unneccessary code duplication. Maybe a base DefScope? With an interface that both implement?
 
-- make bugs for:
-    - polymorphism doesnt work well for decode
-    - builtinstruct type doesnt quite work for builtins
-
-- maybe move constants cache to Chain from Artifact? Though logically it feels like it fits better there....
 - Interp.makeState duplicates logic in Chain
 - add unit test with empty constructors and calling
-
-- migrate builtin tests
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 
@@ -334,7 +330,6 @@ Constructors:
 
 // ---------------
 - test virtual function resolves to public getter
-- more coercions
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos
@@ -343,12 +338,9 @@ Constructors:
 - test behavior of zero-ing out (delete, assign zero, pop) of complex storage datastructures. Are they recursively zeroed-out? For sized arrays? For structs? for unsized arrays?
 
 Eventually:
-    - move push implementaion in ArrayStorageView/BytesStorageView
     - cleanup nyi()s to 0
     - doc all functions
     - cleanup @todo-s
-    - cli
-    - file a bug to eventually elaborate the steps of constant expression eval by moving logic from solc-typed-ast's constant eval. Note this requires making Value = | Decimal to support rationals.
 
 Writing ideas:
     - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!

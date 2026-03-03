@@ -17,7 +17,7 @@ contract Foo {
         return 2;
     }
 
-    function main() public {
+    function main() public payable {
         assert(getOne.callAndAddOne() == 2);
         assert(getTwo.callAndAddOne() == 3);
         assert(Lib.callAndAddOne(getOne) == 2);
@@ -25,7 +25,7 @@ contract Foo {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Foo __this__ = new Foo();
         __this__.main();
     }

@@ -44,7 +44,7 @@ contract Casts {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Casts __this__ = new Casts();
         __testCase286__(__this__);
         __testCase318__(__this__);

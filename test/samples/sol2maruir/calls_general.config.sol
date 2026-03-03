@@ -169,7 +169,7 @@ contract Calls {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Calls __this__ = new Calls();
         __testCase843__(__this__);
         __testCase871__(__this__);

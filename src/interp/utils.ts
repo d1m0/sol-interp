@@ -20,7 +20,7 @@ import {
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { ExternalCallDescription, NewCall, none, Value } from "./value";
-import { CallResult, State, WorldInterface } from "./state";
+import { State } from "./state";
 import {
     FixedBytesLocalView,
     BaseLocalView,
@@ -29,7 +29,7 @@ import {
     TempView,
     CodeView
 } from "./view";
-import { AccountInfo } from "./chain";
+import { AccountInfo, CallResult, EnvInterface } from "./env";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
 import { Address, setLengthLeft } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
@@ -690,17 +690,8 @@ export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Se
     return res;
 }
 
-export const worldFailMock: WorldInterface = {
-    create: function (): CallResult {
-        throw new Error("Function not implemented.");
-    },
-    call: function (): CallResult {
-        throw new Error("Function not implemented.");
-    },
-    staticcall: function (): CallResult {
-        throw new Error("Function not implemented.");
-    },
-    delegatecall: function (): CallResult {
+export const envFailMock: EnvInterface = {
+    execMsg: function (): CallResult {
         throw new Error("Function not implemented.");
     },
     getAccount: function (): AccountInfo | undefined {
@@ -957,4 +948,9 @@ export function gatherStateVars(
 export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
     const paddedLength = bs.length / 32 + (bs.length % 32) === 0 ? 0 : 32;
     return setLengthLeft(bs, paddedLength);
+}
+
+export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition {
+    sol.assert(ref.opaque instanceof sol.FunctionDefinition, ``);
+    return ref.opaque;
 }

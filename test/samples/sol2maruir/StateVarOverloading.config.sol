@@ -17,7 +17,7 @@ contract Child is Base {
 }
 
 contract StateVarOverloading {
-    function main() public returns (uint, uint, uint) {
+    function main() public payable returns (uint, uint, uint) {
         Base b = new Base();
         Base c = new Child();
         Child d = new Child();
@@ -26,7 +26,7 @@ contract StateVarOverloading {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         StateVarOverloading __this__ = new StateVarOverloading();
         __testCase79__(__this__);
     }

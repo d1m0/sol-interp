@@ -14,14 +14,14 @@ contract A {
 }
 
 contract Main {
-    function main() public returns (uint) {
+    function main() public payable returns (uint) {
         A a = new A(42);
         return a.inc();
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Main __this__ = new Main();
         __testCase62__(__this__);
     }

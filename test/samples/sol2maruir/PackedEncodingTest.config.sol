@@ -32,7 +32,7 @@ contract PackedEncodingTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         PackedEncodingTest __this__ = new PackedEncodingTest();
         __testCase357__(__this__);
         __testCase371__(__this__);

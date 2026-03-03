@@ -15,7 +15,7 @@ library GetThis {
 }
 
 contract LibraryThis {
-    function main() public {
+    function main() public payable {
         address x = GetThis.getThis();
         assert(x == address(this));
         try GetThis.getThis() returns (address y) {
@@ -30,7 +30,7 @@ contract LibraryThis {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         LibraryThis __this__ = new LibraryThis();
         __testCase105__(__this__);
     }

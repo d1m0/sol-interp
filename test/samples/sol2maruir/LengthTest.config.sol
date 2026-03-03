@@ -27,7 +27,7 @@ contract LengthTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         LengthTest __this__ = new LengthTest();
         __testCase148__(__this__);
         __testCase162__(__this__);

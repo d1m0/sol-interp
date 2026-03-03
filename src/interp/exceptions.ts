@@ -161,3 +161,9 @@ export class InsufficientBalance extends NoPayloadError {
         super(node);
     }
 }
+
+export class NoMatchingMethod extends NoPayloadError {
+    constructor(node: FailLoc) {
+        super(node);
+    }
+}

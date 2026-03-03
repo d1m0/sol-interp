@@ -7,7 +7,7 @@ contract StructConstructorCall {
         uint memberSince;
     }
 
-    function main() public {
+    function main() public payable {
         address targetMember = address(0xdeadbeef);
         string memory memberName = "boo";
         Member memory m = Member({memberSince: 0, name: memberName, member: targetMember});
@@ -16,7 +16,7 @@ contract StructConstructorCall {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         StructConstructorCall __this__ = new StructConstructorCall();
         __testCase53__(__this__);
     }

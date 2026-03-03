@@ -17,7 +17,7 @@ contract Child is Base {
 }
 
 contract PrivateFuncsAreVirtual {
-    function main() public {
+    function main() public payable {
         Base b = new Child();
         Base b1 = new Base();
         assert(b.boo() == 2);
@@ -26,7 +26,7 @@ contract PrivateFuncsAreVirtual {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         PrivateFuncsAreVirtual __this__ = new PrivateFuncsAreVirtual();
         __testCase77__(__this__);
     }

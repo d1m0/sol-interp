@@ -1,7 +1,7 @@
 pragma solidity 0.4.13;
 
 contract AddressBytesCast04x {
-    function main() public {
+    function main() public payable {
         bytes21 a = 0x01000000000000000000000000000000000000000f;
         address b = address(a);
         bytes21 c = bytes21(b);
@@ -16,7 +16,7 @@ contract AddressBytesCast04x {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         AddressBytesCast04x __this__ = new AddressBytesCast04x();
         __testCase80__(__this__);
     }

@@ -32,7 +32,7 @@ contract CreateContract {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         CreateContract __this__ = new CreateContract();
         __testCase298__(__this__);
         __testCase312__(__this__);

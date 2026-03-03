@@ -11,7 +11,7 @@ import {
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 
-import { bytesT, stringT, topoSort, worldFailMock } from "./utils";
+import { bytesT, stringT, topoSort, envFailMock } from "./utils";
 import { Interpreter } from "./interp";
 import { ContractScope, GlobalScope } from "./scope";
 import { makeNoContractState } from "./state";
@@ -163,7 +163,7 @@ export function gatherConstants(
 
     const [constNodes, depGraph] = buildConstantDepGraph(artifact.units);
     const sortedNodes = topoSort(constNodes, depGraph);
-    const interp = new Interpreter(worldFailMock, artifactManager, artifact, []);
+    const interp = new Interpreter(envFailMock, artifactManager, artifact, []);
 
     // Pre-init constantMap with NoneViews to appease Scope constructors
     for (const nd of sortedNodes) {

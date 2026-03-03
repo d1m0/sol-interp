@@ -38,7 +38,7 @@ contract Literals {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Literals __this__ = new Literals();
         __testCase226__(__this__);
         __testCase240__(__this__);

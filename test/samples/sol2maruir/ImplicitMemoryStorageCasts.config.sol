@@ -5,7 +5,7 @@ contract ImplicitMemoryStorageCasts {
     bytes internal b = hex"2a2b";
     uint256[] internal a = [1, 2, 3];
 
-    function main() public {
+    function main() public payable {
         string memory mS = s;
         assert(keccak256(abi.encode(mS)) == keccak256(abi.encode("abc")));
         bytes memory mB = b;
@@ -38,7 +38,7 @@ contract ImplicitMemoryStorageCasts {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ImplicitMemoryStorageCasts __this__ = new ImplicitMemoryStorageCasts();
         __testCase257__(__this__);
     }

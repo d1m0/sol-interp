@@ -18,7 +18,7 @@ contract Calldata {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Calldata __this__ = new Calldata();
         __testCase70__(__this__);
         __testCase146__(__this__);

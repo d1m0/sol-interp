@@ -160,7 +160,7 @@ contract ForLoops {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ForLoops __this__ = new ForLoops();
         __testCase631__(__this__);
         __testCase645__(__this__);

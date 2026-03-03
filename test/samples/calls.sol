@@ -13,7 +13,7 @@ contract Calls {
         return fib(x-1) + fib(x-2);
     }
 
-    function swap(uint x, uint y) internal returns (uint z, uint w) {
+    function swap(uint x, uint y) public returns (uint z, uint w) {
         (z, w) = (y, x);
     }
 

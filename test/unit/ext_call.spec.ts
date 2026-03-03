@@ -236,7 +236,7 @@ describe("Simple function call tests", () => {
                 hexToBytes(ethABI.encodeParameters(argTs, argVals) as `0x${string}`)
             );
 
-            const res = chain.call({
+            const res = chain.execMsg({
                 from: SENDER,
                 to: RECEIVER,
                 delegatingContract: undefined,
@@ -244,7 +244,8 @@ describe("Simple function call tests", () => {
                 gas: 0n,
                 value: 0n,
                 salt: undefined,
-                isStaticCall: false
+                isStaticCall: false,
+                depth: 0
             });
 
             if (expectedReturns instanceof Array) {

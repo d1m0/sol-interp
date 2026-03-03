@@ -57,7 +57,7 @@ contract SampleBase is SampleAbstract {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         NegativeExponentiation __this__ = new NegativeExponentiation();
         __testCase243__(__this__);
     }

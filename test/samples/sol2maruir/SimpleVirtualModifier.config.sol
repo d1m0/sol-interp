@@ -25,14 +25,14 @@ contract Child is Base {
 }
 
 contract Test {
-    function main() public {
+    function main() public payable {
         Child c = new Child();
         assert(c.goo() == 1);
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test();
         __testCase77__(__this__);
     }

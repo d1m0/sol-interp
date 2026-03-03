@@ -65,7 +65,7 @@ contract TryCatch08 {
         revert CustomError(1, -1, address(0x0));
     }
 
-    function main() public {
+    function main() public payable {
         x = 0;
         try this.throwString("abc") {
             assert(false);
@@ -158,7 +158,7 @@ contract TryCatch08 {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         TryCatch08 __this__ = new TryCatch08();
         __testCase617__(__this__);
     }

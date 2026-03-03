@@ -171,7 +171,7 @@ contract Test {
         assert((oldBalance + 1) == afAddr.balance);
     }
 
-    function main() public {
+    function main() public payable {
         noContractTests();
         noFallbackTest();
         fallbackTests();
@@ -182,7 +182,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = (new Test).value(20)();
         Test __this1__ = (new Test).value(20)();
         RejectFallback __rf__ = new RejectFallback();

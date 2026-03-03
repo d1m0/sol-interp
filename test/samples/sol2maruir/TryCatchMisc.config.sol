@@ -88,7 +88,7 @@ contract TryCatchMisc {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         TryCatchMisc __this__ = new TryCatchMisc();
         __testCase332__(__this__);
         __testCase346__(__this__);

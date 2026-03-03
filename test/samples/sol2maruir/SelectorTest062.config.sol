@@ -19,7 +19,7 @@ contract SelectorTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         SelectorTest __this__ = new SelectorTest();
         __testCase65__(__this__);
     }

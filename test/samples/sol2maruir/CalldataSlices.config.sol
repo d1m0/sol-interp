@@ -11,7 +11,7 @@ contract CalldataSlices {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         CalldataSlices __this__ = new CalldataSlices();
         __testCase65__(__this__);
         __testCase96__(__this__);

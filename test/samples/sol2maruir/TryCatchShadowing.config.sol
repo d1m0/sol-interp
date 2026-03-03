@@ -24,7 +24,7 @@ contract TryCatchShadowing {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         TryCatchShadowing __this__ = new TryCatchShadowing();
         __testCase87__(__this__);
     }

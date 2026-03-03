@@ -15,7 +15,7 @@ contract Solidity08BuiltinsTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Solidity08BuiltinsTest __this__ = new Solidity08BuiltinsTest();
         __testCase69__(__this__);
     }

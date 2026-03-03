@@ -31,7 +31,7 @@ contract T is D {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         T __this__ = new T();
         __testCase79__(__this__);
     }

@@ -1,7 +1,7 @@
 pragma solidity 0.6.10;
 
 contract Foo {
-    function main() public returns (address) {
+    function main() public payable returns (address) {
         address x;
         address payable b = payable(x);
         return b;
@@ -9,7 +9,7 @@ contract Foo {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Foo __this__ = new Foo();
         __testCase34__(__this__);
     }

@@ -46,7 +46,7 @@ contract Child is Base {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Base __b__ = new Base();
         Child __c__ = new Child();
         __testCase201__(__b__, __c__);

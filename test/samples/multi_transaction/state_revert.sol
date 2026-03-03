@@ -70,7 +70,7 @@ contract Foo {
 
         try new ChildSuccess{value:3}() returns (ChildSuccess c) {
             assert(address(this).balance == oldBal - 3);
-            assert(address(c) == 0xD5DA07DdbC00bD592642628e1E032af770CcC706);
+            assert(address(c) == 0x017361A83a6C7DDf54F85298c85D227856B21156);
         } catch {
             assert(false);
         }

@@ -54,7 +54,7 @@ contract DecodingTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         DecodingTest __this__ = new DecodingTest();
         __testCase312__(__this__);
     }

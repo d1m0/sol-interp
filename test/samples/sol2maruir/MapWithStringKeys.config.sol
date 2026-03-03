@@ -15,7 +15,7 @@ contract MapWithStringKeys {
         return x[str];
     }
 
-    function main() public {
+    function main() public payable {
         x[y] = 1;
         string memory foo = "foo";
         x[foo] = 2;
@@ -30,7 +30,7 @@ contract MapWithStringKeys {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         MapWithStringKeys __this__ = new MapWithStringKeys();
         __testCase122__(__this__);
     }

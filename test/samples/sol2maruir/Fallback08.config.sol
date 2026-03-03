@@ -6,7 +6,7 @@ contract Fallback08 {
         return input;
     }
 
-    function main() public {
+    function main() public payable {
         bytes memory data = hex"000102030405";
         (bool success, bytes memory ret) = address(this).call(data);
         assert(success);
@@ -15,7 +15,7 @@ contract Fallback08 {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Fallback08 __this__ = new Fallback08();
         __testCase71__(__this__);
     }

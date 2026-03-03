@@ -25,7 +25,7 @@ contract Child2 is Child1 {
 }
 
 contract SuperKeyword {
-    function main() public {
+    function main() public payable {
         Base b1 = new Child1();
         Base b2 = new Child2();
         b1.boo();
@@ -34,7 +34,7 @@ contract SuperKeyword {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         SuperKeyword __this__ = new SuperKeyword();
         __testCase88__(__this__);
     }

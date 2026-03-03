@@ -22,7 +22,7 @@ contract B is A(1) {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         B __this__ = new B();
         __testCase60__(__this__);
     }

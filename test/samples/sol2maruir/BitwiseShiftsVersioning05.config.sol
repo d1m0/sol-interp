@@ -2,14 +2,14 @@ pragma solidity 0.5.5;
 
 /// Returns `-2` for 0.4.x and `-3` since 0.5.x
 contract Test {
-    function main() public returns (int256) {
+    function main() public payable returns (int256) {
         int256 a = -5;
         return a >> 1;
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test();
         __testCase31__(__this__);
     }

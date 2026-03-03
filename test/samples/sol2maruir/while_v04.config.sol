@@ -76,7 +76,7 @@ contract While {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         While __this__ = new While();
         __testCase252__(__this__);
         __testCase266__(__this__);

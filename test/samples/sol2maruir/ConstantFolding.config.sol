@@ -1,7 +1,7 @@
 pragma solidity 0.4.24;
 
 contract ConstantFolding {
-    function main() public {
+    function main() public payable {
         uint8 a = 258 - 10;
         assert(a == 248);
         int8 b = (10 * 2) - 22;
@@ -12,7 +12,7 @@ contract ConstantFolding {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ConstantFolding __this__ = new ConstantFolding();
         __testCase59__(__this__);
     }

@@ -51,7 +51,7 @@ contract ConditionalTuples2 {
         assert(((x.length == 4) && (y.length == 5)) && (z == 6));
     }
 
-    function main() public {
+    function main() public payable {
         verifyNestedTuples();
         verifyTupleOrFunctionCall();
         verifyNestedConditionalTuples();
@@ -60,7 +60,7 @@ contract ConditionalTuples2 {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ConditionalTuples2 __this__ = new ConditionalTuples2();
         __testCase476__(__this__);
     }

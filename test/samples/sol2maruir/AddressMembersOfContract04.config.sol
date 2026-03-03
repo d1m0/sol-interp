@@ -18,7 +18,7 @@ contract AddressMembersOfContract {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         AddressMembersOfContract __this__ = new AddressMembersOfContract();
         __testCase74__(__this__);
     }

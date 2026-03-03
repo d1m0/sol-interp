@@ -6,7 +6,7 @@ import {
     createAddressFromString,
     hexToBytes
 } from "@ethereumjs/util";
-import { Chain } from "../interp";
+import { CallResult, Chain, SolMessage } from "../interp";
 import { ArtifactManager } from "../interp/artifactManager";
 import { TraceVisitor } from "../interp/visitors";
 import { ParsedStep } from "./ast/parser";
@@ -26,7 +26,6 @@ import {
 import { BaseInterpType } from "../interp/types";
 import { ExpressionNode } from "./ast";
 import * as sol from "solc-typed-ast";
-import { CallResult, SolMessage } from "../interp/state";
 import * as ethABI from "web3-eth-abi";
 import { abiTypeToCanonicalName, abiValueToBaseValue, toABIEncodedType } from "../interp/abi";
 import { getGetterArgAndReturnTs } from "../interp/utils";
@@ -195,7 +194,7 @@ export class Runner {
             data = concatBytes(bytecode, argData);
         } else {
             this.expect(target !== undefined);
-            const selector = hexToBytes(`0x${sol.signatureHash(target)}`);
+            const selector = sol.signatureHash(target);
             data = concatBytes(selector, argData);
         }
 
@@ -208,7 +207,8 @@ export class Runner {
                 gas: 0n,
                 value: 1000n,
                 salt: undefined,
-                isStaticCall: false
+                isStaticCall: false,
+                depth: 0
             },
             targetContract
         ];
@@ -246,7 +246,7 @@ export class Runner {
     run(step: ParsedStep): [CallResult, BaseValue[] | undefined] {
         const [msg, info] = this.getMsgFromStep(step);
 
-        const res = step.kind === "Deploy" ? this.chain.create(msg) : this.chain.call(msg);
+        const res = this.chain.execMsg(msg);
 
         let decodedReturns: BaseValue[] | undefined;
 

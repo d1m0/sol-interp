@@ -49,7 +49,7 @@ import { decode, encode, encodePacked, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
-import { satisfies } from "semver";
+import { lt, satisfies } from "semver";
 import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
 import { xor } from "./bitwise";
 
@@ -124,7 +124,11 @@ export const assertBuiltin = new BuiltinFunction(
         const flag = interp.castTo(args[0], rtt.bool, state);
 
         if (!flag) {
-            interp.runtimeError(AssertError, state);
+            if (lt(interp.compilerVersion, "0.8.0")) {
+                interp.runtimeError(NoPayloadError, state);
+            } else {
+                interp.runtimeError(AssertError, state);
+            }
         }
 
         return [];
@@ -368,7 +372,7 @@ export const revertBuiltin = new BuiltinFunction(
     dummyFunT,
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         if (args.length === 0) {
-            throw new NoPayloadError(interp.curNode);
+            interp.runtimeError(NoPayloadError, state);
         }
 
         interp.expect(
@@ -378,7 +382,7 @@ export const revertBuiltin = new BuiltinFunction(
         const msgArg = args[0];
         const msg = msgArg.decode(state.memory);
         interp.expect(msg instanceof Uint8Array);
-        throw new ErrorError(interp.curNode, bytesToUtf8(msg));
+        interp.runtimeError(ErrorError, state, bytesToUtf8(msg));
     }
 );
 
@@ -395,14 +399,14 @@ export const requireBuiltin = new BuiltinFunction(
         }
 
         if (args.length === 1) {
-            throw new NoPayloadError(interp.curNode);
+            interp.runtimeError(NoPayloadError, state);
         }
 
         interp.expect(args[1] instanceof rtt.BytesMemView);
         const bs = args[1].decode(state.memory);
         interp.expect(bs instanceof Uint8Array);
 
-        throw new ErrorError(interp.curNode, bytesToUtf8(bs));
+        interp.runtimeError(ErrorError, state, bytesToUtf8(bs));
     }
 );
 

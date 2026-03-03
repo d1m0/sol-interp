@@ -17,7 +17,7 @@ contract Child is Base {
 }
 
 contract Test {
-    function main() public returns (uint, uint, uint) {
+    function main() public payable returns (uint, uint, uint) {
         Base b = new Base();
         Child c = new Child();
         Base b1 = new Child();
@@ -26,7 +26,7 @@ contract Test {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Test __this__ = new Test();
         __testCase85__(__this__);
     }

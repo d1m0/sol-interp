@@ -1,7 +1,7 @@
 pragma solidity 0.7.6;
 
 contract ImplicitStringLiteralFixedByteCasts {
-    function main() public {
+    function main() public payable {
         bytes memory b = new bytes(1);
         b[0] = bytes1(0x61);
         bytes2 b1 = hex"6162";
@@ -18,7 +18,7 @@ contract ImplicitStringLiteralFixedByteCasts {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ImplicitStringLiteralFixedByteCasts __this__ = new ImplicitStringLiteralFixedByteCasts();
         __testCase74__(__this__);
     }

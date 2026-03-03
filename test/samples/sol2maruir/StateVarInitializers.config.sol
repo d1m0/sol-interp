@@ -49,7 +49,7 @@ contract StateVarInitializers {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         StateVarInitializers __this__ = new StateVarInitializers();
     }
 }

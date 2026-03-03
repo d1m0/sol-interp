@@ -40,7 +40,7 @@ contract C is NumPong {
 }
 
 contract Dispatch {
-    function main() public returns (uint) {
+    function main() public payable returns (uint) {
         NumPong[] memory contracts = new NumPong[](4);
         contracts[0] = new NumPong(address(this), 10);
         contracts[1] = new A(address(this), 100);
@@ -66,7 +66,7 @@ contract Dispatch {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Dispatch __this__ = new Dispatch();
         __testCase296__(__this__);
     }

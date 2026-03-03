@@ -9,7 +9,7 @@ contract StorageRefArg {
         t[0] = v;
     }
 
-    function main() public returns (uint[] memory, uint[] memory) {
+    function main() public payable returns (uint[] memory, uint[] memory) {
         a = [1, 2, 3];
         b = [4, 5, 6];
         setFirst(a, 42);
@@ -20,7 +20,7 @@ contract StorageRefArg {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         StorageRefArg __this__ = new StorageRefArg();
         __testCase90__(__this__);
     }

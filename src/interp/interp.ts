@@ -28,7 +28,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { WorldInterface, State, SolMessage, CallResult } from "./state";
+import { State } from "./state";
 import {
     InternalError,
     NoScope,
@@ -40,7 +40,8 @@ import {
     ERROR_SELECTOR,
     PanicError,
     CustomError,
-    NoPayloadError
+    NoPayloadError,
+    NoMatchingMethod
 } from "./exceptions";
 import { gte, lt } from "semver";
 import {
@@ -94,6 +95,7 @@ import {
     getCodeContractInfo,
     getContractInfo,
     getExternalCallComponents,
+    getFunDef,
     getGetterArgAndReturnTs,
     getLibraryLinkedAddress,
     getModifiers,
@@ -146,6 +148,7 @@ import { InterpVisitor } from "./visitors";
 import { decodeLinkMap, isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bshl, bshr } from "./bitwise";
 import { buildEvent } from "./events";
+import { CallResult, EnvInterface, SolMessage } from "./env";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -187,7 +190,7 @@ export class Interpreter {
     arrayBuiltins: BuiltinStruct;
 
     constructor(
-        public readonly world: WorldInterface,
+        public readonly world: EnvInterface,
         public readonly artifactManager: ArtifactManager,
         public readonly artifact: ArtifactInfo,
         private readonly visitors: InterpVisitor[]
@@ -465,6 +468,17 @@ export class Interpreter {
             }
         }
 
+        // HACK:
+        // Libraries tend to put their own address in bytes 1-21 in bytecode. Unfortunately there is no
+        // immutable reference for this. Try and catch this here
+        if (
+            mdc.ast &&
+            mdc.ast.kind === sol.ContractKind.Library &&
+            equalsBytes(deployedBytecode.slice(1, 21), rtt.ZERO_ADDRESS.bytes)
+        ) {
+            deployedBytecode.set(state.account.address.bytes, 1);
+        }
+
         for (const v of this.visitors) {
             v.return(this, state, deployedBytecode);
         }
@@ -496,7 +510,11 @@ export class Interpreter {
         const entryPoint = this.artifactManager.findEntryPoint(msg.data, codeInfo);
 
         if (entryPoint === undefined) {
-            return new NoPayloadError(codeInfo.ast);
+            const exc = new NoMatchingMethod(codeInfo.ast);
+            for (const v of this.visitors) {
+                v.exception(this, state, exc);
+            }
+            return exc;
         }
 
         // Decode Arguments
@@ -1365,11 +1383,7 @@ export class Interpreter {
         const res = this.eval(expr, state);
 
         if (res instanceof Poison) {
-            if (res instanceof DecodingFailure) {
-                this.fail(NoPayloadError, `DecodingFailure`, expr);
-            }
-
-            this.fail(InternalError, `Got poison`, expr);
+            this.runtimeError(NoPayloadError, state);
         }
 
         return res;
@@ -2134,9 +2148,17 @@ export class Interpreter {
             return typ.asInt();
         }
 
-        // Note: RHS evaluates first.
-        const rVal = this.evalNP(expr.vRightExpression, state);
-        const lVal = this.evalNP(expr.vLeftExpression, state);
+        // Note: for logical operations LVal evaluates first. For other ops RVal evaluates first
+        let rVal: Value;
+        let lVal: Value;
+
+        if (expr.operator === "||" || expr.operator === "&&") {
+            lVal = this.evalNP(expr.vLeftExpression, state);
+            rVal = this.evalNP(expr.vRightExpression, state);
+        } else {
+            rVal = this.evalNP(expr.vRightExpression, state);
+            lVal = this.evalNP(expr.vLeftExpression, state);
+        }
 
         return this.computeBinary(
             lVal,
@@ -2548,22 +2570,20 @@ export class Interpreter {
         return results;
     }
 
-    private makeMsgCall(msg: SolMessage, state: State, isDelegate: boolean): CallResult {
+    private makeMsgCall(msg: SolMessage, state: State): CallResult {
         const address = getThis(state);
         // Pesist our state changes before calling out
         this.world.updateAccount(state.account);
 
-        // Call out
-        let res: CallResult;
-
         if (msg.to.equals(rtt.ZERO_ADDRESS)) {
-            this.expect(!isDelegate, `Contract deployments are never delegate calls`);
-            res = this.world.create(msg);
-        } else if (!isDelegate) {
-            res = this.world.call(msg);
-        } else {
-            res = this.world.delegatecall(msg);
+            // Increment caller nonce. Note that we do this here, since increments
+            // persist even if the new contract constructor reverts
+            state.account.nonce++;
+            this.world.updateAccount(state.account);
         }
+
+        // Call out
+        const res: CallResult = this.world.execMsg(msg);
 
         // Refresh our account from the world in case our state has changed
         const acc = this.world.getAccount(address);
@@ -2680,10 +2700,11 @@ export class Interpreter {
             gas: gas === undefined ? 0n : gas,
             value: value === undefined ? 0n : value,
             salt: salt,
-            isStaticCall: callee.callKind === "staticcall"
+            isStaticCall: callee.callKind === "staticcall",
+            depth: state.msg.depth + 1
         };
 
-        return this.makeMsgCall(msg, state, isLibCall);
+        return this.makeMsgCall(msg, state);
     }
 
     private getValuesFromReturnedCalldata(
@@ -2798,8 +2819,9 @@ export class Interpreter {
             callTarget = callee;
             actualCallee = callee;
         } else if (callee instanceof rtt.InternalFunRef) {
-            callTarget = callee.fun;
-            actualCallee = callee.fun;
+            const fun = getFunDef(callee);
+            callTarget = fun;
+            actualCallee = fun;
         } else {
             callTarget = callee.vModifier as sol.ModifierDefinition;
             actualCallee = callee;
@@ -3705,7 +3727,10 @@ export class Interpreter {
         let nd;
 
         if (target instanceof CurriedVal) {
-            nd = target.target instanceof rtt.InternalFunRef ? target.target.fun : target.target;
+            nd =
+                target.target instanceof rtt.InternalFunRef
+                    ? getFunDef(target.target)
+                    : target.target;
             this.expect(!(nd instanceof BuiltinFunction));
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];

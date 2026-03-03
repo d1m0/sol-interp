@@ -17,7 +17,7 @@ contract LibraryUsage {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         LibraryUsage __this__ = new LibraryUsage();
         __testCase195__(__this__);
         __testCase223__(__this__);

@@ -51,7 +51,7 @@ contract DoubleUnderscore {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         DoubleUnderscore __this__ = new DoubleUnderscore();
         __testCase154__(__this__);
         __testCase179__(__this__);

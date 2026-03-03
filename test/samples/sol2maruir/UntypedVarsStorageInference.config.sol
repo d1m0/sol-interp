@@ -5,7 +5,7 @@ contract UntypedVarsStorageInference {
     uint[] internal b;
     uint[][] internal c;
 
-    function main() public {
+    function main() public payable {
         var x = a;
         x = 1;
         assert(a == 0);
@@ -23,7 +23,7 @@ contract UntypedVarsStorageInference {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         UntypedVarsStorageInference __this__ = new UntypedVarsStorageInference();
         __testCase140__(__this__);
     }

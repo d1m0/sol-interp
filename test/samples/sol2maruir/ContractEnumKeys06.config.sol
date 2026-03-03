@@ -18,7 +18,7 @@ contract ContractEnumKeys06 {
     mapping(C => int) internal mC;
     mapping(X => int) internal mX;
 
-    function main() public {
+    function main() public payable {
         A a = new A();
         A a1 = new A();
         D d = new D();
@@ -44,7 +44,7 @@ contract ContractEnumKeys06 {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ContractEnumKeys06 __this__ = new ContractEnumKeys06();
         __testCase200__(__this__);
     }

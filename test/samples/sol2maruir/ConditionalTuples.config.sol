@@ -18,7 +18,7 @@ contract ConditionalTuples {
         return x;
     }
 
-    function main() public {
+    function main() public payable {
         m[0] = Some(10, 15);
         m[1] = Some(20, 25);
         (uint a, uint b) = true ? (1, 2) : (3, 4);
@@ -50,7 +50,7 @@ contract ConditionalTuples {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         ConditionalTuples __this__ = new ConditionalTuples();
         __testCase324__(__this__);
     }

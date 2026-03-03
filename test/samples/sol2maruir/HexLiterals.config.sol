@@ -13,7 +13,7 @@ contract HexLiterals {
         return x;
     }
 
-    function main() public {
+    function main() public payable {
         assert(signatureOfSmt == 0x7532eaac);
         assert(this.signatureOfSmt() == 0x7532eaac);
         assert(signatureOther == 0xe9afa7a1);
@@ -39,7 +39,7 @@ contract HexLiterals {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         HexLiterals __this__ = new HexLiterals();
         __testCase206__(__this__);
     }

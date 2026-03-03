@@ -1,7 +1,7 @@
 pragma solidity 0.4.13;
 
 contract IntByteCasts {
-    function main() public {
+    function main() public payable {
         bytes16 a = 0x0102;
         bytes32 b = 0x01020304;
         uint8 c = uint8(a);
@@ -31,7 +31,7 @@ contract IntByteCasts {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         IntByteCasts __this__ = new IntByteCasts();
         __testCase40__(__this__);
     }

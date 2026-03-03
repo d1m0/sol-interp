@@ -1,0 +1,99 @@
+import {
+    EVMCallEvent,
+    EVMCreateEvent,
+    EVMExceptionEvent,
+    EVMObservableEvent,
+    EVMReturnEvent
+} from "./evm_events";
+import {
+    SolCallEvent,
+    SolCreateEvent,
+    SolExceptionEvent,
+    SolObservableEvent,
+    SolReturnEvent
+} from "./sol_events";
+import { assert } from "../../utils";
+import { ZERO_ADDRESS } from "sol-dbg";
+import { equalsBytes } from "@ethereumjs/util";
+
+/**
+ * In some cases the LL-data includes some 0-es at the end.
+ * Seems to happen when passing empty bytes arrays. So we do fuzzy matching here
+ * @todo Investigate why that difference occur
+ */
+function msgDataEq(hlData: Uint8Array, llData: Uint8Array): boolean {
+    if (hlData.length > llData.length) {
+        return false;
+    }
+
+    for (let i = 0; i < hlData.length; i++) {
+        if (hlData[i] !== llData[i]) {
+            return false;
+        }
+    }
+
+    for (let i = hlData.length; i < llData.length; i++) {
+        if (llData[i] !== 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
+ * Check whether a given low-level observable event and a high-level observable event match
+ * @param llEvent
+ * @param hlEvent
+ * @returns
+ */
+export function eventsMatch(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): boolean {
+    if (llEvent instanceof EVMCallEvent && hlEvent instanceof SolCallEvent) {
+        const llData = llEvent.data;
+        const hlData = hlEvent.data;
+
+        const hlAddress = hlData.delegatingContract ? hlData.delegatingContract : hlData.to;
+        const hlCodeAddress = hlData.to;
+
+        return (
+            llData.address.equals(hlAddress) &&
+            llData.codeAddress.equals(hlCodeAddress) &&
+            msgDataEq(hlData.data, llData.msgData) &&
+            llData.value === hlData.value
+        );
+    }
+
+    if (llEvent instanceof EVMCreateEvent && hlEvent instanceof SolCreateEvent) {
+        const llData = llEvent.data;
+        const hlData = hlEvent.data;
+
+        assert(hlData.to.equals(ZERO_ADDRESS), ``);
+
+        if (llData.salt === undefined || hlData.salt === undefined) {
+            if (llData.salt !== undefined || hlData.salt !== undefined) {
+                return false;
+            }
+        } else {
+            if (!equalsBytes(llData.salt, hlData.salt)) {
+                return false;
+            }
+        }
+
+        // @todo compare nonce
+        // @todo compare new contract address
+        return msgDataEq(hlData.data, llData.msgData) && llData.value === hlData.value;
+    }
+
+    if (llEvent instanceof EVMReturnEvent && hlEvent instanceof SolReturnEvent) {
+        const llData = llEvent.data;
+        const hlData = hlEvent.data;
+
+        return equalsBytes(llData.retData, hlData.data);
+    }
+
+    if (llEvent instanceof EVMExceptionEvent && hlEvent instanceof SolExceptionEvent) {
+        return msgDataEq(hlEvent.data, llEvent.data.excData);
+    }
+
+    return false;
+}

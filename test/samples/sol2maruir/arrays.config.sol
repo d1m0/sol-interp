@@ -50,7 +50,7 @@ contract Arrays {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Arrays __this__ = new Arrays();
         __testCase310__(__this__);
         __testCase373__(__this__);

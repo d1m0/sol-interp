@@ -27,7 +27,7 @@ contract C is B {
         return 0;
     }
 
-    function main() public {
+    function main() public payable {
         uint t1 = E1(1, 2);
         assert(t1 == 4);
         uint t2 = E1(3);
@@ -40,7 +40,7 @@ contract C is B {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         C __this__ = new C();
         __testCase130__(__this__);
     }

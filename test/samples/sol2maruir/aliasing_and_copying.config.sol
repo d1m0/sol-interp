@@ -125,7 +125,7 @@ contract AliasingAndCopying {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         AliasingAndCopying __this__ = new AliasingAndCopying();
         __testCase614__(__this__);
         __testCase692__(__this__);

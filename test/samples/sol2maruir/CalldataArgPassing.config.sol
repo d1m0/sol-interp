@@ -5,14 +5,14 @@ contract CalldataArgPassing {
         assert(keccak256(abi.encodePacked(s)) == keccak256(abi.encodePacked("abcd")));
     }
 
-    function main() public {
+    function main() public payable {
         string memory arg = "abcd";
         this.callee(arg);
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         CalldataArgPassing __this__ = new CalldataArgPassing();
         __testCase52__(__this__);
     }

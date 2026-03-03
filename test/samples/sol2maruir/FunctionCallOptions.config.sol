@@ -7,14 +7,14 @@ contract Foo {
 }
 
 contract FunctionCallOptions {
-    function main() public {
+    function main() public payable {
         Foo f = new Foo{value: 0.0 ether + 0 szabo, salt: 0x0}();
         f.buy{gas: 2000, value: 0 szabo}(1000);
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         FunctionCallOptions __this__ = new FunctionCallOptions();
         __testCase53__(__this__);
     }

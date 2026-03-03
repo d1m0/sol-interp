@@ -24,7 +24,7 @@ contract EncodingTest {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         EncodingTest __this__ = new EncodingTest();
         __testCase143__(__this__);
     }

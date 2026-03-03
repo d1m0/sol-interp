@@ -72,14 +72,14 @@ contract UntypedVars {
         var u16_4 = [x, 1, 256];
     }
 
-    function main() public {
+    function main() public payable {
         test_simple();
         test_complex();
     }
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         UntypedVars __this__ = new UntypedVars();
         __testCase456__(__this__);
     }

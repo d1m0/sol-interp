@@ -181,7 +181,7 @@ contract Casting {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Casting __this__ = new Casting();
         __testCase963__(__this__);
         __testCase977__(__this__);

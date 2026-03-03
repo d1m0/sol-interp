@@ -49,7 +49,7 @@ contract Ternary {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Ternary __this__ = new Ternary();
         __testCase238__(__this__);
         __testCase266__(__this__);

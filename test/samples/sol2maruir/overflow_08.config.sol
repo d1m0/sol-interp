@@ -150,7 +150,7 @@ contract Overflow08 {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Overflow08 __this__ = new Overflow08();
         __testCase427__(__this__);
         __testCase458__(__this__);

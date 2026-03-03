@@ -59,7 +59,7 @@ contract Main {
         return b.a(-9);
     }
 
-    function main() public {
+    function main() public payable {
         A a = new A();
         B b = new B();
         assert(callX(a) == 10);
@@ -74,7 +74,7 @@ contract Main {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Main __this__ = new Main();
         __testCase280__(__this__);
     }

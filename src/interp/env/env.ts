@@ -1,24 +1,13 @@
-import { ContractInfo, Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
-import { CallResult, makeStateForAccount, SolMessage, WorldInterface } from "./state";
-import { Interpreter } from "./interp";
-import { ArtifactManager } from "./artifactManager";
-import { Address, createContractAddress } from "@ethereumjs/util";
-import { InterpVisitor } from "./visitors";
-import { ppAccount } from "./pp";
+import { Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
+import { makeStateForAccount } from "../state";
+import { Interpreter } from "../interp";
+import { ArtifactManager } from "../artifactManager";
+import { Address, createContractAddress, createContractAddress2 } from "@ethereumjs/util";
+import { InterpVisitor } from "../visitors";
+import { ppAccount } from "../pp";
+import { AccountInfo, CallResult, EnvInterface, AccountMap, SolMessage } from "./types";
 
-export interface AccountInfo {
-    address: Address;
-    contract: ContractInfo | undefined;
-    // Creation bytecode. May differ from the artifact bytecode by link references
-    bytecode: Uint8Array;
-    // Deployed bytecode. May differ from the artifact deployed bytecode by link and immtable references
-    deployedBytecode: Uint8Array;
-    storage: Storage;
-    balance: bigint;
-    nonce: bigint;
-}
-
-export function ppChainState(state: ImmMap<string, AccountInfo>): string {
+export function ppChainState(state: AccountMap): string {
     const t: string[] = [];
 
     for (const [addr, account] of state.entries()) {
@@ -32,34 +21,20 @@ export function ppChainState(state: ImmMap<string, AccountInfo>): string {
 /**
  * Simple BlockChain implementation supporting only contracts with source artifacts.
  */
-export class Chain implements WorldInterface {
-    state: ImmMap<string, AccountInfo>;
+export class Chain implements EnvInterface {
+    state: AccountMap;
     visitors: InterpVisitor[];
 
-    constructor(public readonly artifactManager: ArtifactManager) {
-        this.state = ImmMap.fromEntries([]);
+    constructor(
+        public readonly artifactManager: ArtifactManager,
+        initialState: AccountMap = ImmMap.fromEntries([])
+    ) {
+        this.state = initialState;
         this.visitors = [];
     }
 
     addVisitor(v: InterpVisitor): void {
         this.visitors.push(v);
-    }
-
-    create(msg: SolMessage): CallResult {
-        this.expect(msg.to.equals(ZERO_ADDRESS));
-        this.expect(msg.delegatingContract === undefined);
-        return this.execMsg(msg);
-    }
-
-    staticcall(msg: SolMessage): CallResult {
-        msg.isStaticCall = true;
-        return this.call(msg);
-    }
-
-    delegatecall(msg: SolMessage): CallResult {
-        this.expect(!msg.to.equals(ZERO_ADDRESS));
-        this.expect(msg.delegatingContract !== undefined);
-        return this.execMsg(msg);
     }
 
     getAccount(address: string | Address): AccountInfo | undefined {
@@ -119,12 +94,6 @@ export class Chain implements WorldInterface {
         }
     }
 
-    call(msg: SolMessage): CallResult {
-        this.expect(!msg.to.equals(ZERO_ADDRESS));
-        this.expect(msg.delegatingContract === undefined);
-        return this.execMsg(msg);
-    }
-
     private getAccountForMessage(msg: SolMessage): AccountInfo {
         // Normal call
         if (!msg.to.equals(ZERO_ADDRESS)) {
@@ -142,27 +111,33 @@ export class Chain implements WorldInterface {
         const sender = this.getAccount(msg.from);
         this.expect(sender !== undefined);
 
-        const address = createContractAddress(sender.address, sender.nonce);
+        let newAddress;
+        if (msg.salt === undefined) {
+            newAddress = createContractAddress(sender.address, sender.nonce - 1n);
+        } else {
+            newAddress = createContractAddress2(sender.address, msg.salt, msg.data);
+        }
+
         const contract = this.artifactManager.getContractFromCreationBytecode(msg.data);
         this.expect(contract !== undefined);
 
         const res = {
-            address,
+            address: newAddress,
             contract,
             bytecode: msg.data,
             deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]) as Storage,
             balance: 0n,
-            nonce: 0n,
+            nonce: 1n, // Since EIP-161 the nonce is increased by 1 before init code runs
             gen: 0n
         };
 
-        this.setAccount(address, res);
+        this.setAccount(newAddress, res);
 
         return { ...res };
     }
 
-    private execMsg(msg: SolMessage): CallResult {
+    execMsg(msg: SolMessage): CallResult {
         const checkpoint = this.state;
         const fromAccount = this.getAccount(msg.from);
         this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);
@@ -170,8 +145,17 @@ export class Chain implements WorldInterface {
             msg.delegatingContract === undefined
                 ? undefined
                 : this.getAccount(msg.delegatingContract);
-        const toAccount = this.getAccountForMessage(msg);
 
+        const valueSendingAccount =
+            delegatingAccount !== undefined ? delegatingAccount : fromAccount;
+
+        // Increment sender nonce
+        if (msg.depth === 0) {
+            valueSendingAccount.nonce++;
+            this.updateAccount(valueSendingAccount);
+        }
+
+        const toAccount = this.getAccountForMessage(msg);
         const contract = toAccount.contract;
 
         // Calls to contracts with no code succeed.
@@ -182,17 +166,14 @@ export class Chain implements WorldInterface {
             };
         }
 
-        const valueSendingAccount =
-            delegatingAccount !== undefined ? delegatingAccount : fromAccount;
         const valueReceivingAccount =
             delegatingAccount !== undefined ? delegatingAccount : toAccount;
 
         if (msg.value > valueSendingAccount.balance) {
+            this.state = checkpoint;
             return { reverted: true, data: new Uint8Array() };
         }
 
-        // Increment sender nonce
-        valueSendingAccount.nonce++;
         valueSendingAccount.balance -= msg.value;
         // @todo what about overflow here?
         valueReceivingAccount.balance += msg.value;

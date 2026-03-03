@@ -31,7 +31,7 @@ contract Calldata08 {
         return sum;
     }
 
-    function main() public {
+    function main() public payable {
         bytes memory arg = hex"0001020304050607080910";
         (bytes memory b1, bytes memory b2) = this.bytesSlice(arg);
         assert(keccak256(b1) == keccak256(hex"00010203040506070809"));
@@ -45,7 +45,7 @@ contract Calldata08 {
 }
 
 contract __IRTest__ {
-    function main() public {
+    function main() public payable {
         Calldata08 __this__ = new Calldata08();
         __testCase227__(__this__);
     }
