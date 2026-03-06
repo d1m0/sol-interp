@@ -200,7 +200,6 @@ export function scenarioInitialStateToAccountMap(initalState: InitialState): Acc
             {
                 address: createAddressFromString(addrStr),
                 contract: undefined,
-                bytecode: new Uint8Array(),
                 deployedBytecode: hexToBytes(accountDesc.code),
                 storage: ImmMap.fromEntries(storageEntries),
                 balance: hexToBigInt(accountDesc.balance),

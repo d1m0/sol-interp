@@ -45,7 +45,6 @@ export function makeNoContractState(): State {
         account: {
             address: ZERO_ADDRESS,
             contract: undefined,
-            bytecode: new Uint8Array(),
             deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]),
             balance: 0n,
@@ -125,7 +124,6 @@ export function makeStateWithConstants(
         {
             address: ZERO_ADDRESS,
             contract,
-            bytecode: new Uint8Array(),
             deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]),
             balance: 0n,

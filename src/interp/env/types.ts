@@ -4,8 +4,6 @@ import * as rtt from "sol-dbg";
 export interface AccountInfo {
     address: Address;
     contract: rtt.ContractInfo | undefined;
-    // Creation bytecode. May differ from the artifact bytecode by link references
-    bytecode: Uint8Array;
     // Deployed bytecode. May differ from the artifact deployed bytecode by link and immtable references
     deployedBytecode: Uint8Array;
     storage: rtt.Storage;

@@ -46,21 +46,19 @@ export class Chain implements EnvInterface {
         return val === undefined
             ? val
             : {
-                  address: val.address,
-                  contract: val.contract,
-                  bytecode: val.bytecode,
-                  deployedBytecode: val.deployedBytecode,
-                  storage: val.storage,
-                  balance: val.balance,
-                  nonce: val.nonce
-              };
+                address: val.address,
+                contract: val.contract,
+                deployedBytecode: val.deployedBytecode,
+                storage: val.storage,
+                balance: val.balance,
+                nonce: val.nonce
+            };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
         this.state = this.state.set(typeof address === "string" ? address : address.toString(), {
             address: account.address,
             contract: account.contract,
-            bytecode: account.bytecode,
             deployedBytecode: account.deployedBytecode,
             storage: account.storage,
             balance: account.balance,
@@ -78,7 +76,6 @@ export class Chain implements EnvInterface {
         const newAccount: AccountInfo = {
             address,
             contract: undefined,
-            bytecode: new Uint8Array(),
             deployedBytecode: new Uint8Array(),
             storage: ImmMap.fromEntries([]),
             balance: initialBalance,
