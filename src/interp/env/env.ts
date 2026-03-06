@@ -158,14 +158,6 @@ export class Chain implements EnvInterface {
         const toAccount = this.getAccountForMessage(msg);
         const contract = toAccount.contract;
 
-        // Calls to contracts with no code succeed.
-        if (contract === undefined) {
-            return {
-                reverted: false,
-                data: new Uint8Array()
-            };
-        }
-
         const valueReceivingAccount =
             delegatingAccount !== undefined ? delegatingAccount : toAccount;
 
@@ -181,6 +173,14 @@ export class Chain implements EnvInterface {
         this.updateAccount(valueSendingAccount);
         if (valueReceivingAccount !== valueSendingAccount) {
             this.updateAccount(valueReceivingAccount);
+        }
+
+        // Calls to contracts with no code succeed.
+        if (contract === undefined) {
+            return {
+                reverted: false,
+                data: new Uint8Array()
+            };
         }
 
         const interp = new Interpreter(

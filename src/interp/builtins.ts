@@ -6,6 +6,7 @@ import {
     ExternalCallDescription,
     ExternalCallTargetValue,
     isExternalCallTarget,
+    LengthView,
     NewCall,
     TypeValue,
     Value
@@ -24,7 +25,6 @@ import {
     BytesMemView,
     BytesStorageView,
     DecodingFailure,
-    IntStorageView,
     PointerMemView,
     uint256,
     View
@@ -41,7 +41,6 @@ import {
     liftExtCalRef,
     memBytesT,
     memStringT,
-    setStateStorage,
     stringT
 } from "./utils";
 import { Address, bytesToUtf8, concatBytes } from "@ethereumjs/util";
@@ -184,38 +183,17 @@ export const popBuiltin = new BuiltinFunction(
                 (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
         );
         const arr = args[0];
+        const curSize = arr.size(getStateStorage(state));
 
-        if (arr instanceof ArrayStorageView) {
-            const sizeView = new IntStorageView(uint256, [arr.key, arr.endOffsetInWord]);
-            const storage = getStateStorage(state);
-            const curSize = sizeView.decode(storage);
-
-            if (curSize instanceof DecodingFailure) {
-                interp.fail(InternalError, `pop(): couldn't decode array size`);
-            }
-
-            if (curSize === 0n) {
-                interp.runtimeError(EmptyArrayPopError, state);
-            }
-
-            setStateStorage(state, sizeView.encode(curSize - 1n, storage));
-            // @todo zero-out deleted element
-        } else {
-            const storage = getStateStorage(state);
-            const bytes = arr.decode(storage);
-
-            if (bytes instanceof DecodingFailure) {
-                interp.fail(InternalError, `pop(): couldn't decode bytes`);
-            }
-
-            if (bytes.length === 0) {
-                interp.runtimeError(EmptyArrayPopError, state);
-            }
-
-            setStateStorage(state, arr.encode(bytes.slice(0, -1), storage));
-            // @todo zero-out deleted element
+        if (curSize instanceof DecodingFailure) {
+            interp.fail(InternalError, `pop(): couldn't decode array size`);
         }
 
+        if (curSize === 0n) {
+            interp.runtimeError(EmptyArrayPopError, state);
+        }
+
+        interp.resizeStorageArray(new LengthView(arr), curSize - 1n, state);
         return [];
     },
     true

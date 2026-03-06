@@ -11,7 +11,7 @@ import {
 import {
     BuiltinFunction,
     BuiltinStruct,
-    BytesStorageLength,
+    LengthView,
     CurriedVal,
     DefValue,
     ExternalCallDescription,
@@ -33,7 +33,7 @@ export function ppLValue(v: LValue): string {
         return v.pp();
     } else if (v === null) {
         return `null`;
-    } else if (v instanceof BytesStorageLength) {
+    } else if (v instanceof LengthView) {
         return `${ppValue(v.view)}.length`;
     } else {
         return `[${v.map(ppLValue).join(", ")}]`;
@@ -75,7 +75,7 @@ export function ppValue(v: Value): string {
 }
 
 function ppLVorRV(v: LValue | Value): string {
-    if (v instanceof View || v === null || v instanceof BytesStorageLength) {
+    if (v instanceof View || v === null || v instanceof LengthView) {
         return ppLValue(v);
     }
 

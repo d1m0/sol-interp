@@ -54,7 +54,7 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
         const events = await addEventInfo(vm, step, basicInfo, this.artifactManager);
         const withCreate = await addCreateInfo(vm, step, events, trace, ctx.callStack);
         const withCall = await addCallInfo(vm, step, withCreate, trace, ctx.callStack);
-        const withRet = await addReturnInfo(vm, step, withCall, trace, ctx.callStack);
+        const withRet = await addReturnInfo(vm, step, withCall, trace, ctx.callStack, tx);
         const withExceptions = await addExceptionInfo(vm, step, withRet, trace, ctx.callStack);
         const withSnapshot = await addSnapshotInfo(vm, step, withExceptions, trace);
 
