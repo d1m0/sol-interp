@@ -151,10 +151,12 @@ class AlignedTraceBuilder extends Chain {
 
     private tryMatchObservableEvents(
         llEvent: EVMObservableEvent,
-        hlEvent: SolObservableEvent
+        llStep: EVMStep,
+        hlEvent: SolObservableEvent,
+        hlAccount: AccountInfo
     ): void {
         // If the next boundary doesn't match the expected call, throw a misalignment error
-        if (!eventsMatch(llEvent, hlEvent)) {
+        if (!eventsMatch(llEvent, llStep, hlEvent, hlAccount)) {
             this.misalignment();
         }
 
@@ -197,7 +199,8 @@ class AlignedTraceBuilder extends Chain {
             evmEvent = new EVMReturnEvent(resyncLLIdx - 1, lastStep);
             solEvent = new SolReturnEvent({
                 reverted: false,
-                data: lastStep.returnInfo.retData
+                data: lastStep.returnInfo.retData,
+                newContract: lastStep.returnInfo.newContract
             });
         } else {
             assert(lastStep.exceptionInfo !== undefined, ``);
@@ -228,6 +231,11 @@ class AlignedTraceBuilder extends Chain {
         let oldCurIdx = this.currentLLIdx;
         const curDepth = this.lowLevelTrace[this.currentLLIdx].depth;
         let llEvent: EVMObservableEvent | undefined;
+        const callerAddress =
+            msg.delegatingContract !== undefined ? msg.delegatingContract : msg.from;
+        const callerAccount = this.state.get(callerAddress.toString());
+
+        // Here we are in the context of the caller
 
         if (!(msg.depth === 0 && this.currentLLIdx === 0 && this.highLevelTrace.length === 0)) {
             llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
@@ -236,9 +244,18 @@ class AlignedTraceBuilder extends Chain {
                 ? new SolCreateEvent(msg)
                 : new SolCallEvent(msg);
 
-            this.tryMatchObservableEvents(llEvent, hlEvent);
+            sol.assert(callerAccount !== undefined, ``);
+
+            this.tryMatchObservableEvents(
+                llEvent,
+                this.lowLevelTrace[llEvent.idx],
+                hlEvent,
+                callerAccount
+            );
             oldCurIdx = this.currentLLIdx;
         }
+
+        // From here till the end of the function we are in the context of the callee
 
         // Find next low-level trace boundary
 
@@ -253,7 +270,7 @@ class AlignedTraceBuilder extends Chain {
 
             const [, solEvent] = this.reSyncAtDepth(curDepth);
             return solEvent instanceof SolReturnEvent
-                ? { reverted: false, data: solEvent.data.data }
+                ? solEvent.data
                 : { reverted: true, data: solEvent.data as Uint8Array };
         }
 
@@ -290,8 +307,23 @@ class AlignedTraceBuilder extends Chain {
         llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
         assert(llEvent !== undefined, ``);
 
+        const calleeAccountAddr =
+            msg.delegatingContract !== undefined
+                ? msg.delegatingContract
+                : res.newContract
+                  ? res.newContract
+                  : msg.to;
+        const hlAccount = this.state.get(calleeAccountAddr.toString());
+
+        assert(hlAccount !== undefined, `Missing account for ${calleeAccountAddr.toString()}`);
+
         try {
-            this.tryMatchObservableEvents(llEvent, solEndEvt);
+            this.tryMatchObservableEvents(
+                llEvent,
+                this.lowLevelTrace[llEvent.idx],
+                solEndEvt,
+                hlAccount
+            );
         } catch (e) {
             if (!(e instanceof MisalignmentError)) {
                 throw e;
@@ -299,7 +331,7 @@ class AlignedTraceBuilder extends Chain {
 
             const [, solEvent] = this.reSyncAtDepth(curDepth);
             return solEvent instanceof SolReturnEvent
-                ? { reverted: false, data: solEvent.data.data }
+                ? solEvent.data
                 : { reverted: true, data: solEvent.data as Uint8Array };
         }
 
@@ -320,7 +352,12 @@ class AlignedTraceBuilder extends Chain {
                 const hlEvent = new SolExceptionEvent(err.payload);
                 const llEvent = findNextEvent(env.lowLevelTrace, env.currentLLIdx);
                 assert(llEvent !== undefined, ``);
-                env.tryMatchObservableEvents(llEvent, hlEvent);
+                env.tryMatchObservableEvents(
+                    llEvent,
+                    env.lowLevelTrace[llEvent.idx],
+                    hlEvent,
+                    state.account
+                );
             },
             exec: function (interp: Interpreter, state: State, stmt: sol.Statement): void {
                 env.highLevelTrace.push(new ExecStep(stmt));

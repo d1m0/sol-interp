@@ -32,6 +32,10 @@ export function isCall(step: OpInfo): boolean {
     );
 }
 
+export function isCreate(step: OpInfo): boolean {
+    return step.op.opcode === OPCODES.CREATE || step.op.opcode === OPCODES.CREATE2;
+}
+
 /**
  * Given an `initialState` and a trace, rebuild the state of all accounts up to (and including) index `idx` of the trace.
  */

@@ -1,7 +1,18 @@
 import { StorageDump } from "@ethereumjs/common";
 import { VM } from "@ethereumjs/vm";
-import { BasicStepInfo, OpInfo, OPCODES, bigEndianBufToNumber, mustReadMem } from "sol-dbg";
+import {
+    BasicStepInfo,
+    OpInfo,
+    OPCODES,
+    bigEndianBufToNumber,
+    mustReadMem,
+    ZERO_ADDRESS
+} from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
+import { Address } from "@ethereumjs/util";
+import { isCreate } from "../utils";
+import { TypedTransaction } from "@ethereumjs/tx";
+import { assert } from "../../../utils";
 
 /**
  * Interface with additional data regarding a RETURN/STOP op
@@ -9,6 +20,7 @@ import { InterpreterStep } from "@ethereumjs/evm";
 export interface ReturnInfo {
     retData: Uint8Array; // return data
     state: StorageDump; // copy of the state before the return instruction executes
+    newContract?: Address;
 }
 
 export interface WithReturnInfo {
@@ -23,7 +35,8 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
     step: InterpreterStep,
     state: T,
     trace: Array<T & WithReturnInfo>,
-    callStack: number[]
+    callStack: number[],
+    tx: TypedTransaction
 ): Promise<T & WithReturnInfo> {
     const op = state.op;
 
@@ -34,16 +47,21 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         };
     }
 
-    callStack.pop();
+    const idx = callStack.pop();
+    assert(idx !== undefined, ``);
+    const isCreation =
+        (idx > 0 && isCreate(trace[idx])) ||
+        (idx < 0 && (tx.to === undefined || tx.to.equals(ZERO_ADDRESS)));
 
-    const storageDump = (vm.stateManager.dumpStorage as any)(step.address);
+    const storageDump = await (vm.stateManager.dumpStorage as any)(step.address);
 
     if (op.opcode === OPCODES.STOP) {
         return {
             ...state,
             returnInfo: {
                 retData: new Uint8Array(),
-                state: storageDump
+                state: storageDump,
+                newContract: isCreation ? state.address : undefined
             }
         };
     }
@@ -57,7 +75,8 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         ...state,
         returnInfo: {
             retData,
-            state: storageDump
+            state: storageDump,
+            newContract: isCreation ? state.address : undefined
         }
     };
 }

@@ -47,7 +47,7 @@ import { gte, lt } from "semver";
 import {
     BuiltinFunction,
     BuiltinStruct,
-    BytesStorageLength,
+    LengthView,
     CurriedVal,
     DefValue,
     ExternalCallDescription,
@@ -119,6 +119,7 @@ import {
     memStringT,
     printNode,
     setStateStorage,
+    stringT,
     typeOfView
 } from "./utils";
 import { BaseStorageView, BaseMemoryView, BaseCalldataView } from "sol-dbg";
@@ -1483,13 +1484,12 @@ export class Interpreter {
                 );
 
                 res = fieldView;
-            } else if (baseLV instanceof rtt.ArrayStorageView && expr.memberName === "length") {
-                // Assinging to storage array lengths changes their length
-                // @todo (dimo) do we zero-out elements when we truncate the length?
-                // @todo (dimo) support assinging to bytes.length
-                res = rtt.makeStorageView(rtt.uint256, [baseLV.key, baseLV.endOffsetInWord]);
-            } else if (baseLV instanceof rtt.BytesStorageView && expr.memberName === "length") {
-                res = new BytesStorageLength(baseLV);
+            } else if (
+                (baseLV instanceof rtt.ArrayStorageView ||
+                    baseLV instanceof rtt.BytesStorageView) &&
+                expr.memberName === "length"
+            ) {
+                res = new LengthView(baseLV);
             } else {
                 nyi(`evalLV(${printNode(expr)}): ${ppLValue(baseLV)}`);
             }
@@ -1703,7 +1703,9 @@ export class Interpreter {
 
         const rvalueLen = length(rvalue, state);
 
-        // @todo dimo if we need to delete the previous contents we should do this here
+        // Zero out pervious contents
+        this.zeroOutStorage(lvalue, state);
+
         if (lvalue.type.size === undefined) {
             const lenView = new rtt.IntStorageView(rtt.uint256, [
                 lvalue.key,
@@ -1761,12 +1763,9 @@ export class Interpreter {
 
         // Special case - assigning to bytes length in storage requires decoding and re-encoding
         // due to the compressed way length is handled in storage
-        if (lvalue instanceof BytesStorageLength) {
+        if (lvalue instanceof LengthView) {
             rvalue = this.implicitCoercion(rvalue, rtt.uint256, state) as bigint;
-
-            let bytes = decodeView(lvalue.view, state) as Uint8Array;
-            bytes = setLengthRight(bytes, bigIntToNum(rvalue));
-            setStateStorage(state, lvalue.view.encode(bytes, getStateStorage(state)));
+            this.resizeStorageArray(lvalue, rvalue, state);
             return;
         }
 
@@ -1802,6 +1801,7 @@ export class Interpreter {
                 if (lvalue instanceof BaseMemoryView) {
                     lvalue.encode(complexRVal, state.memory, state.memAllocator);
                 } else if (lvalue instanceof BaseStorageView) {
+                    this.zeroOutStorage(lvalue, state);
                     setStateStorage(state, lvalue.encode(complexRVal, getStateStorage(state)));
                 } else {
                     this.expect(lvalue instanceof PointerLocalView || lvalue instanceof TempView);
@@ -1831,7 +1831,7 @@ export class Interpreter {
         } else {
             // Primitive value assignment
             if (lvalue instanceof BaseStorageView) {
-                // @todo fix this
+                this.zeroOutStorage(lvalue, state);
                 setStateStorage(state, lvalue.encode(rvalue as any, getStateStorage(state)));
             } else if (lvalue instanceof BaseMemoryView) {
                 lvalue.encode(rvalue, state.memory, state.memAllocator);
@@ -1848,6 +1848,96 @@ export class Interpreter {
             } else {
                 nyi(`assign(${lvalue}, ${rvalue}, ${state})`);
             }
+        }
+    }
+
+    /**
+     * Zero-out a given storage location. Used before assigning to storage to clear old data
+     */
+    zeroOutStorage(view: BaseStorageView<BaseValue, rtt.BaseRuntimeType>, state: State): void {
+        if (view instanceof PointerStorageView) {
+            return this.zeroOutStorage(view.toView(), state);
+        } else if (view instanceof rtt.BytesStorageView) {
+            const len = view.size(getStateStorage(state));
+            this.expect(!isFailure(len));
+            setStateStorage(
+                state,
+                view.encode(new Uint8Array(bigIntToNum(len)), getStateStorage(state))
+            );
+        } else if (view instanceof rtt.StringStorageView) {
+            const bytesView = new rtt.BytesStorageView(stringT, [view.key, view.endOffsetInWord]);
+            this.zeroOutStorage(bytesView, state);
+        } else if (view instanceof rtt.ArrayStorageView) {
+            const len = view.size(getStateStorage(state));
+            this.expect(!isFailure(len));
+            for (let i = 0n; i < len; i++) {
+                const idxView = view.indexView(i, getStateStorage(state));
+                this.expect(!isFailure(idxView));
+                this.zeroOutStorage(idxView, state);
+            }
+
+            const sizeView = new rtt.IntStorageView(rtt.uint256, [view.key, view.endOffsetInWord]);
+            setStateStorage(state, sizeView.encode(0n, getStateStorage(state)));
+        } else if (view instanceof StructStorageView) {
+            for (const [, fView] of view.fieldViews) {
+                this.zeroOutStorage(fView, state);
+            }
+        } else if (isValueType(view.type) || view.type instanceof rtt.FunctionType) {
+            setStateStorage(
+                state,
+                view.encode(makeZeroValue(view.type, state), getStateStorage(state))
+            );
+        } else if (view instanceof MapStorageView) {
+            // nothing to do
+        } else {
+            nyi(`Zero out storage type ${view.type.pp()}`);
+        }
+    }
+
+    resizeStorageArray(lenView: LengthView, newSize: bigint, state: State): void {
+        const curSize = lenView.view.size(getStateStorage(state));
+
+        this.expect(!isFailure(curSize));
+
+        if (lenView.view instanceof rtt.ArrayStorageView) {
+            // Storage array
+            const arr = lenView.view;
+            const elT = changeLocTo(arr.type.elementT, sol.DataLocation.Memory);
+
+            if (newSize < curSize) {
+                // 0-out deleted indices
+                for (let i = newSize; i < curSize; i++) {
+                    const idxView = arr.indexView(i, getStateStorage(state));
+                    this.expect(!isFailure(idxView));
+                    this.assign(idxView, makeZeroValue(elT, state), state);
+                }
+            }
+
+            const sizeView = rtt.makeStorageView(rtt.uint256, [arr.key, arr.endOffsetInWord]);
+            setStateStorage(state, sizeView.encode(newSize, getStateStorage(state)));
+        } else {
+            const byts = lenView.view;
+            // Storage bytes
+            // 0-out bytes when decreasing the length
+            if (newSize < curSize) {
+                const t = decodeView(byts, state);
+                this.expect(t instanceof Uint8Array && BigInt(t.length) === curSize);
+
+                // @todo check for overflow here
+                t.set(new Uint8Array(Number(curSize - newSize)), Number(newSize));
+                setStateStorage(state, byts.encode(t, getStateStorage(state)));
+            }
+
+            let t = decodeView(byts, state);
+            this.expect(t instanceof Uint8Array && BigInt(t.length) === curSize);
+
+            if (newSize < curSize) {
+                t = t.slice(0, Number(newSize));
+            } else {
+                t = setLengthRight(t, Number(newSize));
+            }
+
+            setStateStorage(state, byts.encode(t, getStateStorage(state)));
         }
     }
 

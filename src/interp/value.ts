@@ -238,14 +238,25 @@ export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDes
 // Values that represent possible internal call targets. Currently just InteranalFunRef
 export type InternalCallTargetValue = InternalFunRef | CurriedVal;
 
-export class BytesStorageLength {
-    constructor(public readonly view: rtt.BytesStorageView) {}
+export class LengthView extends rtt.BaseStorageView<bigint, rtt.IntType> {
+    nextLoc(): [bigint, number] | undefined {
+        throw new Error("Method not implemented.");
+    }
+    decode(state: rtt.Storage): bigint | rtt.DecodingFailure {
+        return this.view.size(state);
+    }
+    encode(): rtt.Storage {
+        throw new Error("Method not implemented.");
+    }
+    constructor(public readonly view: rtt.BytesStorageView | rtt.ArrayStorageView) {
+        super(rtt.uint256, [view.key, view.endOffsetInWord]);
+    }
 }
 
 export type LValue =
     | View<StateArea, BaseValue, any, rtt.BaseRuntimeType>
     | null // empty components of tuple assignments
-    | BytesStorageLength
+    | LengthView
     | LValue[]; // Tuple assignments
 
 // @todo move to sol-dbg

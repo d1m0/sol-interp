@@ -145,6 +145,10 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
         return none;
     }
 
+    if (t instanceof rtt.FunctionType && t.solType.kind === "external") {
+        return new rtt.ExternalFunRef(ZERO_ADDRESS, new Uint8Array(4));
+    }
+
     nyi(`makeZeroValue(${t.pp()})`);
 }
 
