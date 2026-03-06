@@ -178,7 +178,13 @@ const scratchWord = new Uint8Array(32);
  */
 export class Interpreter {
     nodes: Array<sol.ASTNode | BuiltinFunction>;
+    numSteps: number;
+    _maxNumSteps: number = 1000000;
     ctx: sol.ASTContext;
+
+    setMaxNumSteps(n: number): void {
+        this._maxNumSteps = n;
+    }
 
     get compilerVersion(): string {
         return this.artifact.compilerVersion;
@@ -202,6 +208,7 @@ export class Interpreter {
             arrayBuiltinDecs,
             this.artifact.compilerVersion
         ) as BuiltinStruct;
+        this.numSteps = 0;
     }
 
     get curNode(): sol.ASTNode | BuiltinFunction {
@@ -878,6 +885,14 @@ export class Interpreter {
 
         this.nodes.pop();
 
+        this.numSteps++;
+
+        if (this.numSteps > this._maxNumSteps) {
+            for (const v of this.visitors) {
+                v.infiniteLoop(this, state);
+            }
+        }
+
         return res;
     }
 
@@ -1353,6 +1368,13 @@ export class Interpreter {
         }
 
         this.nodes.pop();
+        this.numSteps++;
+
+        if (this.numSteps > this._maxNumSteps) {
+            for (const v of this.visitors) {
+                v.infiniteLoop(this, state);
+            }
+        }
 
         return res;
     }

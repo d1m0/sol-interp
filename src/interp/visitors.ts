@@ -23,6 +23,7 @@ export interface InterpVisitor {
     exec(interp: Interpreter, state: State, stmt: sol.Statement): void;
     eval(interp: Interpreter, state: State, expr: sol.Expression, val: Value | LValue): void;
     emit(interp: Interpreter, state: State, event: EventDesc): void;
+    infiniteLoop(interp: Interpreter, state: State): void;
 }
 
 export class TraceVisitor implements InterpVisitor {
@@ -64,4 +65,6 @@ export class TraceVisitor implements InterpVisitor {
     emit(interp: Interpreter, state: State, event: EventDesc): void {
         this.trace.push(new EmitStep(event));
     }
+
+    infiniteLoop(): void {}
 }

@@ -1,6 +1,7 @@
 import {
     EVMCallEvent,
     EVMCreateEvent,
+    EVMEmitEvent,
     EVMExceptionEvent,
     EVMObservableEvent,
     EVMReturnEvent
@@ -8,12 +9,13 @@ import {
 import {
     SolCallEvent,
     SolCreateEvent,
+    SolEmitEvent,
     SolExceptionEvent,
     SolObservableEvent,
     SolReturnEvent
 } from "./sol_events";
 import { assert } from "../../utils";
-import { ZERO_ADDRESS, Storage } from "sol-dbg";
+import { ZERO_ADDRESS, Storage, EventDesc } from "sol-dbg";
 import { bytesToHex, equalsBytes } from "@ethereumjs/util";
 import { EVMStep } from "../evm_trace";
 import { AccountInfo } from "../../interp";
@@ -92,6 +94,20 @@ function accountsEq(llAccountInfo: AccountInfo, hlAccountInfo: AccountInfo): boo
     );
 }
 
+function eventsEq(llEvent: EventDesc, hlEvent: EventDesc): boolean {
+    if (llEvent.topics.length !== hlEvent.topics.length) {
+        return false;
+    }
+
+    for (let i = 0; i < llEvent.topics.length; i++) {
+        if (!equalsBytes(llEvent.topics[i], hlEvent.topics[i])) {
+            return false;
+        }
+    }
+
+    return equalsBytes(llEvent.payload, hlEvent.payload);
+}
+
 /**
  * Check whether a given low-level observable event and a high-level observable event match
  * @param llEvent
@@ -168,6 +184,10 @@ export function eventsMatch(
 
     if (llEvent instanceof EVMExceptionEvent && hlEvent instanceof SolExceptionEvent) {
         return msgDataEq(hlEvent.data, llEvent.data.excData);
+    }
+
+    if (llEvent instanceof EVMEmitEvent && hlEvent instanceof SolEmitEvent) {
+        return eventsEq(llEvent.data, hlEvent.data);
     }
 
     return false;

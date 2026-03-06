@@ -1,11 +1,12 @@
 /**
  * EVM-level events
  */
+import { EventDesc } from "sol-dbg";
 import { assert } from "../../utils";
 import { EVMStep } from "../evm_trace";
 import { CallInfo, CreateInfo, ExceptionInfo, ReturnInfo } from "../evm_trace/transformers";
 
-type EVMPayloadTypes = CallInfo | CreateInfo | ExceptionInfo | ReturnInfo;
+type EVMPayloadTypes = CallInfo | CreateInfo | ExceptionInfo | ReturnInfo | EventDesc;
 
 abstract class EVMEvent<T extends EVMPayloadTypes> {
     public readonly data: T;
@@ -54,7 +55,18 @@ export class EVMExceptionEvent extends EVMEvent<ExceptionInfo> {
     }
 }
 
-export type EVMObservableEvent = EVMCallEvent | EVMCreateEvent | EVMReturnEvent | EVMExceptionEvent;
+export class EVMEmitEvent extends EVMEvent<EventDesc> {
+    protected _getPayload(): EventDesc | undefined {
+        return this.step.emittedEvent;
+    }
+}
+
+export type EVMObservableEvent =
+    | EVMCallEvent
+    | EVMCreateEvent
+    | EVMReturnEvent
+    | EVMExceptionEvent
+    | EVMEmitEvent;
 
 export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservableEvent | undefined {
     for (let i = afterIdx + 1; i < trace.length; i++) {
@@ -68,6 +80,8 @@ export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservable
             return new EVMReturnEvent(i, step);
         } else if (step.callInfo) {
             return new EVMCallEvent(i, step);
+        } else if (step.emittedEvent) {
+            return new EVMEmitEvent(i, step);
         }
     }
 

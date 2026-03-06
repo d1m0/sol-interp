@@ -3,10 +3,10 @@ const sol = require("solc-typed-ast")
 const util = require("@ethereumjs/util");
 const { assert } = require("console");
 
-const samples = fse
+let samples = fse
     .readdirSync("test/samples/sol2maruir")
     .filter((name) => name.endsWith("config.sol"));
-//const samples = ["SelectorTest062.config.sol"]
+//samples = ["events.config.sol"]
 
 const libDependencies = new Map([
     ["PackedEncodingTest.config.sol", ["BytesLib"]],

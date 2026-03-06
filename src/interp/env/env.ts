@@ -27,7 +27,8 @@ export class Chain implements EnvInterface {
 
     constructor(
         public readonly artifactManager: ArtifactManager,
-        initialState: AccountMap = ImmMap.fromEntries([])
+        initialState: AccountMap = ImmMap.fromEntries([]),
+        private readonly maxNumSteps: undefined | number = undefined
     ) {
         this.state = initialState;
         this.visitors = [];
@@ -46,13 +47,13 @@ export class Chain implements EnvInterface {
         return val === undefined
             ? val
             : {
-                address: val.address,
-                contract: val.contract,
-                deployedBytecode: val.deployedBytecode,
-                storage: val.storage,
-                balance: val.balance,
-                nonce: val.nonce
-            };
+                  address: val.address,
+                  contract: val.contract,
+                  deployedBytecode: val.deployedBytecode,
+                  storage: val.storage,
+                  balance: val.balance,
+                  nonce: val.nonce
+              };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
@@ -186,6 +187,10 @@ export class Chain implements EnvInterface {
             contract.artifact,
             this.visitors
         );
+
+        if (this.maxNumSteps !== undefined) {
+            interp.setMaxNumSteps(this.maxNumSteps);
+        }
 
         const interpState = makeStateForAccount(
             this.artifactManager,
