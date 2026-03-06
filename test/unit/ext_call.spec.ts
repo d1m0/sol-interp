@@ -206,7 +206,6 @@ describe("Simple function call tests", () => {
             chain.setAccount(RECEIVER, {
                 address: RECEIVER,
                 contract: contractInfo,
-                bytecode: contractInfo.bytecode.bytecode,
                 deployedBytecode: contractInfo.deployedBytecode.bytecode,
                 storage: ImmMap.fromEntries([]),
                 balance: 0n,

@@ -46,7 +46,6 @@ async function snapshotContractState(
     return {
         address,
         contract: undefined,
-        bytecode: new Uint8Array(), // @todo delete
         deployedBytecode: code,
         storage,
         balance: account.balance,

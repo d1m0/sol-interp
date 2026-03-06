@@ -20,6 +20,37 @@ const misalignmentSamples: Array<[string, any]> = [
             [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
             [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
         ]
+    ],
+    [
+        "events.config.json",
+        [
+            [1, 1, false, ["EVMCreateEvent", "SolCreateEvent"]],
+            [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
+            [1, 1, false, ["EVMCallEvent", "SolCallEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
+            [1, 1, false, ["EVMCallEvent", "SolCallEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMExceptionEvent", "SolExceptionEvent"]],
+            [1, 1, false, ["EVMCallEvent", "SolCallEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
+            [2, 2, true, ["EVMExceptionEvent", "SolExceptionEvent"]],
+            [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
+        ]
     ]
 ];
 
@@ -31,11 +62,11 @@ const sol2maruirScenarios: string[] = fse
 
 describe("Trace Alignment Tests", () => {
     for (const sample of sol2maruirScenarios) {
-        it(`${sample}`, async () => {
-            if (hasMisalignment.has(sample)) {
-                return;
-            }
+        if (hasMisalignment.has(sample)) {
+            return;
+        }
 
+        it(`${sample}`, async () => {
             const scenario = fse.readJsonSync(`test/samples/sol2maruir/${sample}`) as Scenario;
             const [artifactManager] = await loadSamples(
                 [sample.slice(0, -4) + "sol"],
@@ -93,7 +124,8 @@ describe("Trace Misalignment Tests", () => {
                     txDescToTxData(txDesc),
                     sender,
                     txDescToBlockData(txDesc),
-                    artifactManager
+                    artifactManager,
+                    10000
                 );
                 state = stateAfter;
                 if (i === 1) {
