@@ -376,5 +376,3 @@ Difficult:
     - gasleft/msg.gas <0.5.0
     - selfdestruct
     - user-defined operators
-
-More tests:

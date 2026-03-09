@@ -1,13 +1,12 @@
 import { Command } from "commander";
+import { getTXReplayInfo } from "./quicknode";
+/*
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
 import { PartialSolcOutput, Value as BaseValue, Struct } from "sol-dbg";
-import { ArtifactManager } from "../interp/artifactManager";
-import { Runner } from "./runner";
-import { parseStep, SyntaxError } from "./ast";
 import { Address, bytesToUtf8 } from "@ethereumjs/util";
-import { ppTrace } from "../interp/pp";
 import { CallResult } from "../interp";
+*/
 
 function terminate(message?: string, exitCode = 0): never {
     if (message !== undefined) {
@@ -21,76 +20,35 @@ function terminate(message?: string, exitCode = 0): never {
     process.exit(exitCode);
 }
 
-function error(message: string): never {
+export function error(message: string): never {
     terminate(message, 1);
-}
-
-function ppBaseValue(v: BaseValue): string {
-    if (v instanceof Address) {
-        return v.toString();
-    }
-
-    if (v instanceof Array) {
-        return "[" + v.map(ppBaseValue).join(", ") + "]";
-    }
-
-    if (v instanceof Struct) {
-        return `{${v.entries.map(([name, val]) => `${name}: ${ppBaseValue(val)}`)}}`;
-    }
-
-    return sol.pp(v as unknown as any);
-}
-
-function ppRes(res: CallResult, decodedReturns: BaseValue[] | undefined): string {
-    if (res.reverted) {
-        return `reverted`;
-    }
-
-    if (decodedReturns) {
-        return `return [${decodedReturns.map(ppBaseValue).join(", ")}]`;
-    }
-
-    return `succeeded`;
-}
-
-function addSourcesToResult(artifact: PartialSolcOutput, files: sol.FileMap): void {
-    for (const name in artifact.sources) {
-        if (artifact.sources[name].contents !== undefined) {
-            continue;
-        }
-
-        const file = files.get(name);
-
-        if (file) {
-            artifact.sources[name].contents = bytesToUtf8(file);
-        }
-    }
 }
 
 (async () => {
     const program = new Command();
 
     program
-        .name("sol-interp")
-        .description("Execute a sequence of steps given some solidity files, or interpret a given mainnet TX")
+        .name("sol-replay")
+        .description("Replay a mainnet TX fetching source info from etherscan")
         .helpOption("-h, --help", "Print help message.");
 
     program.argument(
-        "[file(s)]",
-        "Either one or more Solidity files, or JSON compiler output files."
+        "tx",
+        "Mainnet TX."
     );
 
-    program.option("--steps [step...]", "Steps to execute");
-    program.option("-v --verbose", "Verbose");
+    program.requiredOption("-q --quicknode-endpoint <quicknode>", "Quicknode Endpoint")
 
     program.parse(process.argv);
-    const args = program.args;
-    const options = program.opts();
+    const [tx] = program.args;
+    const opts = program.opts();
 
-    if (args.length === 0) {
-        error("Need at least one file");
-    }
 
+    console.error(`Fetching ${tx} from quicknode:`)
+    const txReplayInfo = await getTXReplayInfo(opts.quicknodeEndpoint, tx)
+    console.error(`Data: ${txReplayInfo}`)
+
+    /*
     const artifacts: PartialSolcOutput[] = [];
 
     try {
@@ -158,4 +116,5 @@ function addSourcesToResult(artifact: PartialSolcOutput, files: sol.FileMap): vo
             throw e;
         }
     }
+        */
 })();

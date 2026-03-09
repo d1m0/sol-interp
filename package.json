@@ -35,7 +35,8 @@
         "@ethereumjs/vm": "10.1.0",
         "semver": "^7.6.3",
         "web3-eth-abi": "^4.4.1",
-        "src-location": "^1.1.0"
+        "src-location": "^1.1.0",
+        "axios": "1.13.6"
     },
     "devDependencies": {
         "@types/debug": "^4.1.12",
