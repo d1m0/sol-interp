@@ -264,17 +264,16 @@
 248     - test for type(C).creationCode and type(C).runtimeCode with link and immutable references
 249 - cli for playing
 250 - implement computing the correct final deployed bytecode in the face of immutables
-
-Trace alignment refactor:
- - custom tracer
-    - basic info, event desc tracers
-    - decode calls/returns
-        - nonces on create
-        - msg.data/return data
-    - detect and decode exceptions
-    - get storage copies on calls, returns
-    - new contract address at both creation and return step
- - adapt seek code to new tracer
+251 Trace alignment refactor:
+    - custom tracer
+        - basic info, event desc tracers
+        - decode calls/returns
+            - nonces on create
+            - msg.data/return data
+        - detect and decode exceptions
+        - get storage copies on calls, returns
+        - new contract address at both creation and return step
+    - adapt seek code to new tracer
 
 - test multi-level exception
 - test alignment on contract creation with no constructor and no implicit initializers
@@ -286,15 +285,6 @@ Trace alignment refactor:
 - on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?
 - is "foo".length byte length or uncode code points?
 - address.callcode
-- implement block builtins
-    - store block in state
-
-- implement gasleft/block.gas
-- implement tx builtins
-    - store tx info in state
-
-- implement math builtins 
-- implement selfdestruct
 - do a pass over contract scopes
 
 Issue: ContractScope seems wrong
@@ -357,3 +347,34 @@ Tests requiring inline assembly:
     - with only catch (bytes memory) {}
     - with both catch {} and catch (bytes memory) {}
     - use type confusion to call a method that succeeds but returns data of the wrong type, causing an exception in the decoding of the success try clause
+
+Leftovers:
+Easy:
+    - blockhash(uint blockNumber)/block.blockhash (<0.5.0)
+    - blobhash(uint index)
+    - block.basefee
+    - block.blobbasefee
+    - block.chainid
+    - block.coinbase
+    - block.gaslimit
+    - block.number
+    - block.timestamp/now (<0.7.0)
+    - tx.gasprice
+    - tx.origin
+    - bytes.concat
+    - string.concat
+    - addmod
+    - mulmod
+Medium:
+    - block.difficulty
+    - block.prevrandao
+    - ripemd160
+    - ecrecover
+    - address.callcode
+
+Difficult:
+    - gasleft/msg.gas <0.5.0
+    - selfdestruct
+    - user-defined operators
+
+More tests:

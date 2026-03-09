@@ -496,7 +496,6 @@ export class Interpreter {
         // If we succeed update the world on our new state
         this.world.updateAccount(state.account);
 
-        // @todo implement immutables
         return deployedBytecode;
     }
 
@@ -1172,7 +1171,6 @@ export class Interpreter {
     }
 
     private execWhileStatement(stmt: sol.WhileStatement, state: State): ControlFlow {
-        // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
         while (true) {
             const condVal = this.evalT(stmt.vCondition, Boolean, state);
 
@@ -1207,7 +1205,6 @@ export class Interpreter {
     private execDoWhileStatement(stmt: sol.DoWhileStatement, state: State): ControlFlow {
         let cond: boolean;
 
-        // @todo: In the evm gas prevents us from infinite loops. Should we add some sort of loop limit here as well to avoid infinte loops?
         do {
             // Execute body first
             const bodyCflow = this.exec(stmt.vBody, state);
@@ -3770,7 +3767,6 @@ export class Interpreter {
                 res = bytesBitwiseNot(subVal);
             }
         } else {
-            // @todo implement delete
             nyi(`Unary operator ${expr.operator}`);
         }
 
