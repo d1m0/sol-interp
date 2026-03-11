@@ -5,25 +5,10 @@ import { PartialSolcOutput, Value as BaseValue, Struct } from "sol-dbg";
 import { ArtifactManager } from "../interp/artifactManager";
 import { Runner } from "./runner";
 import { parseStep, SyntaxError } from "./ast";
-import { Address, bytesToUtf8 } from "@ethereumjs/util";
+import { Address, } from "@ethereumjs/util";
 import { ppTrace } from "../interp/pp";
 import { CallResult } from "../interp";
-
-function terminate(message?: string, exitCode = 0): never {
-    if (message !== undefined) {
-        if (exitCode === 0) {
-            console.log(message);
-        } else {
-            console.error(message);
-        }
-    }
-
-    process.exit(exitCode);
-}
-
-function error(message: string): never {
-    terminate(message, 1);
-}
+import { addSourcesToResult, error } from "./utils";
 
 function ppBaseValue(v: BaseValue): string {
     if (v instanceof Address) {
@@ -53,26 +38,14 @@ function ppRes(res: CallResult, decodedReturns: BaseValue[] | undefined): string
     return `succeeded`;
 }
 
-function addSourcesToResult(artifact: PartialSolcOutput, files: sol.FileMap): void {
-    for (const name in artifact.sources) {
-        if (artifact.sources[name].contents !== undefined) {
-            continue;
-        }
-
-        const file = files.get(name);
-
-        if (file) {
-            artifact.sources[name].contents = bytesToUtf8(file);
-        }
-    }
-}
-
 (async () => {
     const program = new Command();
 
     program
         .name("sol-interp")
-        .description("Execute a sequence of steps given some solidity files, or interpret a given mainnet TX")
+        .description(
+            "Execute a sequence of steps given some solidity files, or interpret a given mainnet TX"
+        )
         .helpOption("-h, --help", "Print help message.");
 
     program.argument(

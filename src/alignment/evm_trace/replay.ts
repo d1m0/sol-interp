@@ -6,7 +6,6 @@ import {
     setLengthLeft
 } from "@ethereumjs/util";
 import { AccountMap } from "../../interp/env";
-import { ArtifactManager } from "../../interp/artifactManager";
 import { createTx, TypedTransaction, TypedTxData } from "@ethereumjs/tx";
 import { BlockData, createBlock } from "@ethereumjs/block";
 import { Common, Hardfork, Mainnet, StateManagerInterface } from "@ethereumjs/common";
@@ -73,7 +72,6 @@ function makeFakeTransaction(
 }
 
 export async function replayEVM(
-    artifactManager: ArtifactManager,
     initialState: AccountMap,
     txData: TypedTxData,
     blockData: BlockData,
@@ -85,7 +83,7 @@ export async function replayEVM(
     const block = createBlock(blockData, { common });
     const stateManager = await makeStateManager(initialState);
 
-    const tracer = new EVMTracer(artifactManager, { strict: false, foundryCheatcodes: false });
+    const tracer = new EVMTracer();
     const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager, {
         callStack: [-1]
     });

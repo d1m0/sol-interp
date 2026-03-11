@@ -1,28 +1,12 @@
 import { Command } from "commander";
 import { getTXReplayInfo } from "./quicknode";
-/*
-import * as sol from "solc-typed-ast";
-import * as fse from "fs-extra";
-import { PartialSolcOutput, Value as BaseValue, Struct } from "sol-dbg";
-import { Address, bytesToUtf8 } from "@ethereumjs/util";
-import { CallResult } from "../interp";
-*/
-
-function terminate(message?: string, exitCode = 0): never {
-    if (message !== undefined) {
-        if (exitCode === 0) {
-            console.log(message);
-        } else {
-            console.error(message);
-        }
-    }
-
-    process.exit(exitCode);
-}
-
-export function error(message: string): never {
-    terminate(message, 1);
-}
+import { getArtifact } from "./etherscan";
+import { ContractInfo, PartialSolcOutput } from "sol-dbg";
+import { replayEVM } from "../alignment/evm_trace";
+import { AlignedTraceBuilder, makeSolMessage } from "../alignment";
+import { ArtifactManager } from "../interp/artifactManager";
+import { hasUnmached } from "../alignment/trace_builder";
+import { assert } from "../utils"
 
 (async () => {
     const program = new Command();
@@ -32,89 +16,74 @@ export function error(message: string): never {
         .description("Replay a mainnet TX fetching source info from etherscan")
         .helpOption("-h, --help", "Print help message.");
 
-    program.argument(
-        "tx",
-        "Mainnet TX."
-    );
+    program.argument("tx", "Mainnet TX.");
 
-    program.requiredOption("-q --quicknode-endpoint <quicknode>", "Quicknode Endpoint")
+    program.requiredOption("-q --quicknode-endpoint <quicknode>", "Quicknode Endpoint");
+    program.requiredOption("-e --etherscan-key <etherscan-api-key>", "Etherscan api key");
+    program.option("--max-num-steps <max-num-steps>", "Maximum Number of steps", "1000000000");
 
     program.parse(process.argv);
-    const [tx] = program.args;
+    const [txHash] = program.args;
     const opts = program.opts();
 
+    console.error(`Fetching ${txHash} from quicknode:`);
+    const txReplayInfo = await getTXReplayInfo(opts.quicknodeEndpoint, txHash);
 
-    console.error(`Fetching ${tx} from quicknode:`)
-    const txReplayInfo = await getTXReplayInfo(opts.quicknodeEndpoint, tx)
-    console.error(`Data: ${txReplayInfo}`)
 
-    /*
+    const [trace, , , evmTx] = await replayEVM(txReplayInfo.preState, txReplayInfo.tx, txReplayInfo.block, txReplayInfo.sender)
+
+    const addrsTouched = new Set<string>();
+    for (const step of trace) {
+        addrsTouched.add(step.address.toString());
+        if (step.codeAddress !== undefined) {
+            addrsTouched.add(step.codeAddress.toString());
+        }
+    }
     const artifacts: PartialSolcOutput[] = [];
 
-    try {
-        for (const file of args) {
-            if (file.endsWith("sol")) {
-                const { data, files } = await sol.compileSol(file, "auto");
-                addSourcesToResult(data, files);
-                artifacts.push(data);
-            } else {
-                const data = fse.readJSONSync(file);
-                artifacts.push(data);
-            }
+    const addrToMainContract = new Map<string, [string, string]>()
+
+    for (const addr of addrsTouched) {
+        console.error(`Try fetching source for ${addr}:`);
+        const artifactDesc = await getArtifact(addr, opts.etherscanKey);
+        if (artifactDesc !== undefined) {
+            const [artifact, fileName, contractName] = artifactDesc
+
+            artifacts.push(artifact);
+            addrToMainContract.set(addr, [fileName, contractName]);
+            assert(fileName in artifact.contracts && contractName in artifact.contracts[fileName], `Missing info for main contract {0}:{1}`, fileName, contractName)
         }
-    } catch (e: any) {
-        if (e instanceof sol.CompileFailedError) {
-            console.error("Compile errors encountered:");
-
-            for (const failure of e.failures) {
-                console.error(
-                    failure.compilerVersion
-                        ? `SolcJS ${failure.compilerVersion}:`
-                        : "Unknown compiler:"
-                );
-
-                for (const error of failure.errors) {
-                    console.error(error);
-                }
-            }
-
-            error("Unable to compile due to errors above.");
-        }
-
-        error(e.message);
     }
 
     const artifactManager = new ArtifactManager(artifacts);
-    const runner = new Runner(artifactManager);
 
-    for (const step of options.steps) {
-        try {
-            const parsedStep = parseStep(step);
-            const oldTraceLen = runner.visitor.getTrace().length;
-            try {
-                const [res, returns] = runner.run(parsedStep);
+    const nameToArtifact = new Map<string, ContractInfo>();
+    for (const info of artifactManager.contracts()) {
+        nameToArtifact.set(`${info.fileName}:${info.contractName}`, info)
+    }
 
-                if (options.verbose) {
-                    const newSegment = runner.visitor.getTrace().slice(oldTraceLen);
-                    console.error(ppTrace(newSegment, artifactManager));
-                }
+    // Add contract info to initial state
+    for (const [, accountInfo] of txReplayInfo.preState.entries()) {
+        const t = addrToMainContract.get(accountInfo.address.toString())
 
-                console.error(ppRes(res, returns));
-            } catch (e) {
-                if (options.verbose) {
-                    const newSegment = runner.visitor.getTrace().slice(oldTraceLen);
-                    console.error(ppTrace(newSegment, artifactManager));
-                }
+        if (t) {
+            const [fileName, contractName] = t;
+            const info = nameToArtifact.get(`${fileName}:${contractName}`)
 
-                throw e;
+            if (info) {
+                accountInfo.contract = info;
             }
-        } catch (e) {
-            if (e instanceof SyntaxError) {
-                error(`SyntaxError ${e.location}: ${e.message}`);
-            }
-
-            throw e;
         }
     }
-        */
+
+    const builder = new AlignedTraceBuilder(
+        artifactManager,
+        txReplayInfo.preState,
+        trace,
+        makeSolMessage(evmTx, txReplayInfo.sender),
+        Number(opts.maxNumSteps)
+    );
+
+    const [alignedTraces,] = builder.buildAlignedTraces();
+    console.error(`Has misalignment: `, hasUnmached(alignedTraces));
 })();

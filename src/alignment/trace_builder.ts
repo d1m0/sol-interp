@@ -55,7 +55,7 @@ export function findFirstIdxAtDepthAfter(
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
  */
-function makeSolMessage(tx: TypedTransaction, sender: Address): SolMessage {
+export function makeSolMessage(tx: TypedTransaction, sender: Address): SolMessage {
     return {
         from: sender,
         delegatingContract: undefined,
@@ -85,7 +85,6 @@ export async function buildAlignedTraces(
 ): Promise<[AlignedTraces, AccountMap]> {
     // 1. Get the low-level trace
     const [trace, , , tx] = await replayEVM(
-        artifactManager,
         initialState,
         txData,
         blockData,
@@ -122,9 +121,9 @@ export function hasUnmached(ps: AlignedTraces): boolean {
     return false;
 }
 
-class MisalignmentError extends Error {}
+class MisalignmentError extends Error { }
 
-class AlignedTraceBuilder extends Chain {
+export class AlignedTraceBuilder extends Chain {
     currentLLIdx = 0;
     highLevelTrace: BaseStep[] = [];
     alignedTraces: AlignedTraces = [];
@@ -291,7 +290,7 @@ class AlignedTraceBuilder extends Chain {
             this.currentLLIdx > 0 &&
             isCall(this.lowLevelTrace[this.currentLLIdx - 1]) &&
             this.lowLevelTrace[this.currentLLIdx - 1].depth ===
-                this.lowLevelTrace[this.currentLLIdx].depth
+            this.lowLevelTrace[this.currentLLIdx].depth
         ) {
             // This should push an empty low-level and high-level traces and leave currentLLIdx unchanged
             this.addAlignedSegment(
@@ -314,8 +313,8 @@ class AlignedTraceBuilder extends Chain {
             msg.delegatingContract !== undefined
                 ? msg.delegatingContract
                 : res.newContract
-                  ? res.newContract
-                  : msg.to;
+                    ? res.newContract
+                    : msg.to;
         const hlAccount = this.state.get(calleeAccountAddr.toString());
 
         assert(hlAccount !== undefined, `Missing account for ${calleeAccountAddr.toString()}`);
