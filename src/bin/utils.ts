@@ -1,7 +1,9 @@
 import { bytesToUtf8 } from "@ethereumjs/util";
-import { PartialSolcOutput } from "sol-dbg";
+import { keccak256 } from "ethereum-cryptography/keccak";
+import { bigEndianBufToBigint, bigIntToBuf, ImmMap, PartialSolcOutput, Storage } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { EVMStep } from "../alignment/evm_trace";
+import { AccountMap } from "../interp";
 
 function terminate(message?: string, exitCode = 0): never {
     if (message !== undefined) {
@@ -46,4 +48,25 @@ export function getExecutedAddresses(trace: EVMStep[]): Set<string> {
         }
     }
     return addrsTouched;
+}
+
+function lowerStorage(s: Storage): Storage {
+    return ImmMap.fromEntries(
+        [...s.entries()].map(([key, val]) => [
+            bigEndianBufToBigint(keccak256(bigIntToBuf(key, 32, "big"))),
+            val
+        ])
+    );
+}
+
+export function tracerStorageToStorageDump(tStorage: AccountMap): AccountMap {
+    return ImmMap.fromEntries(
+        [...tStorage.entries()].map(([addr, accInfo]) => [
+            addr,
+            {
+                ...accInfo,
+                storage: lowerStorage(accInfo.storage)
+            }
+        ])
+    );
 }

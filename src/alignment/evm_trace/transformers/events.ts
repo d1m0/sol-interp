@@ -12,7 +12,7 @@ export interface WithEventInfo {
 export async function addEventInfo<T extends object & BasicStepInfo>(
     vm: VM,
     step: InterpreterStep,
-    state: T,
+    state: T
 ): Promise<T & WithEventInfo> {
     let emittedEvent: EventDesc | undefined = undefined;
 

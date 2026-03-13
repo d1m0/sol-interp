@@ -43,7 +43,10 @@ export class Runner {
     addrToInfo = new Map<string, ContractInfo>();
     SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
 
-    constructor(private readonly artifactManager: ArtifactManager, block: Block) {
+    constructor(
+        private readonly artifactManager: ArtifactManager,
+        block: Block
+    ) {
         this.chain = new Chain(this.artifactManager, ImmMap.fromEntries([]), block);
         this.visitor = new TraceVisitor();
         this.chain.addVisitor(this.visitor);

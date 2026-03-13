@@ -83,9 +83,9 @@ function makeAccountMap(qState: QuicknodeStateDesc): AccountMap {
                     accDesc.storage === undefined
                         ? []
                         : Object.entries(accDesc.storage).map(([k, v]) => [
-                            hexToBigInt(k as `0x${string}`),
-                            hexToBytes(v)
-                        ])
+                              hexToBigInt(k as `0x${string}`),
+                              hexToBytes(v)
+                          ])
                 ),
                 balance: hexToBigInt(accDesc.balance),
                 nonce: BigInt(accDesc.nonce)
@@ -102,7 +102,7 @@ function makeTxData(qTx: QuicknodeTransaction): TypedTxData {
         to: qTx.to,
         value: qTx.value,
         chainId: qTx.chainId,
-        gasLimit: qTx.gas,
+        gasLimit: qTx.gas
     };
 }
 
@@ -132,7 +132,7 @@ function makeBlockData(qBlockData: QuicknodeBlock): BlockData {
             withdrawalsRoot: qBlockData.withdrawlsRoot,
             blobGasUsed: qBlockData.blobGasUsed,
             excessBlobGas: qBlockData.excessBlobGas,
-            parentBeaconBlockRoot: qBlockData.parentBeaconBlockRoot,
+            parentBeaconBlockRoot: qBlockData.parentBeaconBlockRoot
             //requestsHash: qBlockData.requestsHash
         }
     };
@@ -146,7 +146,7 @@ export interface QuicknodeReplayInfo {
 
 class QuicknodeCache extends JSONCache {
     makeKey(endpoint: string, txHash: string): string {
-        return txHash
+        return txHash;
     }
     async make(endpoint: string, txHash: string): Promise<QuicknodeReplayInfo> {
         const qTxData = await jsonCall(endpoint, "eth_getTransactionByHash", [txHash]);
@@ -168,13 +168,13 @@ class QuicknodeCache extends JSONCache {
 }
 
 const QUICKNODE_CACHE_DIR = ".quicknode_cache/";
-const qCache = new QuicknodeCache(QUICKNODE_CACHE_DIR)
+const qCache = new QuicknodeCache(QUICKNODE_CACHE_DIR);
 
 export interface ReplayInfo {
     block: BlockData;
     tx: TypedTxData;
     preState: AccountMap;
-    sender: Address
+    sender: Address;
 }
 
 /**
@@ -189,5 +189,5 @@ export async function getTXReplayInfo(endpoint: string, txHash: string): Promise
         tx: makeTxData(rawData.tx),
         preState: makeAccountMap(rawData.preState),
         sender: createAddressFromString(rawData.tx.from)
-    }
+    };
 }

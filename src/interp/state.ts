@@ -35,7 +35,7 @@ export interface State {
     scope: BaseScope | undefined;
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
     storageReadOnly: boolean;
-    block: Block
+    block: Block;
 }
 
 /**
@@ -83,7 +83,7 @@ export function makeStateForAccount(
     artifactManager: ArtifactManager,
     account: AccountInfo,
     codeAccount: AccountInfo | undefined,
-    storageReadOnly: boolean,
+    storageReadOnly: boolean
 ): State {
     const memAllocator = new DefaultAllocator();
     const contract = (codeAccount !== undefined ? codeAccount : account).contract;

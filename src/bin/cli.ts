@@ -5,7 +5,7 @@ import { PartialSolcOutput, Value as BaseValue, Struct } from "sol-dbg";
 import { ArtifactManager } from "../interp/artifactManager";
 import { Runner } from "./runner";
 import { parseStep, SyntaxError } from "./ast";
-import { Address, } from "@ethereumjs/util";
+import { Address } from "@ethereumjs/util";
 import { ppTrace } from "../interp/pp";
 import { CallResult } from "../interp";
 import { addSourcesToResult, error } from "./utils";

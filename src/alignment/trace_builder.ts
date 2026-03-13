@@ -3,14 +3,14 @@ import { AccountInfo, AccountMap, CallResult, Chain, SolMessage } from "../inter
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction, TypedTxData } from "@ethereumjs/tx";
-import { Block, BlockData, createBlock } from "@ethereumjs/block";
+import { Block, BlockData, } from "@ethereumjs/block";
 import { EventDesc, ImmMap, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
 import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
-import { EVMStep, getCommon, isCall, rebuildStateFromTrace, replayEVM } from "./evm_trace";
+import { EVMStep, isCall, rebuildStateFromTrace, replayEVM } from "./evm_trace";
 import { assert } from "../utils";
 import {
     eventsMatch,
@@ -84,15 +84,7 @@ export async function buildAlignedTraces(
     maxNumSteps: number | undefined = undefined
 ): Promise<[AlignedTraces, AccountMap]> {
     // 1. Get the low-level trace
-    const [trace, , , tx] = await replayEVM(
-        initialState,
-        txData,
-        blockData,
-        sender
-    );
-
-    const common = getCommon();
-    const block = createBlock(blockData, { common });
+    const [trace, , , block, tx] = await replayEVM(initialState, txData, blockData, sender);
 
     // 2. Interpret at the Solidity level
     const builder = new AlignedTraceBuilder(
@@ -190,11 +182,14 @@ export class AlignedTraceBuilder extends Chain {
     }
 
     private reSyncAtDepth(expDepth: number): [EVMObservableEvent, SolObservableEvent] {
-        const resyncLLIdx = findFirstIdxAtDepthAfter(
-            this.lowLevelTrace,
-            expDepth,
-            this.currentLLIdx
-        );
+        let resyncLLIdx: number;
+
+        if (this.currentLLIdx === 0 && expDepth === 1) {
+            // Couldnt synchronize at the first call
+            resyncLLIdx = this.lowLevelTrace.length;
+        } else {
+            resyncLLIdx = findFirstIdxAtDepthAfter(this.lowLevelTrace, expDepth, this.currentLLIdx);
+        }
 
         assert(resyncLLIdx > 0, ``);
         const lastStep = this.lowLevelTrace[resyncLLIdx - 1];

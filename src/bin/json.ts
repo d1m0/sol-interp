@@ -35,15 +35,15 @@ export abstract class JSONCache {
         }
     }
 
-    abstract makeKey(...args: any): string
-    abstract make(...args: any): any
+    abstract makeKey(...args: any): string;
+    abstract make(...args: any): any;
 
     async get(...args: any): Promise<any> {
         const key = this.makeKey(...args);
 
         const cachedFilePath = path.join(this.cacheDir, key + ".json");
         if (fse.existsSync(cachedFilePath)) {
-            return fse.readJsonSync(cachedFilePath)
+            return fse.readJsonSync(cachedFilePath);
         }
 
         let res = this.make(...args);

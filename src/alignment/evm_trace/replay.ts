@@ -7,7 +7,7 @@ import {
 } from "@ethereumjs/util";
 import { AccountMap } from "../../interp/env";
 import { createTx, TypedTransaction, TypedTxData } from "@ethereumjs/tx";
-import { BlockData, createBlock } from "@ethereumjs/block";
+import { Block, BlockData, createBlock } from "@ethereumjs/block";
 import { Common, Hardfork, Mainnet, StateManagerInterface } from "@ethereumjs/common";
 import { MerkleStateManager } from "@ethereumjs/statemanager";
 import { RunTxResult } from "@ethereumjs/vm";
@@ -76,7 +76,7 @@ export async function replayEVM(
     txData: TypedTxData,
     blockData: BlockData,
     sender: Address
-): Promise<[EVMStep[], RunTxResult, StateManagerInterface, TypedTransaction]> {
+): Promise<[EVMStep[], RunTxResult, StateManagerInterface, Block, TypedTransaction]> {
     const common = getCommon();
     const tx = makeFakeTransaction(txData, sender, common);
 
@@ -90,5 +90,5 @@ export async function replayEVM(
 
     await (stateAfter as MerkleStateManager).flush();
 
-    return [trace, res, stateAfter, tx];
+    return [trace, res, stateAfter, block, tx];
 }

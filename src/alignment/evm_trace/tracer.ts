@@ -1,12 +1,6 @@
 import { InterpreterStep } from "@ethereumjs/evm";
 import { VM } from "@ethereumjs/vm";
-import {
-    addBasicInfo,
-    addOpInfo,
-    StepVMState,
-    EventDesc,
-    BaseSolTxTracer
-} from "sol-dbg";
+import { addBasicInfo, addOpInfo, StepVMState, EventDesc, BaseSolTxTracer } from "sol-dbg";
 import {
     addCallInfo,
     addCreateInfo,
@@ -43,7 +37,7 @@ interface TracerContext {
 export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
     constructor() {
         // Artifact Manager not used in this tracer
-        super(new ArtifactManager([]), { strict: false, foundryCheatcodes: false })
+        super(new ArtifactManager([]), { strict: false, foundryCheatcodes: false });
     }
     async processRawTraceStep(
         vm: VM,
