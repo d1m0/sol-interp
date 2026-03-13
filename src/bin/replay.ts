@@ -1,12 +1,38 @@
 import { Command } from "commander";
 import { getTXReplayInfo } from "./quicknode";
-import { getArtifact } from "./etherscan";
+import { getArtifacts } from "./etherscan";
 import { ContractInfo, PartialSolcOutput } from "sol-dbg";
 import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, makeSolMessage } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
 import { hasUnmached } from "../alignment/trace_builder";
-import { assert } from "../utils"
+import { getExecutedAddresses } from "./utils";
+import { AccountMap } from "../interp";
+
+/**
+ * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
+ * for each address, lookup its contract in the given `ArtifactManager`, and if a contract is found, add its info to the relevant
+ * `AccountInfo` in `state`.
+ */
+function addArtifactToAccountMap(state: AccountMap, artifactManager: ArtifactManager, addrToNameMap: Map<string, [PartialSolcOutput, string]>): void {
+    const nameToArtifact = new Map<string, ContractInfo>();
+    for (const info of artifactManager.contracts()) {
+        nameToArtifact.set(`${info.fileName}:${info.contractName}`, info)
+    }
+
+    // Add contract info to initial state
+    for (const [, accountInfo] of state.entries()) {
+        const t = addrToNameMap.get(accountInfo.address.toString())
+
+        if (t) {
+            const info = nameToArtifact.get(t[1])
+
+            if (info) {
+                accountInfo.contract = info;
+            }
+        }
+    }
+}
 
 (async () => {
     const program = new Command();
@@ -32,49 +58,11 @@ import { assert } from "../utils"
 
     const [trace, , , evmTx] = await replayEVM(txReplayInfo.preState, txReplayInfo.tx, txReplayInfo.block, txReplayInfo.sender)
 
-    const addrsTouched = new Set<string>();
-    for (const step of trace) {
-        addrsTouched.add(step.address.toString());
-        if (step.codeAddress !== undefined) {
-            addrsTouched.add(step.codeAddress.toString());
-        }
-    }
-    const artifacts: PartialSolcOutput[] = [];
-
-    const addrToMainContract = new Map<string, [string, string]>()
-
-    for (const addr of addrsTouched) {
-        console.error(`Try fetching source for ${addr}:`);
-        const artifactDesc = await getArtifact(addr, opts.etherscanKey);
-        if (artifactDesc !== undefined) {
-            const [artifact, fileName, contractName] = artifactDesc
-
-            artifacts.push(artifact);
-            addrToMainContract.set(addr, [fileName, contractName]);
-            assert(fileName in artifact.contracts && contractName in artifact.contracts[fileName], `Missing info for main contract {0}:{1}`, fileName, contractName)
-        }
-    }
-
+    const addrsTouched = getExecutedAddresses(trace);
+    const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey)
+    const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map(p => p[0]);
     const artifactManager = new ArtifactManager(artifacts);
-
-    const nameToArtifact = new Map<string, ContractInfo>();
-    for (const info of artifactManager.contracts()) {
-        nameToArtifact.set(`${info.fileName}:${info.contractName}`, info)
-    }
-
-    // Add contract info to initial state
-    for (const [, accountInfo] of txReplayInfo.preState.entries()) {
-        const t = addrToMainContract.get(accountInfo.address.toString())
-
-        if (t) {
-            const [fileName, contractName] = t;
-            const info = nameToArtifact.get(`${fileName}:${contractName}`)
-
-            if (info) {
-                accountInfo.contract = info;
-            }
-        }
-    }
+    addArtifactToAccountMap(txReplayInfo.preState, artifactManager, addrToContract);
 
     const builder = new AlignedTraceBuilder(
         artifactManager,

@@ -1,4 +1,5 @@
 import { Address } from "@ethereumjs/util";
+import { assert } from "../utils"
 import axios from "axios";
 import * as sol from "solc-typed-ast"
 import { JSONCache } from "./json";
@@ -125,4 +126,26 @@ export async function getArtifact(
 
         error(e.message);
     }
+}
+
+export async function getArtifacts(
+    addresses: Iterable<Address> | Iterable<string>,
+    apiKey: string,
+): Promise<Map<string, [PartialSolcOutput, string]>> {
+
+    const res = new Map<string, [PartialSolcOutput, string]>()
+
+    for (const addr of addresses) {
+        const strAddr = addr instanceof Address ? addr.toString() : addr;
+
+        console.error(`Try fetching source for ${strAddr}:`);
+        const artifactDesc = await getArtifact(addr, apiKey);
+        if (artifactDesc !== undefined) {
+            const [artifact, fileName, contractName] = artifactDesc
+            assert(fileName in artifact.contracts && contractName in artifact.contracts[fileName], `Missing info for main contract {0}:{1}`, fileName, contractName)
+            res.set(strAddr, [artifact, `${fileName}:${contractName}`]);
+        }
+    }
+
+    return res;
 }
