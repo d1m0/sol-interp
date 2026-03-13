@@ -3,14 +3,14 @@ import { AccountInfo, AccountMap, CallResult, Chain, SolMessage } from "../inter
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction, TypedTxData } from "@ethereumjs/tx";
-import { BlockData } from "@ethereumjs/block";
+import { Block, BlockData, createBlock } from "@ethereumjs/block";
 import { EventDesc, ImmMap, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
 import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
-import { EVMStep, isCall, rebuildStateFromTrace, replayEVM } from "./evm_trace";
+import { EVMStep, getCommon, isCall, rebuildStateFromTrace, replayEVM } from "./evm_trace";
 import { assert } from "../utils";
 import {
     eventsMatch,
@@ -91,12 +91,16 @@ export async function buildAlignedTraces(
         sender
     );
 
+    const common = getCommon();
+    const block = createBlock(blockData, { common });
+
     // 2. Interpret at the Solidity level
     const builder = new AlignedTraceBuilder(
         artifactManager,
         initialState,
         trace,
         makeSolMessage(tx, sender),
+        block,
         maxNumSteps
     );
     return builder.buildAlignedTraces();
@@ -133,9 +137,10 @@ export class AlignedTraceBuilder extends Chain {
         private readonly initialState: AccountMap,
         private readonly lowLevelTrace: EVMStep[],
         private readonly msg: SolMessage,
+        block: Block,
         maxNumSteps: number | undefined = undefined
     ) {
-        super(artifactManager, initialState, maxNumSteps);
+        super(artifactManager, initialState, block, maxNumSteps);
     }
 
     private misalignment(): never {

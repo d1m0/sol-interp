@@ -13,6 +13,7 @@ import { Allocator } from "sol-dbg";
 import { BuiltinFunction } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { AccountInfo, SolMessage } from "./env";
+import { Block, createBlock } from "@ethereumjs/block";
 
 export interface InternalCallFrame {
     callee: sol.FunctionDefinition | sol.VariableDeclaration | BuiltinFunction;
@@ -34,6 +35,7 @@ export interface State {
     scope: BaseScope | undefined;
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
     storageReadOnly: boolean;
+    block: Block
 }
 
 /**
@@ -68,7 +70,8 @@ export function makeNoContractState(): State {
         intCallStack: [],
         scope: undefined,
         constantsMap: new Map(),
-        storageReadOnly: true
+        storageReadOnly: true,
+        block: createBlock()
     };
 }
 
@@ -80,7 +83,7 @@ export function makeStateForAccount(
     artifactManager: ArtifactManager,
     account: AccountInfo,
     codeAccount: AccountInfo | undefined,
-    storageReadOnly: boolean
+    storageReadOnly: boolean,
 ): State {
     const memAllocator = new DefaultAllocator();
     const contract = (codeAccount !== undefined ? codeAccount : account).contract;
@@ -111,7 +114,8 @@ export function makeStateForAccount(
         intCallStack: [],
         scope: undefined,
         constantsMap: constantsMap,
-        storageReadOnly
+        storageReadOnly,
+        block: createBlock()
     };
 }
 

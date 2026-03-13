@@ -6,6 +6,7 @@ import { Address, createContractAddress, createContractAddress2 } from "@ethereu
 import { InterpVisitor } from "../visitors";
 import { ppAccount } from "../pp";
 import { AccountInfo, CallResult, EnvInterface, AccountMap, SolMessage } from "./types";
+import { Block } from "@ethereumjs/block";
 
 export function ppChainState(state: AccountMap): string {
     const t: string[] = [];
@@ -19,7 +20,7 @@ export function ppChainState(state: AccountMap): string {
         }`;
 }
 /**
- * Simple BlockChain implementation supporting only contracts with source artifacts.
+ * Simple BlockChain implementation supporting only contracts with source artifacts within a single block.
  */
 export class Chain implements EnvInterface {
     state: AccountMap;
@@ -28,6 +29,7 @@ export class Chain implements EnvInterface {
     constructor(
         public readonly artifactManager: ArtifactManager,
         initialState: AccountMap = ImmMap.fromEntries([]),
+        private readonly block: Block,
         private readonly maxNumSteps: undefined | number = undefined
     ) {
         this.state = initialState;
@@ -47,13 +49,13 @@ export class Chain implements EnvInterface {
         return val === undefined
             ? val
             : {
-                  address: val.address,
-                  contract: val.contract,
-                  deployedBytecode: val.deployedBytecode,
-                  storage: val.storage,
-                  balance: val.balance,
-                  nonce: val.nonce
-              };
+                address: val.address,
+                contract: val.contract,
+                deployedBytecode: val.deployedBytecode,
+                storage: val.storage,
+                balance: val.balance,
+                nonce: val.nonce
+            };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
@@ -198,6 +200,8 @@ export class Chain implements EnvInterface {
             delegatingAccount ? toAccount : undefined,
             msg.isStaticCall
         );
+
+        interpState.block = this.block;
 
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);

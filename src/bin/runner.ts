@@ -21,7 +21,8 @@ import {
     Value as BaseValue,
     BaseRuntimeType,
     BoolType,
-    typeIdToRuntimeType
+    typeIdToRuntimeType,
+    ImmMap
 } from "sol-dbg";
 import { BaseInterpType } from "../interp/types";
 import { ExpressionNode } from "./ast";
@@ -29,6 +30,7 @@ import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
 import { abiTypeToCanonicalName, abiValueToBaseValue, toABIEncodedType } from "../interp/abi";
 import { getGetterArgAndReturnTs } from "../interp/utils";
+import { Block } from "@ethereumjs/block";
 
 /**
  * Helper class to run a set of steps
@@ -41,8 +43,8 @@ export class Runner {
     addrToInfo = new Map<string, ContractInfo>();
     SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
 
-    constructor(private readonly artifactManager: ArtifactManager) {
-        this.chain = new Chain(this.artifactManager);
+    constructor(private readonly artifactManager: ArtifactManager, block: Block) {
+        this.chain = new Chain(this.artifactManager, ImmMap.fromEntries([]), block);
         this.visitor = new TraceVisitor();
         this.chain.addVisitor(this.visitor);
 

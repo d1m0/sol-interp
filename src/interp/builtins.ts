@@ -180,7 +180,7 @@ export const popBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         interp.expect(
             args.length === 1 &&
-                (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
+            (args[0] instanceof ArrayStorageView || args[0] instanceof BytesStorageView)
         );
         const arr = args[0];
         const curSize = arr.size(getStateStorage(state));
@@ -764,7 +764,7 @@ const sha3 = keccak256v04Builtin.alias("sha3");
 function interfaceId(contract: sol.ContractDefinition): Uint8Array {
     sol.assert(
         contract.kind === sol.ContractKind.Interface ||
-            (contract.kind === sol.ContractKind.Contract && contract.abstract),
+        (contract.kind === sol.ContractKind.Contract && contract.abstract),
         ``
     );
     const selectors: Uint8Array[] = contract.vFunctions.map((funDef) => sol.signatureHash(funDef));
@@ -783,9 +783,9 @@ const typeBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
         interp.expect(
             args.length === 1 &&
-                args[0] instanceof TypeValue &&
-                args[0].type instanceof WrappedType &&
-                args[0].type.innerT instanceof sol.TypeTypeId,
+            args[0] instanceof TypeValue &&
+            args[0].type instanceof WrappedType &&
+            args[0].type.innerT instanceof sol.TypeTypeId,
             `keccak256 expects a bytes array as argument`
         );
 
@@ -868,6 +868,25 @@ const typeBuiltin = new BuiltinFunction(
     false
 );
 
+const blockBaseFeeBuiltin = new BuiltinFunction(
+    "basefee",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        interp.expect(state.block.header.baseFeePerGas !== undefined, `Missing basefee in block`)
+        return [state.block.header.baseFeePerGas];
+    },
+    false,
+    true,
+    false
+);
+
+const blockBuiltinStructDesc: BuiltinDescriptor = [
+    "block",
+    [
+        blockBaseFeeBuiltin
+    ]
+];
+
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
     [
@@ -883,7 +902,8 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
             [keccak256v05Builtin, ">=0.5.0"]
         ],
         msgBuiltinStructDesc,
-        typeBuiltin
+        typeBuiltin,
+        blockBuiltinStructDesc
     ]
 ];
 

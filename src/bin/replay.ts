@@ -2,12 +2,13 @@ import { Command } from "commander";
 import { getTXReplayInfo } from "./quicknode";
 import { getArtifacts } from "./etherscan";
 import { ContractInfo, PartialSolcOutput } from "sol-dbg";
-import { replayEVM } from "../alignment/evm_trace";
+import { getCommon, replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, makeSolMessage } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
 import { hasUnmached } from "../alignment/trace_builder";
 import { getExecutedAddresses } from "./utils";
 import { AccountMap } from "../interp";
+import { createBlock } from "@ethereumjs/block";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -64,11 +65,15 @@ function addArtifactToAccountMap(state: AccountMap, artifactManager: ArtifactMan
     const artifactManager = new ArtifactManager(artifacts);
     addArtifactToAccountMap(txReplayInfo.preState, artifactManager, addrToContract);
 
+    const common = getCommon();
+    const block = createBlock(txReplayInfo.block, { common });
+
     const builder = new AlignedTraceBuilder(
         artifactManager,
         txReplayInfo.preState,
         trace,
         makeSolMessage(evmTx, txReplayInfo.sender),
+        block,
         Number(opts.maxNumSteps)
     );
 
