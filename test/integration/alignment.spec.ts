@@ -1,7 +1,7 @@
 import { loadSamples, txDescToBlockData, txDescToTxData } from "../unit/utils";
 import * as fse from "fs-extra";
 import { Scenario } from "sol-dbg";
-import { buildAlignedTraces } from "../../src";
+import { assert, buildAlignedTraces } from "../../src";
 import { createAddressFromString } from "@ethereumjs/util";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
 import { AlignedTraces, hasUnmached } from "../../src/alignment/trace_builder";
@@ -90,6 +90,31 @@ describe("Trace Alignment Tests", () => {
         });
     }
 });
+
+
+it(`Missing root info`, async () => {
+    const scenario = fse.readJsonSync(`test/samples/sol2maruir/while_v04.config.json`) as Scenario;
+    const [artifactManager] = await loadSamples(
+        ["while_v04.config.sol"],
+        "test/samples/sol2maruir",
+    );
+
+    let state = scenarioInitialStateToAccountMap(scenario.initialState);
+
+    for (let i = 0; i < scenario.steps.length; i++) {
+        const txDesc = scenario.steps[i];
+        const sender = createAddressFromString(txDesc.origin);
+        const [alignedTraces, stateAfter] = await buildAlignedTraces(
+            state,
+            txDescToTxData(txDesc),
+            sender,
+            txDescToBlockData(txDesc),
+            artifactManager
+        );
+        state = stateAfter;
+        expect(hasUnmached(alignedTraces)).toEqual(i === 1);
+    }
+})
 
 function alignedTraceToDesc(t: AlignedTraces): any {
     const res: any[] = [];
