@@ -161,3 +161,10 @@ describe("Trace Misalignment Tests", () => {
         });
     }
 });
+
+describe("Alignment with missing info", () => {
+    for (const [sample, desc] of misalignmentSamples) {
+        it(`${sample}`, async () => {
+        })
+    }
+}
