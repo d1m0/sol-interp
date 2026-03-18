@@ -1,10 +1,14 @@
 import { loadSamples, txDescToBlockData, txDescToTxData } from "../unit/utils";
 import * as fse from "fs-extra";
-import { Scenario } from "sol-dbg";
-import { assert, buildAlignedTraces } from "../../src";
+import { ImmMap, Scenario, } from "sol-dbg";
+import { AccountInfo, AccountMap, buildAlignedTraces } from "../../src";
 import { createAddressFromString } from "@ethereumjs/util";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
-import { AlignedTraces, hasUnmached } from "../../src/alignment/trace_builder";
+import { AlignedTraceBuilder, AlignedTraces, hasUnmached, isUnmached, makeSolMessage } from "../../src/alignment/trace_builder";
+import { ArtifactManager } from "../../src/interp/artifactManager";
+import { BlockReplayInfo, EVMReplay, EVMReplayDesc, makeEVMReplayDesc, StateDesc } from "../../src/alignment/evm_trace";
+import { assert } from "../../src";
+import { stateManagerToAccountMap } from "../../src/alignment/evm_trace/transformers";
 
 const misalignmentSamples: Array<[string, any]> = [
     [
@@ -54,16 +58,45 @@ const misalignmentSamples: Array<[string, any]> = [
     ]
 ];
 
+export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMReplayDesc> {
+    assert(scenario.steps.length > 0, ``);
+    const block = txDescToBlockData(scenario.steps[0]);
+    return makeEVMReplayDesc(
+        block,
+        scenario.steps.map((step) => [createAddressFromString(step.origin), txDescToTxData(step)]),
+        scenarioInitialStateToAccountMap(scenario.initialState)
+    );
+}
+
 const hasMisalignment: Set<string> = new Set(misalignmentSamples.map((t) => t[0]));
 
 const sol2maruirScenarios: string[] = fse
     .readdirSync("test/samples/sol2maruir")
     .filter((name) => name.endsWith("config.json"));
 
+/**
+ * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
+ * for each address, lookup its contract in the given `ArtifactManager`, and if a contract is found, add its info to the relevant
+ * `AccountInfo` in `state`.
+ */
+function addArtifactsToAccountMap(
+    state: AccountMap,
+    artifactManager: ArtifactManager,
+): void {
+    // Add contract info to initial state
+    for (const [, accountInfo] of state.entries()) {
+        const info = artifactManager.getContractFromDeployedBytecode(accountInfo.deployedBytecode)
+
+        if (info) {
+            accountInfo.contract = info;
+        }
+    }
+}
+
 describe("Trace Alignment Tests", () => {
     for (const sample of sol2maruirScenarios) {
         if (hasMisalignment.has(sample)) {
-            return;
+            continue;
         }
 
         it(`${sample}`, async () => {
@@ -90,31 +123,6 @@ describe("Trace Alignment Tests", () => {
         });
     }
 });
-
-
-it(`Missing root info`, async () => {
-    const scenario = fse.readJsonSync(`test/samples/sol2maruir/while_v04.config.json`) as Scenario;
-    const [artifactManager] = await loadSamples(
-        ["while_v04.config.sol"],
-        "test/samples/sol2maruir",
-    );
-
-    let state = scenarioInitialStateToAccountMap(scenario.initialState);
-
-    for (let i = 0; i < scenario.steps.length; i++) {
-        const txDesc = scenario.steps[i];
-        const sender = createAddressFromString(txDesc.origin);
-        const [alignedTraces, stateAfter] = await buildAlignedTraces(
-            state,
-            txDescToTxData(txDesc),
-            sender,
-            txDescToBlockData(txDesc),
-            artifactManager
-        );
-        state = stateAfter;
-        expect(hasUnmached(alignedTraces)).toEqual(i === 1);
-    }
-})
 
 function alignedTraceToDesc(t: AlignedTraces): any {
     const res: any[] = [];
@@ -162,9 +170,82 @@ describe("Trace Misalignment Tests", () => {
     }
 });
 
-describe("Alignment with missing info", () => {
-    for (const [sample, desc] of misalignmentSamples) {
-        it(`${sample}`, async () => {
-        })
+async function stateDescToAccountMap(state: StateDesc): Promise<AccountMap> {
+    const accounts: AccountInfo[] = [];
+    for (const addr of state.liveAccounts) {
+        accounts.push(await stateManagerToAccountMap(createAddressFromString(addr), state.state))
     }
+
+    return ImmMap.fromEntries(accounts.map((acc) => [acc.address.toString(), acc]))
 }
+
+async function alignNthTx(replayInfo: BlockReplayInfo, artifactManager: ArtifactManager, txIdx: number, deleteSource: Set<string>, maxNumSteps = 10000): Promise<[AlignedTraces, AccountMap]> {
+    const tx = replayInfo.txs[txIdx]
+    let initialState: AccountMap = await stateDescToAccountMap(tx.stateBefore)
+
+    addArtifactsToAccountMap(initialState, artifactManager);
+
+    for (const [addr, acc] of initialState.entries()) {
+        if (deleteSource.has(addr)) {
+            acc.contract = undefined;
+        }
+    }
+
+    const builder = new AlignedTraceBuilder(
+        artifactManager,
+        initialState,
+        tx.trace,
+        makeSolMessage(tx.tx),
+        replayInfo.block,
+        maxNumSteps
+    );
+
+    return await builder.buildAlignedTraces();
+}
+
+it("Alignment with missing info", async () => {
+    const scenario = fse.readJsonSync(
+        `test/samples/misalignment/missing_info.config.json`
+    ) as Scenario;
+
+    const [artifactManager] = await loadSamples(
+        ["missing_info.config.sol"],
+        "test/samples/misalignment"
+    );
+
+    const replayDesc = await scenarioToReplayDesc(scenario);
+    const evmR = await EVMReplay.replay([replayDesc])
+
+    const hist = evmR.history;
+    expect(hist.length).toEqual(1);
+    expect(hist[0].txs.length).toEqual(2);
+
+    const [traceDepl,] = await alignNthTx(hist[0], artifactManager, 0, new Set())
+    const [traceMain,] = await alignNthTx(hist[0], artifactManager, 1, new Set())
+
+    expect(hasUnmached(traceDepl)).toBeFalsy();
+    expect(hasUnmached(traceMain)).toBeFalsy();
+
+    const stateManager = hist[0].txs[1].stateBefore
+
+    for (const strAddr of stateManager.liveAccounts) {
+        const addr = createAddressFromString(strAddr)
+
+        const codeSize = await stateManager.state.getCodeSize(addr);
+        if (codeSize === 0) {
+            continue;
+        }
+
+        const [traceMainWithDel,] = await alignNthTx(hist[0], artifactManager, 1, new Set([strAddr]))
+        expect(hasUnmached(traceMainWithDel)).toBeTruthy();
+
+        // Check that unmatched segments apply *ONLY* to the contract with removed info
+        for (const segment of traceMainWithDel) {
+            if (isUnmached(segment)) {
+                for (const llStep of segment[0]) {
+                    expect(llStep.address.equals(addr)).toBeTruthy();
+                }
+            }
+        }
+    }
+});

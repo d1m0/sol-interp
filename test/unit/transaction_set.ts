@@ -10,6 +10,7 @@ import {
     BaseRuntimeType,
     Value as BaseValue,
     ContractInfo,
+    ImmMap,
     Scenario,
     Struct,
     TxDesc,
@@ -27,6 +28,7 @@ import {
 import { CallResult, Chain, SolMessage, Trace } from "../../src";
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
 import { TraceVisitor } from "../../src/interp/visitors";
+import { createBlock } from "@ethereumjs/block";
 
 const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
 
@@ -84,7 +86,7 @@ export class TransactionSet {
         private readonly steps: TransactionDesc[]
     ) {
         this.traceVisitor = new TraceVisitor();
-        this.chain = new Chain(this._artifactManager);
+        this.chain = new Chain(this._artifactManager, ImmMap.fromEntries([]), createBlock(), 1000);
         this.chain.addVisitor(this.traceVisitor);
         this.chain.makeEmptyAccount(SENDER, 1000000n);
     }

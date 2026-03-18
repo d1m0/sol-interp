@@ -1,4 +1,4 @@
-import { StorageDump } from "@ethereumjs/common";
+import { StateManagerInterface, StorageDump } from "@ethereumjs/common";
 import { Address, hexToBigInt, setLengthLeft } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
 import { BasicStepInfo, Storage, OpInfo, ImmMap } from "sol-dbg";
@@ -32,17 +32,16 @@ function storageDumpToStorage(dump: StorageDump): Storage {
     return ImmMap.fromEntries(entries);
 }
 
-async function snapshotContractState(
+export async function stateManagerToAccountMap(
     address: Address,
-    state: LowerStep,
-    vm: VM
+    stateManager: StateManagerInterface
 ): Promise<AccountInfo> {
-    const account = await vm.stateManager.getAccount(address);
+    const account = await stateManager.getAccount(address);
     assert(account !== undefined, `No account ${address.toString()}`);
-    assert(vm.stateManager.dumpStorage !== undefined, `No dump storage`);
+    assert(stateManager.dumpStorage !== undefined, `No dump storage`);
 
-    const storage = storageDumpToStorage(await vm.stateManager.dumpStorage(address));
-    const code = await vm.stateManager.getCode(address);
+    const storage = storageDumpToStorage(await stateManager.dumpStorage(address));
+    const code = await stateManager.getCode(address);
     return {
         address,
         contract: undefined,
@@ -68,7 +67,7 @@ export async function addSnapshotInfo<T extends object & LowerStep>(
     if (lastStep && lastStep.exceptionInfo !== undefined) {
         return {
             ...state,
-            snapshot: await snapshotContractState(state.address, state, vm)
+            snapshot: await stateManagerToAccountMap(state.address, vm.stateManager)
         };
     }
 
@@ -83,6 +82,6 @@ export async function addSnapshotInfo<T extends object & LowerStep>(
 
     return {
         ...state,
-        snapshot: await snapshotContractState(state.address, state, vm)
+        snapshot: await stateManagerToAccountMap(state.address, vm.stateManager)
     };
 }

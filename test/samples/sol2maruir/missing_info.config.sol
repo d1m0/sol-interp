@@ -70,7 +70,6 @@ contract B {
 contract A {
     B b;
     uint[] arrA;
-    
     constructor() {
         b = new B();
     }

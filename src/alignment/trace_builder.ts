@@ -3,7 +3,7 @@ import { AccountInfo, AccountMap, CallResult, Chain, SolMessage } from "../inter
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction, TypedTxData } from "@ethereumjs/tx";
-import { Block, BlockData, } from "@ethereumjs/block";
+import { Block, BlockData } from "@ethereumjs/block";
 import { EventDesc, ImmMap, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
@@ -55,9 +55,9 @@ export function findFirstIdxAtDepthAfter(
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
  */
-export function makeSolMessage(tx: TypedTransaction, sender: Address): SolMessage {
+export function makeSolMessage(tx: TypedTransaction): SolMessage {
     return {
-        from: sender,
+        from: tx.getSenderAddress(),
         delegatingContract: undefined,
         to: tx.to === undefined ? ZERO_ADDRESS : tx.to,
         data: tx.data,
@@ -91,7 +91,7 @@ export async function buildAlignedTraces(
         artifactManager,
         initialState,
         trace,
-        makeSolMessage(tx, sender),
+        makeSolMessage(tx),
         block,
         maxNumSteps
     );
@@ -103,7 +103,7 @@ export type UnmachedTracePair = [EVMStep[], undefined, [EVMObservableEvent, SolO
 export type TracePair = MatchedTracePair | UnmachedTracePair;
 export type AlignedTraces = TracePair[];
 
-function isUnmached(p: TracePair): p is UnmachedTracePair {
+export function isUnmached(p: TracePair): p is UnmachedTracePair {
     return p[1] === undefined;
 }
 
@@ -237,8 +237,8 @@ export class AlignedTraceBuilder extends Chain {
             msg.delegatingContract !== undefined ? msg.delegatingContract : msg.from;
         const callerAccount = this.state.get(callerAddress.toString());
 
-        // Here we are in the context of the caller
-
+        // Here we are in the context of the caller. If this is not the *root* call, then try
+        // and match the current high-level call with the next interpreter call.
         if (!(msg.depth === 0 && this.currentLLIdx === 0 && this.highLevelTrace.length === 0)) {
             llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
             assert(llEvent !== undefined, ``);
@@ -258,8 +258,6 @@ export class AlignedTraceBuilder extends Chain {
         }
 
         // From here till the end of the function we are in the context of the callee
-
-        // Find next low-level trace boundary
 
         let res: CallResult;
 
