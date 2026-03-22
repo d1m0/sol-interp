@@ -1,4 +1,4 @@
-import { loadSamples, txDescToBlockData, txDescToTxData } from "../unit/utils";
+import { txDescToBlockData, txDescToTxData } from "../unit/utils";
 import * as fse from "fs-extra";
 import { Scenario } from "sol-dbg";
 import {} from "@ethereumjs/tx";
@@ -20,10 +20,6 @@ describe("EVM Tracer tests", () => {
     for (const sample of sol2maruirScenarios) {
         it(`${sample}`, async () => {
             const scenario = fse.readJsonSync(`test/samples/sol2maruir/${sample}`) as Scenario;
-            const [artifactManager] = await loadSamples(
-                [sample.slice(0, -4) + "sol"],
-                "test/samples/sol2maruir"
-            );
             const state = scenarioInitialStateToAccountMap(scenario.initialState);
 
             for (let i = 0; i < scenario.steps.length; i++) {
@@ -31,13 +27,7 @@ describe("EVM Tracer tests", () => {
                 const sender = createAddressFromString(txDesc.origin);
                 const txData = txDescToTxData(txDesc);
                 const blockData = txDescToBlockData(txDesc);
-                const [evmTrace] = await replayEVM(
-                    artifactManager,
-                    state,
-                    txData,
-                    blockData,
-                    sender
-                );
+                const [evmTrace] = await replayEVM(state, txData, blockData, sender);
 
                 const stack: Array<CreateInfo | CallInfo> = [];
 

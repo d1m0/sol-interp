@@ -13,9 +13,9 @@ import { MerkleStateManager } from "@ethereumjs/statemanager";
 import { RunTxResult } from "@ethereumjs/vm";
 import { EVMStep, EVMTracer } from "./tracer";
 import { BasicStepInfo, ImmMap, OPCODES, OpInfo } from "sol-dbg";
-import { WithExceptionInfo, } from "./transformers";
+import { WithExceptionInfo } from "./transformers";
 import { isCall, isCreate } from "./utils";
-import { assert } from "../../utils"
+import { assert } from "../../utils";
 
 /**
  * Build a `MerkleStateManager` corresponding to the provided `initialState`.
@@ -93,7 +93,7 @@ export async function makeEVMReplayDesc(
     const common = getCommon();
     const block = createBlock(blockData, { common });
     const stateManager = await makeStateManager(initialState);
-    const liveAccounts = new Set([...initialState.entries()].map((t) => t[0]))
+    const liveAccounts = new Set([...initialState.entries()].map((t) => t[0]));
     const txs: TypedTransaction[] = txDatas.map(([sender, txData]) =>
         makeFakeTransaction(txData, sender, common)
     );
@@ -110,7 +110,7 @@ export async function makeEVMReplayDesc(
 
 export interface StateDesc {
     state: StateManagerInterface;
-    liveAccounts: Set<string>
+    liveAccounts: Set<string>;
 }
 
 /**
@@ -132,7 +132,10 @@ export interface BlockReplayInfo {
     txs: TxReplayInfo[];
 }
 
-function computeLiveContracts(trace: (OpInfo & BasicStepInfo & WithExceptionInfo)[], initialLive: Set<string>): Set<string> {
+function computeLiveContracts(
+    trace: Array<OpInfo & BasicStepInfo & WithExceptionInfo>,
+    initialLive: Set<string>
+): Set<string> {
     let res = ImmMap.fromEntries([...initialLive].map((addr) => [addr, 1]));
     const stepToSet = new Map<number, ImmMap<string, number>>();
 
@@ -145,19 +148,19 @@ function computeLiveContracts(trace: (OpInfo & BasicStepInfo & WithExceptionInfo
         }
 
         if (isCreate(lastStep) && !lastStep.exceptionInfo) {
-            res = res.set(step.address.toString(), 1)
+            res = res.set(step.address.toString(), 1);
         } else if (lastStep.op.opcode === OPCODES.SELFDESTRUCT && !lastStep.exceptionInfo) {
-            res = res.delete(lastStep.address.toString())
+            res = res.delete(lastStep.address.toString());
         }
 
         if (lastStep.exceptionInfo) {
             const contractsBeforeFailingCall = stepToSet.get(lastStep.exceptionInfo.correspCallIdx);
-            assert(contractsBeforeFailingCall !== undefined, ``)
+            assert(contractsBeforeFailingCall !== undefined, ``);
             res = contractsBeforeFailingCall;
         }
     }
 
-    return new Set([...res.entries()].map(t => t[0]))
+    return new Set([...res.entries()].map((t) => t[0]));
 }
 
 export class EVMReplay {
@@ -168,7 +171,7 @@ export class EVMReplay {
         return this._history;
     }
 
-    private constructor() { }
+    private constructor() {}
 
     static async replay(blocks: EVMReplayDesc[]): Promise<EVMReplay> {
         const res = new EVMReplay();
@@ -180,9 +183,9 @@ export class EVMReplay {
             blocks[0].initialState !== undefined
                 ? blocks[0].initialState
                 : {
-                    state: new MerkleStateManager(),
-                    liveAccounts: new Set()
-                }
+                      state: new MerkleStateManager(),
+                      liveAccounts: new Set()
+                  };
 
         for (const info of blocks) {
             const histEntry: BlockReplayInfo = {
@@ -202,10 +205,10 @@ export class EVMReplay {
                 );
 
                 await (stateAfter as MerkleStateManager).flush();
-                const liveAccountsAfter = computeLiveContracts(trace, res._curState.liveAccounts)
+                const liveAccountsAfter = computeLiveContracts(trace, res._curState.liveAccounts);
 
                 if (result.createdAddress !== undefined) {
-                    liveAccountsAfter.add(result.createdAddress.toString())
+                    liveAccountsAfter.add(result.createdAddress.toString());
                 }
 
                 histEntry.txs.push({
@@ -222,7 +225,7 @@ export class EVMReplay {
                 res._curState = {
                     state: stateAfter,
                     liveAccounts: liveAccountsAfter
-                }
+                };
             }
 
             res._history.push(histEntry);

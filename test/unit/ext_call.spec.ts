@@ -12,6 +12,7 @@ import {
     toABIEncodedType
 } from "../../src/interp/abi";
 import { TraceVisitor } from "../../src/interp/visitors";
+import { createBlock } from "@ethereumjs/block";
 
 type ExceptionConstructors = typeof AssertError;
 const samples: Array<
@@ -191,7 +192,7 @@ describe("Simple function call tests", () => {
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
 
             const traceVis = new TraceVisitor();
-            const chain = new Chain(artifactManager);
+            const chain = new Chain(artifactManager, undefined, createBlock({}));
 
             chain.addVisitor(traceVis);
             const contractInfo = artifactManager.getContractInfo(fun);

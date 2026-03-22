@@ -29,6 +29,9 @@ contract D {
         } catch {
 
         }
+
+        a.add(32);
+
         assert(!fail);
     }
 }
@@ -55,6 +58,8 @@ contract B {
         c.main(a);
         a.add(6);
         d.main(a, false);
+
+        a.add(31);
 
         try d.main(a, true) {
             assert(false);

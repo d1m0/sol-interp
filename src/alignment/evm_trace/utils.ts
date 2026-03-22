@@ -54,29 +54,22 @@ export function rebuildStateFromTrace(
 
     for (let i = 0; i <= idx; i++) {
         const step = trace[i];
-        const lastStep = i > 0 ? trace[i - 1] : undefined;
 
         if (step.callInfo || step.createInfo || step.returnInfo) {
             assert(step.snapshot !== undefined, ``);
             state = state.set(step.address.toString(), step.snapshot);
             stateMap.set(i, state);
-        } else if (lastStep && lastStep.exceptionInfo) {
-            const oldState = stateMap.get(lastStep.exceptionInfo.correspCallIdx);
-            assert(oldState !== undefined && step.snapshot !== undefined, ``);
+        } else if (step.exceptionInfo) {
+            const oldState = stateMap.get(step.exceptionInfo.correspCallIdx);
+            assert(oldState !== undefined, ``);
             // Restore the caller contract to the recorded state right after the exception.
             // This is mostly to get the right nonce after a failed contract creation.
             state = oldState;
-            stateMap.set(i, state);
         }
 
         // Right after SELFDESTRUCT delete the destroyed contract
-        if (
-            lastStep &&
-            lastStep.op.opcode === OPCODES.SELFDESTRUCT &&
-            lastStep.exceptionInfo === undefined
-        ) {
-            state = state.delete(lastStep.address.toString());
-            stateMap.set(i, state);
+        if (step && step.op.opcode === OPCODES.SELFDESTRUCT && step.exceptionInfo === undefined) {
+            state = state.delete(step.address.toString());
         }
     }
 
