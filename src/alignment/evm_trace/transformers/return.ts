@@ -21,6 +21,9 @@ export interface ReturnInfo {
     retData: Uint8Array; // return data
     state: StorageDump; // copy of the state before the return instruction executes
     newContract?: Address;
+    // Index of the corresponding *CALL*/CREATE* instruction to whom's context we are reverting
+    // -1 for top-level reverts
+    correspCallIdx: number;
 }
 
 export interface WithReturnInfo {
@@ -61,7 +64,8 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
             returnInfo: {
                 retData: new Uint8Array(),
                 state: storageDump,
-                newContract: isCreation ? state.address : undefined
+                newContract: isCreation ? state.address : undefined,
+                correspCallIdx: idx
             }
         };
     }
@@ -76,7 +80,8 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         returnInfo: {
             retData,
             state: storageDump,
-            newContract: isCreation ? state.address : undefined
+            newContract: isCreation ? state.address : undefined,
+            correspCallIdx: idx
         }
     };
 }

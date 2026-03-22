@@ -39,10 +39,13 @@ export class EVMCreateEvent extends EVMEvent<CreateInfo> {
 export class EVMReturnEvent extends EVMEvent<ReturnInfo> {
     protected _getPayload(): ReturnInfo | undefined {
         // Should only happen on calls to contracts with no code
+        // @todo remove this case
+        assert(this.step.returnInfo !== undefined, ``)
         if (!this.step.returnInfo) {
             return {
                 retData: new Uint8Array(),
-                state: {}
+                state: {},
+                correspCallIdx: -1
             };
         }
         return this.step.returnInfo;

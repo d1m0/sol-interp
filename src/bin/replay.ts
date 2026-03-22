@@ -100,7 +100,7 @@ function addArtifactToAccountMap(
         artifactManager,
         interpPreState,
         trace,
-        makeSolMessage(evmTx, txReplayInfo.sender),
+        makeSolMessage(evmTx),
         block,
         Number(opts.maxNumSteps)
     );

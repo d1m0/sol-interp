@@ -49,13 +49,13 @@ export class Chain implements EnvInterface {
         return val === undefined
             ? val
             : {
-                  address: val.address,
-                  contract: val.contract,
-                  deployedBytecode: val.deployedBytecode,
-                  storage: val.storage,
-                  balance: val.balance,
-                  nonce: val.nonce
-              };
+                address: val.address,
+                contract: val.contract,
+                deployedBytecode: val.deployedBytecode,
+                storage: val.storage,
+                balance: val.balance,
+                nonce: val.nonce
+            };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
