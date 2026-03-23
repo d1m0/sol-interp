@@ -282,12 +282,11 @@ it("Alignment with missing info", async () => {
             artifactManager.artifacts().map((a) => a.artifact),
             [...killSet].map((addr) => (accMap.get(addr) as AccountInfo).deployedBytecode)
         );
+
         expect(
             alignedTraceWellFormed(traceMainWithDel, hist[0].txs[1].trace, prunedManager)
         ).toBeTruthy();
-        if (hasNoSource(traceMainWithDel) !== killSet.size > 0) {
-            console.error(killSet);
-        }
+
         expect(hasNoSource(traceMainWithDel)).toEqual(killSet.size > 0);
         for (const segment of traceMainWithDel) {
             if (isNoSource(segment)) {
