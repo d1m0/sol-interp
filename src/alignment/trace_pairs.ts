@@ -62,18 +62,22 @@ export function hasNoSource(ps: AlignedTraces): boolean {
 
 /**
  * Return true IFF t is well formed. We consider a pair of aligned traces to be well formed if:
- * 
+ *
  * 1. The low-level traces in `t` concatenated equal the original low-level trace `llTrace`
  * 2. For every segment s (trace pair) in `t`:
  *      - if the running bytecode in s is found in `artifactManager` and has sources, then the pair
  *          must either be `aligned` or `misaligned`
- *      - if the running bytecode in s is NOT found in `artifactManager` then the segment must be `no-source` 
- * @param t 
+ *      - if the running bytecode in s is NOT found in `artifactManager` then the segment must be `no-source`
+ * @param t
  */
-export function alignedTraceWellFormed(t: AlignedTraces, llTrace: EVMStep[], artifactManager: ArtifactManager): boolean {
+export function alignedTraceWellFormed(
+    t: AlignedTraces,
+    llTrace: EVMStep[],
+    artifactManager: ArtifactManager
+): boolean {
     const llTraceFromAligned: EVMStep[] = [];
-    for (let segment of t) {
-        llTraceFromAligned.push(...segment.llTrace)
+    for (const segment of t) {
+        llTraceFromAligned.push(...segment.llTrace);
     }
 
     // Alignment covers original llTrace
@@ -83,6 +87,29 @@ export function alignedTraceWellFormed(t: AlignedTraces, llTrace: EVMStep[], art
 
     for (let i = 0; i < llTraceFromAligned.length; i++) {
         if (llTraceFromAligned[i] !== llTrace[i]) {
+            return false;
+        }
+    }
+
+    // Check we only have no-source segments for ll trace segments with no ast in the artifact manager
+    for (const segment of t) {
+        // Ignore segments corresponding to calls to contracts with no code
+        if (segment.llTrace.length === 0) {
+            continue;
+        }
+
+        const step = segment.llTrace[0];
+        const info = step.codeInfo.isCreation
+            ? artifactManager.getContractFromCreationBytecode(step.codeInfo.code)
+            : artifactManager.getContractFromDeployedBytecode(step.codeInfo.code);
+
+        const hasAST = info !== undefined && info.ast !== undefined;
+
+        if (hasAST && segment.type === "no-source") {
+            return false;
+        }
+
+        if (!hasAST && segment.type !== "no-source") {
             return false;
         }
     }

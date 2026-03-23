@@ -47,7 +47,6 @@ export class EVMReturnNoContractEvent extends EVMEvent<ReturnInfo> {
     protected _getPayload(): ReturnInfo | undefined {
         return {
             retData: new Uint8Array(),
-            state: {},
             correspCallIdx: -1
         };
     }

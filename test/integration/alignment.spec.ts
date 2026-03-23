@@ -1,8 +1,8 @@
 import { loadSamples, txDescToBlockData, txDescToTxData } from "../unit/utils";
 import * as fse from "fs-extra";
-import { ImmMap, Scenario } from "sol-dbg";
+import { ContractInfo, ImmMap, PartialSolcOutput, Scenario } from "sol-dbg";
 import { AccountInfo, AccountMap, buildAlignedTraces } from "../../src";
-import { createAddressFromString } from "@ethereumjs/util";
+import { createAddressFromString, equalsBytes } from "@ethereumjs/util";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
 import {
     AlignedTraceBuilder,
@@ -38,7 +38,7 @@ const misalignmentSamples: Array<[string, any]> = [
             [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
             [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
         ]
-    ],
+    ]
 ];
 
 export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMReplayDesc> {
@@ -99,7 +99,9 @@ describe("Trace Alignment Tests", () => {
                     10000
                 );
                 state = stateAfter;
-                expect(alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)).toBeTruthy();
+                expect(
+                    alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)
+                ).toBeTruthy();
                 expect(hasMisaligned(alignedTraces)).toEqual(false);
             }
         });
@@ -110,7 +112,10 @@ function alignedTraceToDesc(t: AlignedTraces): any {
     const res: any[] = [];
 
     for (const p of t) {
-        let hlEvtDesc = (p.type === 'aligned' || p.type === 'misaligned') ? p.hlEndEvent.constructor.name : "<undefined>";
+        const hlEvtDesc =
+            p.type === "aligned" || p.type === "misaligned"
+                ? p.hlEndEvent.constructor.name
+                : "<undefined>";
         res.push([
             p.llTrace[0].depth,
             p.llTrace[p.llTrace.length - 1].depth,
@@ -144,7 +149,9 @@ describe("Trace Misalignment Tests", () => {
                     10000
                 );
                 state = stateAfter;
-                expect(alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)).toBeTruthy();
+                expect(
+                    alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)
+                ).toBeTruthy();
                 if (i === 1) {
                     expect(hasMisaligned(alignedTraces)).toEqual(true);
                     expect(alignedTraceToDesc(alignedTraces)).toEqual(desc);
@@ -196,15 +203,12 @@ async function alignNthTx(
 export function* powerset<A>(s: Set<A>): Iterable<Set<A>> {
     const elements = [...s];
     for (let i = 0; i < 2 ** elements.length; i++) {
-        const t = 1;
         const s = new Set<A>();
 
-        for (let i = 0; i < elements.length; i++) {
-            if ((t & i) !== 0) {
-                s.add(elements[i]);
+        for (let j = 0; j < elements.length; j++) {
+            if ((i & (1 << j)) !== 0) {
+                s.add(elements[j]);
             }
-
-            t << 1;
         }
 
         yield s;
@@ -213,14 +217,35 @@ export function* powerset<A>(s: Set<A>): Iterable<Set<A>> {
 
 it("Powerset correct", () => {
     let t = [...powerset(new Set())];
-    expect(t.length === 1 && t[0].size == 0);
+    expect(t.length === 1 && t[0].size == 0).toBeTruthy();
 
     t = [...powerset(new Set([1]))];
-    expect(t.length === 2 && t[0].size == 0 && t[1].size == 1);
+    expect(t.length === 2 && t[0].size == 0 && t[1].size == 1).toBeTruthy();
 
-    t = [...powerset(new Set([2]))];
-    expect(t.length === 4 && t[0].size == 0 && t[1].size == 1 && t[2].size == 1 && t[3].size == 2);
+    t = [...powerset(new Set([1, 2]))];
+    expect(
+        t.length === 4 && t[0].size == 0 && t[1].size == 1 && t[2].size == 1 && t[3].size == 2
+    ).toBeTruthy();
 });
+
+class PrunedArtifactManager extends ArtifactManager {
+    constructor(
+        artifacts: PartialSolcOutput[],
+        private readonly ignoreCodes: Iterable<Uint8Array>
+    ) {
+        super(artifacts);
+    }
+
+    getContractFromDeployedBytecode(bytecode: Uint8Array): ContractInfo | undefined {
+        for (const ignore of this.ignoreCodes) {
+            if (equalsBytes(ignore, bytecode)) {
+                return undefined;
+            }
+        }
+
+        return super.getContractFromDeployedBytecode(bytecode);
+    }
+}
 
 it("Alignment with missing info", async () => {
     const scenario = fse.readJsonSync(
@@ -239,7 +264,7 @@ it("Alignment with missing info", async () => {
     expect(hist.length).toEqual(1);
     expect(hist[0].txs.length).toEqual(2);
 
-    const [traceDepl] = await alignNthTx(hist[0], artifactManager, 0, new Set());
+    const [traceDepl, accMap] = await alignNthTx(hist[0], artifactManager, 0, new Set());
     const [traceMain] = await alignNthTx(hist[0], artifactManager, 1, new Set());
 
     expect(hasMisaligned(traceDepl)).toBeFalsy();
@@ -247,9 +272,22 @@ it("Alignment with missing info", async () => {
 
     const stateManager = hist[0].txs[1].stateBefore;
 
-    for (const killSet of powerset(stateManager.liveAccounts)) {
+    const allAccountsWithCode = new Set(stateManager.liveAccounts);
+    allAccountsWithCode.delete("0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97");
+
+    for (const killSet of powerset(allAccountsWithCode)) {
         const [traceMainWithDel] = await alignNthTx(hist[0], artifactManager, 1, killSet);
-        expect(alignedTraceWellFormed(traceMainWithDel, hist[0].txs[1].trace, artifactManager)).toBeTruthy();
+
+        const prunedManager = new PrunedArtifactManager(
+            artifactManager.artifacts().map((a) => a.artifact),
+            [...killSet].map((addr) => (accMap.get(addr) as AccountInfo).deployedBytecode)
+        );
+        expect(
+            alignedTraceWellFormed(traceMainWithDel, hist[0].txs[1].trace, prunedManager)
+        ).toBeTruthy();
+        if (hasNoSource(traceMainWithDel) !== killSet.size > 0) {
+            console.error(killSet);
+        }
         expect(hasNoSource(traceMainWithDel)).toEqual(killSet.size > 0);
         for (const segment of traceMainWithDel) {
             if (isNoSource(segment)) {

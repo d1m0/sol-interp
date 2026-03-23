@@ -114,7 +114,7 @@ class MisalignmentError extends Error {
     }
 }
 
-class MatchedInfiniteLoop extends Error { }
+class MatchedInfiniteLoop extends Error {}
 
 export class AlignedTraceBuilder extends Chain {
     highLevelTrace: BaseStep[] = [];
@@ -200,9 +200,15 @@ export class AlignedTraceBuilder extends Chain {
         this.addAlignedSegment(llEvent, hlEvent);
     }
 
-    private updateStateFrom(otherState: AccountMap): void {
+    private updateStateFromLLStep(idx: number): void {
+        const correctLowLevelState = rebuildStateFromTrace(
+            this.lowLevelTrace,
+            this.initialState,
+            idx
+        );
+
         let state = ImmMap.fromEntries<string, AccountInfo>([]);
-        for (const [addr, otherAccInfo] of otherState.entries()) {
+        for (const [addr, otherAccInfo] of correctLowLevelState.entries()) {
             const myAccInfo = this.state.get(addr);
             state = state.set(addr, {
                 address: otherAccInfo.address,
@@ -218,12 +224,7 @@ export class AlignedTraceBuilder extends Chain {
     }
 
     private updateStateFromPrevLLStep(): void {
-        const correctLowLevelState = rebuildStateFromTrace(
-            this.lowLevelTrace,
-            this.initialState,
-            this.currentLLIdx - 1
-        );
-        this.updateStateFrom(correctLowLevelState);
+        this.updateStateFromLLStep(this.currentLLIdx - 1);
     }
 
     private reSyncAtDepth(expDepth: number): [EVMObservableEvent, SolObservableEvent] {
@@ -302,18 +303,15 @@ export class AlignedTraceBuilder extends Chain {
                 // Nothing to do
             } else if (nextEvent instanceof EVMCallEvent || nextEvent instanceof EVMCreateEvent) {
                 const msg = makeSolMessageFromStep(step);
+                this.addNoSourceSegment(nextEvent);
                 [, pos] = this.execMsgNoSource(msg, pos); // result ignored
             } else {
                 this.expect(
                     nextEvent instanceof EVMReturnEvent || nextEvent instanceof EVMExceptionEvent
                 );
                 const res = makeCallResultFromStep(step);
+                this.addNoSourceSegment(nextEvent);
                 this.updateStateFromPrevLLStep();
-
-                if (pos === this.lowLevelTrace.length) {
-                    // Reached end of the trace in contract without code - add a final mis-alignment segment
-                    this.addNoSourceSegment(nextEvent);
-                }
 
                 return [res, pos];
             }
@@ -372,7 +370,7 @@ export class AlignedTraceBuilder extends Chain {
         const info = this.getContractInfo(msg, this.lowLevelTrace[calleeStartIdx]);
 
         if (!info) {
-            const [res,] = this.execMsgNoSource(msg, this.currentLLIdx);
+            const [res] = this.execMsgNoSource(msg, this.currentLLIdx);
             return res;
         }
 
@@ -396,7 +394,7 @@ export class AlignedTraceBuilder extends Chain {
             res = {
                 reverted: true,
                 data: new Uint8Array()
-            }
+            };
         }
 
         if (res.reverted) {
@@ -413,7 +411,7 @@ export class AlignedTraceBuilder extends Chain {
             this.currentLLIdx > 0 &&
             isCall(this.lowLevelTrace[this.currentLLIdx - 1]) &&
             this.lowLevelTrace[this.currentLLIdx - 1].depth ===
-            this.lowLevelTrace[this.currentLLIdx].depth
+                this.lowLevelTrace[this.currentLLIdx].depth
         ) {
             // This should push an empty low-level and high-level traces and leave currentLLIdx unchanged
             this.addAlignedSegment(
@@ -435,8 +433,8 @@ export class AlignedTraceBuilder extends Chain {
             msg.delegatingContract !== undefined
                 ? msg.delegatingContract
                 : res.newContract
-                    ? res.newContract
-                    : msg.to;
+                  ? res.newContract
+                  : msg.to;
 
         const hlAccount = this.state.get(calleeAccountAddr.toString());
         assert(hlAccount !== undefined, `Missing account for ${calleeAccountAddr.toString()}`);

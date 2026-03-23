@@ -16,6 +16,7 @@ import { TypedTransaction } from "@ethereumjs/tx";
 import { addSnapshotInfo } from "./transformers/state_snapshot";
 import { AccountInfo } from "../../interp";
 import { ArtifactManager } from "../../interp/artifactManager";
+import { addCodeInfo, CodeInfo } from "./transformers/code";
 
 /**
  * Annotated evm step struct used for aligning traces.
@@ -27,6 +28,7 @@ export interface EVMStep extends StepVMState {
     emittedEvent: EventDesc | undefined;
     exceptionInfo: ExceptionInfo | undefined;
     snapshot: AccountInfo | undefined;
+    codeInfo: CodeInfo;
 }
 
 interface TracerContext {
@@ -54,7 +56,8 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
         const withRet = await addReturnInfo(vm, step, withCall, trace, ctx.callStack, tx);
         const withExceptions = await addExceptionInfo(vm, step, withRet, trace, ctx.callStack);
         const withSnapshot = await addSnapshotInfo(vm, step, withExceptions, trace);
+        const withCode = await addCodeInfo(vm, step, withSnapshot, trace, tx);
 
-        return [withSnapshot, ctx];
+        return [withCode, ctx];
     }
 }
