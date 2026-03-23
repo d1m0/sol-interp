@@ -117,7 +117,6 @@ class MisalignmentError extends Error {
 class MatchedInfiniteLoop extends Error { }
 
 export class AlignedTraceBuilder extends Chain {
-    currentLLIdx = 0;
     highLevelTrace: BaseStep[] = [];
     alignedTraces: AlignedTraces = [];
     // Map from LL trace indices of starts of new exection context to the LL trace idx right after their corresponding return/revert
@@ -155,38 +154,35 @@ export class AlignedTraceBuilder extends Chain {
     ): void {
         this.alignedTraces.push({
             type: "aligned",
-            llTrace: this.lowLevelTrace.slice(this.lastSegmentEnd, llEndEvent.idx + 1),
+            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEndEvent.idx + 1),
             hlTrace: this.highLevelTrace,
             llEndEvent,
             hlEndEvent
         });
 
         this.highLevelTrace = [];
-        this.currentLLIdx = llEndEvent.idx + 1;
     }
 
     private addMisalignedSegment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): void {
         this.alignedTraces.push({
             type: "misaligned",
-            llTrace: this.lowLevelTrace.slice(this.lastSegmentEnd, llEvent.idx + 1),
+            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
             llEndEvent: llEvent,
             hlTrace: this.highLevelTrace,
             hlEndEvent: hlEvent
         });
 
         this.highLevelTrace = [];
-        this.currentLLIdx = llEvent.idx + 1;
     }
 
     private addNoSourceSegment(llEvent: EVMObservableEvent): void {
         this.alignedTraces.push({
             type: "no-source",
-            llTrace: this.lowLevelTrace.slice(this.lastSegmentEnd, llEvent.idx + 1),
+            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
             llEndEvent: llEvent
         });
 
         this.highLevelTrace = [];
-        this.currentLLIdx = llEvent.idx + 1;
     }
 
     private tryMatchObservableEvents(
@@ -275,9 +271,9 @@ export class AlignedTraceBuilder extends Chain {
 
         // If we have an AST, run the interpreter
         if (info !== undefined) {
-            sol.assert(calleeFirstStep >= this.lastSegmentEnd, ``);
+            sol.assert(calleeFirstStep >= this.currentLLIdx, ``);
 
-            if (calleeFirstStep > this.lastSegmentEnd) {
+            if (calleeFirstStep > this.currentLLIdx) {
                 this.addNoSourceSegment(
                     makeEVMEventFromStep(
                         this.lowLevelTrace[calleeFirstStep - 1],
@@ -289,7 +285,6 @@ export class AlignedTraceBuilder extends Chain {
             }
 
             sol.assert(this.highLevelTrace.length === 0, `Missed high-level steps`);
-            this.currentLLIdx = calleeFirstStep;
             const res = this.execMsg(msg, true);
             return [res, this.currentLLIdx];
         }
@@ -327,7 +322,11 @@ export class AlignedTraceBuilder extends Chain {
         this.expect(false, `Shouldn't get here`);
     }
 
-    get lastSegmentEnd(): number {
+    /**
+     * Index of the first yet un-aligned low-level step.
+     * Always right after the end of the last aligned segment
+     */
+    get currentLLIdx(): number {
         if (this.alignedTraces.length === 0) {
             return 0;
         }
@@ -373,8 +372,7 @@ export class AlignedTraceBuilder extends Chain {
         const info = this.getContractInfo(msg, this.lowLevelTrace[calleeStartIdx]);
 
         if (!info) {
-            const [res, pos] = this.execMsgNoSource(msg, this.currentLLIdx);
-            this.currentLLIdx = pos;
+            const [res,] = this.execMsgNoSource(msg, this.currentLLIdx);
             return res;
         }
 

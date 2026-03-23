@@ -10,7 +10,7 @@ import {
     alignedTraceWellFormed,
     hasMisaligned,
     hasNoSource,
-    isMisaligned,
+    isNoSource,
     makeSolMessage
 } from "../../src/alignment";
 import { ArtifactManager } from "../../src/interp/artifactManager";
@@ -39,39 +39,6 @@ const misalignmentSamples: Array<[string, any]> = [
             [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
         ]
     ],
-    /*
-    [
-        "events.config.json",
-        [
-            [1, 1, false, ["EVMCreateEvent", "SolCreateEvent"]],
-            [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
-            [1, 1, false, ["EVMCallEvent", "SolCallEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
-            [1, 1, false, ["EVMCallEvent", "SolCallEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMExceptionEvent", "SolExceptionEvent"]],
-            [1, 1, false, ["EVMCallEvent", "SolCallEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, false, ["EVMEmitEvent", "SolEmitEvent"]],
-            [2, 2, true, ["EVMExceptionEvent", "SolExceptionEvent"]],
-            [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
-        ]
-    ]
-        */
 ];
 
 export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMReplayDesc> {
@@ -285,7 +252,7 @@ it("Alignment with missing info", async () => {
         expect(alignedTraceWellFormed(traceMainWithDel, hist[0].txs[1].trace, artifactManager)).toBeTruthy();
         expect(hasNoSource(traceMainWithDel)).toEqual(killSet.size > 0);
         for (const segment of traceMainWithDel) {
-            if (isMisaligned(segment)) {
+            if (isNoSource(segment)) {
                 for (const llStep of segment.llTrace) {
                     expect(killSet.has(llStep.address.toString())).toBeTruthy();
                 }
