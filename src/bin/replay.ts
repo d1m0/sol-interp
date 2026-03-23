@@ -5,7 +5,7 @@ import { ContractInfo, PartialSolcOutput } from "sol-dbg";
 import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, makeSolMessage } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
-import { hasUnmached } from "../alignment/trace_builder";
+import { hasMisaligned } from "../alignment/trace_builder";
 import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
 import { AccountMap } from "../interp";
 import * as fse from "fs-extra";
@@ -106,5 +106,5 @@ function addArtifactToAccountMap(
     );
 
     const [alignedTraces] = builder.buildAlignedTraces();
-    console.error(`Has misalignment: `, hasUnmached(alignedTraces));
+    console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
 })();

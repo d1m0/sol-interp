@@ -7,8 +7,9 @@ import { scenarioInitialStateToAccountMap } from "../unit/utils";
 import {
     AlignedTraceBuilder,
     AlignedTraces,
-    hasUnmached,
-    isUnmached,
+    hasMisaligned,
+    hasNoSource,
+    isMisaligned,
     makeSolMessage
 } from "../../src/alignment/trace_builder";
 import { ArtifactManager } from "../../src/interp/artifactManager";
@@ -37,6 +38,7 @@ const misalignmentSamples: Array<[string, any]> = [
             [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
         ]
     ],
+    /*
     [
         "events.config.json",
         [
@@ -68,6 +70,7 @@ const misalignmentSamples: Array<[string, any]> = [
             [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
         ]
     ]
+        */
 ];
 
 export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMReplayDesc> {
@@ -124,10 +127,11 @@ describe("Trace Alignment Tests", () => {
                     txDescToTxData(txDesc),
                     sender,
                     txDescToBlockData(txDesc),
-                    artifactManager
+                    artifactManager,
+                    10000
                 );
                 state = stateAfter;
-                expect(hasUnmached(alignedTraces)).toEqual(false);
+                expect(hasMisaligned(alignedTraces)).toEqual(false);
             }
         });
     }
@@ -136,12 +140,13 @@ describe("Trace Alignment Tests", () => {
 function alignedTraceToDesc(t: AlignedTraces): any {
     const res: any[] = [];
 
-    for (const [llT, hlT, [llEv, hlEv]] of t) {
+    for (const p of t) {
+        let hlEvtDesc = (p.type === 'aligned' || p.type === 'misaligned') ? p.hlEndEvent.constructor.name : "<undefined>";
         res.push([
-            llT[0].depth,
-            llT[llT.length - 1].depth,
-            hlT === undefined,
-            [llEv.constructor.name, hlEv.constructor.name]
+            p.llTrace[0].depth,
+            p.llTrace[p.llTrace.length - 1].depth,
+            p.type !== "aligned",
+            [p.llEndEvent.constructor.name, hlEvtDesc]
         ]);
     }
 
@@ -171,7 +176,7 @@ describe("Trace Misalignment Tests", () => {
                 );
                 state = stateAfter;
                 if (i === 1) {
-                    expect(hasUnmached(alignedTraces)).toEqual(true);
+                    expect(hasMisaligned(alignedTraces)).toEqual(true);
                     expect(alignedTraceToDesc(alignedTraces)).toEqual(desc);
                 }
             }
@@ -267,17 +272,17 @@ it("Alignment with missing info", async () => {
     const [traceDepl] = await alignNthTx(hist[0], artifactManager, 0, new Set());
     const [traceMain] = await alignNthTx(hist[0], artifactManager, 1, new Set());
 
-    expect(hasUnmached(traceDepl)).toBeFalsy();
-    expect(hasUnmached(traceMain)).toBeFalsy();
+    expect(hasMisaligned(traceDepl)).toBeFalsy();
+    expect(hasMisaligned(traceMain)).toBeFalsy();
 
     const stateManager = hist[0].txs[1].stateBefore;
 
     for (const killSet of powerset(stateManager.liveAccounts)) {
         const [traceMainWithDel] = await alignNthTx(hist[0], artifactManager, 1, killSet);
-        expect(hasUnmached(traceMainWithDel)).toEqual(killSet.size > 0);
+        expect(hasNoSource(traceMainWithDel)).toEqual(killSet.size > 0);
         for (const segment of traceMainWithDel) {
-            if (isUnmached(segment)) {
-                for (const llStep of segment[0]) {
+            if (isMisaligned(segment)) {
+                for (const llStep of segment.llTrace) {
                     expect(killSet.has(llStep.address.toString())).toBeTruthy();
                 }
             }

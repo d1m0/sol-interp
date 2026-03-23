@@ -40,11 +40,7 @@ import {
  * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
  * reaching `depth`, or we never reach `depth` return -1.
  */
-export function findFirstIdxAtDepthAfter(
-    llTrace: EVMStep[],
-    depth: number,
-    afterIdx: number
-): number {
+function findFirstIdxAtDepthAfter(llTrace: EVMStep[], depth: number, afterIdx: number): number {
     assert(
         afterIdx >= llTrace.length - 1 || llTrace[afterIdx + 1].depth > depth,
         `After idx must be at a higher depth`
@@ -108,18 +104,48 @@ export async function buildAlignedTraces(
     return builder.buildAlignedTraces();
 }
 
-export type MatchedTracePair = [EVMStep[], BaseStep[], [EVMObservableEvent, SolObservableEvent]];
-export type UnmachedTracePair = [EVMStep[], undefined, [EVMObservableEvent, SolObservableEvent]];
-export type TracePair = MatchedTracePair | UnmachedTracePair;
-export type AlignedTraces = TracePair[];
-
-export function isUnmached(p: TracePair): p is UnmachedTracePair {
-    return p[1] === undefined;
+interface BasePair {
+    type: "aligned" | "misaligned" | "no-source";
+    llTrace: EVMStep[];
+    llEndEvent: EVMObservableEvent;
 }
 
-export function hasUnmached(ps: AlignedTraces): boolean {
+interface AlignedPair extends BasePair {
+    type: "aligned";
+    hlTrace: BaseStep[];
+    hlEndEvent: SolObservableEvent;
+}
+
+interface MisalignedPair extends BasePair {
+    type: "misaligned";
+    hlTrace: BaseStep[];
+    hlEndEvent: SolObservableEvent;
+}
+
+interface NoSourcePair extends BasePair {
+    type: "no-source";
+}
+
+export type MatchedTracePair = [EVMStep[], BaseStep[], [EVMObservableEvent, SolObservableEvent]];
+export type UnmachedTracePair = [EVMStep[], undefined, [EVMObservableEvent, SolObservableEvent]];
+export type TracePair = AlignedPair | MisalignedPair | NoSourcePair;
+export type AlignedTraces = TracePair[];
+
+export function isAligned(p: TracePair): p is MisalignedPair {
+    return p.type === "aligned";
+}
+
+export function isMisaligned(p: TracePair): p is MisalignedPair {
+    return p.type === "misaligned";
+}
+
+export function isNoSource(p: TracePair): p is NoSourcePair {
+    return p.type === "no-source";
+}
+
+export function hasMisaligned(ps: AlignedTraces): boolean {
     for (const p of ps) {
-        if (isUnmached(p)) {
+        if (isMisaligned(p)) {
             return true;
         }
     }
@@ -127,7 +153,26 @@ export function hasUnmached(ps: AlignedTraces): boolean {
     return false;
 }
 
-class MisalignmentError extends Error {}
+export function hasNoSource(ps: AlignedTraces): boolean {
+    for (const p of ps) {
+        if (isNoSource(p)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+class MisalignmentError extends Error {
+    constructor(
+        public readonly llEvent: EVMObservableEvent,
+        public readonly hlEvent: SolObservableEvent
+    ) {
+        super();
+    }
+}
+
+class MatchedInfiniteLoop extends Error { }
 
 export class AlignedTraceBuilder extends Chain {
     currentLLIdx = 0;
@@ -158,26 +203,45 @@ export class AlignedTraceBuilder extends Chain {
         }
     }
 
-    private misalignment(): never {
-        throw new MisalignmentError();
+    private misalignment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): never {
+        throw new MisalignmentError(llEvent, hlEvent);
     }
 
-    private addAlignedSegment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): void {
-        this.alignedTraces.push([
-            this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
-            this.highLevelTrace,
-            [llEvent, hlEvent]
-        ]);
+    private addAlignedSegment(
+        llEndEvent: EVMObservableEvent,
+        hlEndEvent: SolObservableEvent
+    ): void {
+        this.alignedTraces.push({
+            type: "aligned",
+            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEndEvent.idx + 1),
+            hlTrace: this.highLevelTrace,
+            llEndEvent,
+            hlEndEvent
+        });
+
+        this.highLevelTrace = [];
+        this.currentLLIdx = llEndEvent.idx + 1;
+    }
+
+    private addMisalignedSegment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): void {
+        this.alignedTraces.push({
+            type: "misaligned",
+            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
+            llEndEvent: llEvent,
+            hlTrace: this.highLevelTrace,
+            hlEndEvent: hlEvent
+        });
+
         this.highLevelTrace = [];
         this.currentLLIdx = llEvent.idx + 1;
     }
 
-    private addMisalignedSegment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): void {
-        this.alignedTraces.push([
-            this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
-            undefined,
-            [llEvent, hlEvent]
-        ]);
+    private addNoSourceSegment(llEvent: EVMObservableEvent): void {
+        this.alignedTraces.push({
+            type: "no-source",
+            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
+            llEndEvent: llEvent
+        });
 
         this.highLevelTrace = [];
         this.currentLLIdx = llEvent.idx + 1;
@@ -191,7 +255,7 @@ export class AlignedTraceBuilder extends Chain {
     ): void {
         // If the next boundary doesn't match the expected call, throw a misalignment error
         if (!eventsMatch(llEvent, llStep, hlEvent, hlAccount)) {
-            this.misalignment();
+            this.misalignment(llEvent, hlEvent);
         }
 
         // Add new aligned trace segments
@@ -274,13 +338,11 @@ export class AlignedTraceBuilder extends Chain {
             this.currentLLIdx = calleeFirstStep;
 
             if (this.currentLLIdx > this.lastSegmentEnd + 1) {
-                const isCreate = msg.to.equals(ZERO_ADDRESS);
-                this.addMisalignedSegment(
+                this.addNoSourceSegment(
                     makeEVMEventFromStep(
                         this.lowLevelTrace[this.currentLLIdx - 1],
                         this.currentLLIdx - 1
-                    ),
-                    isCreate ? new SolCreateEvent(msg) : new SolCallEvent(msg)
+                    )
                 );
 
                 this.updateStateFromPrevLLStep();
@@ -311,10 +373,7 @@ export class AlignedTraceBuilder extends Chain {
 
                 if (this.currentLLIdx === this.lowLevelTrace.length) {
                     // Reached end of the trace in contract without code - add a final mis-alignment segment
-                    this.addMisalignedSegment(
-                        nextEvent,
-                        makeSolEventFromStep(this.lowLevelTrace[this.currentLLIdx - 1])
-                    );
+                    this.addNoSourceSegment(nextEvent);
                 }
 
                 return res;
@@ -329,7 +388,7 @@ export class AlignedTraceBuilder extends Chain {
             return 0;
         }
 
-        return this.alignedTraces[this.alignedTraces.length - 1][2][0].idx;
+        return this.alignedTraces[this.alignedTraces.length - 1].llEndEvent.idx;
     }
 
     /**
@@ -378,14 +437,22 @@ export class AlignedTraceBuilder extends Chain {
         try {
             res = super.execMsg(msg);
         } catch (e) {
-            if (!(e instanceof MisalignmentError)) {
+            if (!(e instanceof MisalignmentError || e instanceof MatchedInfiniteLoop)) {
                 throw e;
             }
 
-            const [, solEvent] = this.reSyncAtDepth(callerDepth);
-            return solEvent instanceof SolReturnEvent
-                ? solEvent.data
-                : { reverted: true, data: solEvent.data as Uint8Array };
+            if (e instanceof MisalignmentError) {
+                const [, solEvent] = this.reSyncAtDepth(callerDepth);
+                return solEvent instanceof SolReturnEvent
+                    ? solEvent.data
+                    : { reverted: true, data: solEvent.data as Uint8Array };
+            }
+
+            // Matched a too-long execution in the interpreter with an out-of-gas or stack overflow exception
+            res = {
+                reverted: true,
+                data: new Uint8Array()
+            }
         }
 
         if (res.reverted) {
@@ -402,7 +469,7 @@ export class AlignedTraceBuilder extends Chain {
             this.currentLLIdx > 0 &&
             isCall(this.lowLevelTrace[this.currentLLIdx - 1]) &&
             this.lowLevelTrace[this.currentLLIdx - 1].depth ===
-                this.lowLevelTrace[this.currentLLIdx].depth
+            this.lowLevelTrace[this.currentLLIdx].depth
         ) {
             // This should push an empty low-level and high-level traces and leave currentLLIdx unchanged
             this.addAlignedSegment(
@@ -424,8 +491,8 @@ export class AlignedTraceBuilder extends Chain {
             msg.delegatingContract !== undefined
                 ? msg.delegatingContract
                 : res.newContract
-                  ? res.newContract
-                  : msg.to;
+                    ? res.newContract
+                    : msg.to;
 
         const hlAccount = this.state.get(calleeAccountAddr.toString());
         assert(hlAccount !== undefined, `Missing account for ${calleeAccountAddr.toString()}`);
@@ -494,8 +561,18 @@ export class AlignedTraceBuilder extends Chain {
                     state.account
                 );
             },
-            infiniteLoop: function (): void {
-                env.misalignment();
+            infiniteLoop: function (interp: Interpreter, state: State): void {
+                const llEvent = findNextEvent(env.lowLevelTrace, env.currentLLIdx);
+                assert(llEvent !== undefined, ``);
+                // Expect an out-of-gas or stack overflow
+                const hlEvent = new SolExceptionEvent(new Uint8Array());
+                env.tryMatchObservableEvents(
+                    llEvent,
+                    env.lowLevelTrace[llEvent.idx],
+                    hlEvent,
+                    state.account
+                );
+                throw new MatchedInfiniteLoop();
             }
         };
 
