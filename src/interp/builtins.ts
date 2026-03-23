@@ -752,7 +752,8 @@ const keccak256v05Builtin = new BuiltinFunction(
         );
         const bytes = decodeView(args[0], state);
         interp.expect(bytes instanceof Uint8Array, `keccak256 expects a bytes array as argument`);
-        return [keccak256(bytes)];
+        const res = keccak256(bytes);
+        return [res];
     },
     false,
     false,
@@ -868,6 +869,130 @@ const typeBuiltin = new BuiltinFunction(
     false
 );
 
+const blockBaseFeeBuiltin = new BuiltinFunction(
+    "basefee",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        interp.expect(state.block.header.baseFeePerGas !== undefined, `Missing basefee in block`);
+        return [state.block.header.baseFeePerGas];
+    },
+    false,
+    true,
+    false
+);
+
+const blockBlobBaseFeeBuiltin = new BuiltinFunction(
+    "blobbasefee",
+    dummyFunT,
+    (): Value[] => {
+        rtt.nyi(`block.blobbasefee`);
+    },
+    false,
+    true,
+    false
+);
+
+const blockChainIdBuiltin = new BuiltinFunction(
+    "chainid",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.block.common.chainId()];
+    },
+    false,
+    true,
+    false
+);
+
+const blockCoinbaseBuiltin = new BuiltinFunction(
+    "coinbase",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.block.header.coinbase];
+    },
+    false,
+    true,
+    false
+);
+
+const blockGasLimitBuiltin = new BuiltinFunction(
+    "gaslimit",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.block.header.gasLimit];
+    },
+    false,
+    true,
+    false
+);
+
+const blockNumberBuiltin = new BuiltinFunction(
+    "number",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.block.header.number];
+    },
+    false,
+    true,
+    false
+);
+
+const blockTimestampBuiltin = new BuiltinFunction(
+    "timestamp",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.block.header.timestamp];
+    },
+    false,
+    true,
+    false
+);
+
+const blockBlockhashBuiltin = new BuiltinFunction(
+    "blockhash",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(
+            args.length === 1 && typeof args[0] === "bigint",
+            `keccak256 expects a bytes array as argument`
+        );
+        const blockNum = args[0];
+
+        if (
+            blockNum > state.block.header.number ||
+            blockNum < 0 ||
+            state.block.header.number - blockNum > 255
+        ) {
+            return [new Uint8Array(32)];
+        }
+
+        if (state.block.header.number === blockNum) {
+            return [state.block.hash()];
+        }
+
+        rtt.nyi(`blockhash(${blockNum})`);
+    },
+    false,
+    false,
+    false
+);
+
+const blockBuiltinStructDesc: BuiltinDescriptor = [
+    "block",
+    [
+        blockBaseFeeBuiltin,
+        blockBlobBaseFeeBuiltin,
+        blockChainIdBuiltin,
+        blockCoinbaseBuiltin,
+        blockGasLimitBuiltin,
+        blockNumberBuiltin,
+        blockTimestampBuiltin,
+        [[blockBlockhashBuiltin, "<0.5.0"]]
+    ]
+];
+
+const now = blockTimestampBuiltin.alias("now");
+const blockHashBuiltin = blockBlockhashBuiltin.alias("blockhash");
+
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
     [
@@ -883,7 +1008,10 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
             [keccak256v05Builtin, ">=0.5.0"]
         ],
         msgBuiltinStructDesc,
-        typeBuiltin
+        typeBuiltin,
+        blockBuiltinStructDesc,
+        [[now, "<0.7.0"]],
+        [[blockHashBuiltin, "<0.7.0"]]
     ]
 ];
 

@@ -1,17 +1,10 @@
 import { InterpreterStep } from "@ethereumjs/evm";
 import { VM } from "@ethereumjs/vm";
-import {
-    addBasicInfo,
-    addOpInfo,
-    StepVMState,
-    EventDesc,
-    DecodedEventDesc,
-    addEventInfo,
-    BaseSolTxTracer
-} from "sol-dbg";
+import { addBasicInfo, addOpInfo, StepVMState, EventDesc, BaseSolTxTracer } from "sol-dbg";
 import {
     addCallInfo,
     addCreateInfo,
+    addEventInfo,
     addExceptionInfo,
     addReturnInfo,
     CallInfo,
@@ -22,6 +15,8 @@ import {
 import { TypedTransaction } from "@ethereumjs/tx";
 import { addSnapshotInfo } from "./transformers/state_snapshot";
 import { AccountInfo } from "../../interp";
+import { ArtifactManager } from "../../interp/artifactManager";
+import { addCodeInfo, CodeInfo } from "./transformers/code";
 
 /**
  * Annotated evm step struct used for aligning traces.
@@ -31,9 +26,9 @@ export interface EVMStep extends StepVMState {
     callInfo: CallInfo | undefined;
     returnInfo: ReturnInfo | undefined;
     emittedEvent: EventDesc | undefined;
-    decodedEvent: DecodedEventDesc | undefined;
     exceptionInfo: ExceptionInfo | undefined;
     snapshot: AccountInfo | undefined;
+    codeInfo: CodeInfo;
 }
 
 interface TracerContext {
@@ -42,6 +37,10 @@ interface TracerContext {
 }
 
 export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
+    constructor() {
+        // Artifact Manager not used in this tracer
+        super(new ArtifactManager([]), { strict: false, foundryCheatcodes: false });
+    }
     async processRawTraceStep(
         vm: VM,
         step: InterpreterStep,
@@ -51,13 +50,14 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
     ): Promise<[EVMStep, TracerContext]> {
         const opInfo = addOpInfo(vm, step, {});
         const basicInfo = await addBasicInfo(vm, step, opInfo, trace);
-        const events = await addEventInfo(vm, step, basicInfo, this.artifactManager);
+        const events = await addEventInfo(vm, step, basicInfo);
         const withCreate = await addCreateInfo(vm, step, events, trace, ctx.callStack);
         const withCall = await addCallInfo(vm, step, withCreate, trace, ctx.callStack);
         const withRet = await addReturnInfo(vm, step, withCall, trace, ctx.callStack, tx);
         const withExceptions = await addExceptionInfo(vm, step, withRet, trace, ctx.callStack);
         const withSnapshot = await addSnapshotInfo(vm, step, withExceptions, trace);
+        const withCode = await addCodeInfo(vm, step, withSnapshot, trace, tx);
 
-        return [withSnapshot, ctx];
+        return [withCode, ctx];
     }
 }

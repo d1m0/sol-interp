@@ -1,4 +1,3 @@
-import { StorageDump } from "@ethereumjs/common";
 import { VM } from "@ethereumjs/vm";
 import {
     BasicStepInfo,
@@ -19,8 +18,10 @@ import { assert } from "../../../utils";
  */
 export interface ReturnInfo {
     retData: Uint8Array; // return data
-    state: StorageDump; // copy of the state before the return instruction executes
     newContract?: Address;
+    // Index of the corresponding *CALL*/CREATE* instruction to whom's context we are reverting
+    // -1 for top-level reverts
+    correspCallIdx: number;
 }
 
 export interface WithReturnInfo {
@@ -40,7 +41,11 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
 ): Promise<T & WithReturnInfo> {
     const op = state.op;
 
-    if (op.opcode !== OPCODES.STOP && op.opcode !== OPCODES.RETURN) {
+    if (
+        op.opcode !== OPCODES.STOP &&
+        op.opcode !== OPCODES.RETURN &&
+        op.opcode !== OPCODES.SELFDESTRUCT
+    ) {
         return {
             ...state,
             returnInfo: undefined
@@ -53,15 +58,24 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         (idx > 0 && isCreate(trace[idx])) ||
         (idx < 0 && (tx.to === undefined || tx.to.equals(ZERO_ADDRESS)));
 
-    const storageDump = await (vm.stateManager.dumpStorage as any)(step.address);
-
     if (op.opcode === OPCODES.STOP) {
         return {
             ...state,
             returnInfo: {
                 retData: new Uint8Array(),
-                state: storageDump,
-                newContract: isCreation ? state.address : undefined
+                newContract: isCreation ? state.address : undefined,
+                correspCallIdx: idx
+            }
+        };
+    }
+
+    if (op.opcode === OPCODES.SELFDESTRUCT) {
+        return {
+            ...state,
+            returnInfo: {
+                retData: new Uint8Array(),
+                newContract: undefined,
+                correspCallIdx: idx
             }
         };
     }
@@ -75,8 +89,8 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         ...state,
         returnInfo: {
             retData,
-            state: storageDump,
-            newContract: isCreation ? state.address : undefined
+            newContract: isCreation ? state.address : undefined,
+            correspCallIdx: idx
         }
     };
 }

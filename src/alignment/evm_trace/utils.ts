@@ -1,7 +1,10 @@
-import { BasicStepInfo, OPCODES, OpInfo } from "sol-dbg";
+import { BasicStepInfo, ImmMap, OPCODES, OpInfo } from "sol-dbg";
 import { EVMStep } from "./tracer";
-import { AccountMap } from "../../interp";
+import { AccountInfo, AccountMap } from "../../interp";
 import { assert } from "../../utils";
+import { StateManagerInterface } from "@ethereumjs/common";
+import { Address } from "@ethereumjs/util";
+import { stateManagerToAccountMap } from "./transformers";
 
 /**
  * Return true IFF the EVM runs out of gas on the given step.
@@ -51,29 +54,36 @@ export function rebuildStateFromTrace(
 
     for (let i = 0; i <= idx; i++) {
         const step = trace[i];
-        const lastStep = trace.length > 0 ? trace[trace.length - 1] : undefined;
 
         if (step.callInfo || step.createInfo || step.returnInfo) {
             assert(step.snapshot !== undefined, ``);
             state = state.set(step.address.toString(), step.snapshot);
             stateMap.set(i, state);
-        } else if (lastStep && lastStep.exceptionInfo) {
-            const oldState = stateMap.get(lastStep.exceptionInfo.correspCallIdx);
-            assert(oldState !== undefined && step.snapshot !== undefined, ``);
+        } else if (step.exceptionInfo) {
+            const oldState = stateMap.get(step.exceptionInfo.correspCallIdx);
+            assert(oldState !== undefined, ``);
             // Restore the caller contract to the recorded state right after the exception.
             // This is mostly to get the right nonce after a failed contract creation.
-            state = oldState.set(step.address.toString(), step.snapshot);
+            state = oldState;
         }
 
         // Right after SELFDESTRUCT delete the destroyed contract
-        if (
-            lastStep &&
-            lastStep.op.opcode === OPCODES.SELFDESTRUCT &&
-            lastStep.exceptionInfo === undefined
-        ) {
-            state = state.delete(lastStep.address.toString());
+        if (step && step.op.opcode === OPCODES.SELFDESTRUCT && step.exceptionInfo === undefined) {
+            state = state.delete(step.address.toString());
         }
     }
 
     return state;
+}
+
+export async function getStorageDumpFromStateManager(
+    stateManager: StateManagerInterface,
+    addresses: Iterable<Address>
+): Promise<AccountMap> {
+    assert(stateManager.dumpStorage !== undefined, ``);
+    const accounts: AccountInfo[] = [];
+    for (const addr of addresses) {
+        accounts.push(await stateManagerToAccountMap(addr, stateManager));
+    }
+    return ImmMap.fromEntries(accounts.map((acc) => [acc.address.toString(), acc]));
 }

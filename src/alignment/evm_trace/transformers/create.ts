@@ -1,4 +1,3 @@
-import { StorageDump } from "@ethereumjs/common";
 import { Address, createContractAddress, createContractAddress2 } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
 import {
@@ -21,7 +20,6 @@ export interface CreateInfo {
     msgData: Uint8Array; // msg data
     salt: Uint8Array | undefined;
     nonce: bigint; // caller nonce
-    state: StorageDump; // copy of the state before the call instruction executes
 }
 
 export interface WithCreateInfo {
@@ -69,15 +67,12 @@ export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
             ? createContractAddress(step.address, callerAccount.nonce)
             : createContractAddress2(step.address, salt as Uint8Array, msgData);
 
-    const storageDump: StorageDump = await (vm.stateManager.dumpStorage as any)(step.address);
-
     const createInfo: CreateInfo = {
         address,
         value,
         msgData,
         salt,
-        nonce: callerAccount.nonce,
-        state: storageDump
+        nonce: callerAccount.nonce
     };
 
     return {

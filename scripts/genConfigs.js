@@ -3,8 +3,11 @@ const sol = require("solc-typed-ast")
 const util = require("@ethereumjs/util");
 const { assert } = require("console");
 
+//const BASE_DIR = "test/samples/sol2maruir"
+const BASE_DIR = "test/samples/misalignment"
+
 let samples = fse
-    .readdirSync("test/samples/sol2maruir")
+    .readdirSync(BASE_DIR)
     .filter((name) => name.endsWith("config.sol"));
 //samples = ["events.config.sol"]
 
@@ -43,7 +46,7 @@ const libToAddr = new Map();
 
 (async () => {
     for (const f of samples) {
-        const fName = `test/samples/sol2maruir/${f}`
+        const fName = `${BASE_DIR}/${f}`
         console.error(fName)
         const res = await sol.compileSol(fName, "auto", undefined, [sol.CompilationOutput.ALL])
         const IRTest = res.data.contracts[fName]["__IRTest__"]

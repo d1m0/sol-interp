@@ -3,9 +3,14 @@ import { TransactionDesc, TransactionSet } from "../unit/transaction_set";
 import * as fse from "fs-extra";
 import { ppTrace } from "../../src/interp/pp";
 
+const skip = new Set([
+    "events.config.sol" // has infinite loop
+]);
+
 const sol2maruirTests: string[] = fse
     .readdirSync("test/samples/sol2maruir")
-    .filter((name) => name.endsWith("config.sol"));
+    .filter((name) => name.endsWith("config.sol"))
+    .filter((name) => !skip.has(name));
 
 const libDependencies = new Map<string, string[]>([
     ["PackedEncodingTest.config.sol", ["BytesLib"]],
