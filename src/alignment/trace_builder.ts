@@ -35,6 +35,7 @@ import {
     makeSolEventFromStep,
     makeSolMessageFromStep
 } from "./utils";
+import { AlignedTraces } from "./trace_pairs";
 
 /**
  * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
@@ -88,7 +89,7 @@ export async function buildAlignedTraces(
     blockData: BlockData,
     artifactManager: ArtifactManager,
     maxNumSteps: number | undefined = undefined
-): Promise<[AlignedTraces, AccountMap]> {
+): Promise<[AlignedTraces, AccountMap, EVMStep[]]> {
     // 1. Get the low-level trace
     const [trace, , , block, tx] = await replayEVM(initialState, txData, blockData, sender);
 
@@ -101,66 +102,7 @@ export async function buildAlignedTraces(
         block,
         maxNumSteps
     );
-    return builder.buildAlignedTraces();
-}
-
-interface BasePair {
-    type: "aligned" | "misaligned" | "no-source";
-    llTrace: EVMStep[];
-    llEndEvent: EVMObservableEvent;
-}
-
-interface AlignedPair extends BasePair {
-    type: "aligned";
-    hlTrace: BaseStep[];
-    hlEndEvent: SolObservableEvent;
-}
-
-interface MisalignedPair extends BasePair {
-    type: "misaligned";
-    hlTrace: BaseStep[];
-    hlEndEvent: SolObservableEvent;
-}
-
-interface NoSourcePair extends BasePair {
-    type: "no-source";
-}
-
-export type MatchedTracePair = [EVMStep[], BaseStep[], [EVMObservableEvent, SolObservableEvent]];
-export type UnmachedTracePair = [EVMStep[], undefined, [EVMObservableEvent, SolObservableEvent]];
-export type TracePair = AlignedPair | MisalignedPair | NoSourcePair;
-export type AlignedTraces = TracePair[];
-
-export function isAligned(p: TracePair): p is MisalignedPair {
-    return p.type === "aligned";
-}
-
-export function isMisaligned(p: TracePair): p is MisalignedPair {
-    return p.type === "misaligned";
-}
-
-export function isNoSource(p: TracePair): p is NoSourcePair {
-    return p.type === "no-source";
-}
-
-export function hasMisaligned(ps: AlignedTraces): boolean {
-    for (const p of ps) {
-        if (isMisaligned(p)) {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-export function hasNoSource(ps: AlignedTraces): boolean {
-    for (const p of ps) {
-        if (isNoSource(p)) {
-            return true;
-        }
-    }
-
-    return false;
+    return [...builder.buildAlignedTraces(), trace];
 }
 
 class MisalignmentError extends Error {
@@ -213,7 +155,7 @@ export class AlignedTraceBuilder extends Chain {
     ): void {
         this.alignedTraces.push({
             type: "aligned",
-            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEndEvent.idx + 1),
+            llTrace: this.lowLevelTrace.slice(this.lastSegmentEnd, llEndEvent.idx + 1),
             hlTrace: this.highLevelTrace,
             llEndEvent,
             hlEndEvent
@@ -226,7 +168,7 @@ export class AlignedTraceBuilder extends Chain {
     private addMisalignedSegment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): void {
         this.alignedTraces.push({
             type: "misaligned",
-            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
+            llTrace: this.lowLevelTrace.slice(this.lastSegmentEnd, llEvent.idx + 1),
             llEndEvent: llEvent,
             hlTrace: this.highLevelTrace,
             hlEndEvent: hlEvent
@@ -239,7 +181,7 @@ export class AlignedTraceBuilder extends Chain {
     private addNoSourceSegment(llEvent: EVMObservableEvent): void {
         this.alignedTraces.push({
             type: "no-source",
-            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
+            llTrace: this.lowLevelTrace.slice(this.lastSegmentEnd, llEvent.idx + 1),
             llEndEvent: llEvent
         });
 
@@ -337,7 +279,7 @@ export class AlignedTraceBuilder extends Chain {
             sol.assert(calleeFirstStep >= this.lastSegmentEnd, ``);
             this.currentLLIdx = calleeFirstStep;
 
-            if (this.currentLLIdx > this.lastSegmentEnd + 1) {
+            if (this.currentLLIdx > this.lastSegmentEnd) {
                 this.addNoSourceSegment(
                     makeEVMEventFromStep(
                         this.lowLevelTrace[this.currentLLIdx - 1],
@@ -388,7 +330,7 @@ export class AlignedTraceBuilder extends Chain {
             return 0;
         }
 
-        return this.alignedTraces[this.alignedTraces.length - 1].llEndEvent.idx;
+        return this.alignedTraces[this.alignedTraces.length - 1].llEndEvent.idx + 1;
     }
 
     /**

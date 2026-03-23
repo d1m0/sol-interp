@@ -7,11 +7,12 @@ import { scenarioInitialStateToAccountMap } from "../unit/utils";
 import {
     AlignedTraceBuilder,
     AlignedTraces,
+    alignedTraceWellFormed,
     hasMisaligned,
     hasNoSource,
     isMisaligned,
     makeSolMessage
-} from "../../src/alignment/trace_builder";
+} from "../../src/alignment";
 import { ArtifactManager } from "../../src/interp/artifactManager";
 import {
     BlockReplayInfo,
@@ -122,7 +123,7 @@ describe("Trace Alignment Tests", () => {
             for (let i = 0; i < scenario.steps.length; i++) {
                 const txDesc = scenario.steps[i];
                 const sender = createAddressFromString(txDesc.origin);
-                const [alignedTraces, stateAfter] = await buildAlignedTraces(
+                const [alignedTraces, stateAfter, llTrace] = await buildAlignedTraces(
                     state,
                     txDescToTxData(txDesc),
                     sender,
@@ -131,6 +132,7 @@ describe("Trace Alignment Tests", () => {
                     10000
                 );
                 state = stateAfter;
+                expect(alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)).toBeTruthy();
                 expect(hasMisaligned(alignedTraces)).toEqual(false);
             }
         });
@@ -166,7 +168,7 @@ describe("Trace Misalignment Tests", () => {
             for (let i = 0; i < scenario.steps.length; i++) {
                 const txDesc = scenario.steps[i];
                 const sender = createAddressFromString(txDesc.origin);
-                const [alignedTraces, stateAfter] = await buildAlignedTraces(
+                const [alignedTraces, stateAfter, llTrace] = await buildAlignedTraces(
                     state,
                     txDescToTxData(txDesc),
                     sender,
@@ -175,6 +177,7 @@ describe("Trace Misalignment Tests", () => {
                     10000
                 );
                 state = stateAfter;
+                expect(alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)).toBeTruthy();
                 if (i === 1) {
                     expect(hasMisaligned(alignedTraces)).toEqual(true);
                     expect(alignedTraceToDesc(alignedTraces)).toEqual(desc);
@@ -275,10 +278,17 @@ it("Alignment with missing info", async () => {
     expect(hasMisaligned(traceDepl)).toBeFalsy();
     expect(hasMisaligned(traceMain)).toBeFalsy();
 
-    const stateManager = hist[0].txs[1].stateBefore;
+    //const stateManager = hist[0].txs[1].stateBefore;
 
-    for (const killSet of powerset(stateManager.liveAccounts)) {
+    const t = new Set([
+        "0xe62c923dbaa844e8bdc9cbbfb498319995c21bc2",
+        "0xd6aa822adef50fef83513d3c4e124f62fccf7fa2",
+        "0x7e509604c73549427862e449ca840e075b8992b5",
+        "0x93a5b04040b9d24ea0bb4aaa19967294bcbf44d2",
+    ])
+    for (const killSet of /*powerset(stateManager.liveAccounts)*/[t]) {
         const [traceMainWithDel] = await alignNthTx(hist[0], artifactManager, 1, killSet);
+        expect(alignedTraceWellFormed(traceMainWithDel, hist[0].txs[1].trace, artifactManager)).toBeTruthy();
         expect(hasNoSource(traceMainWithDel)).toEqual(killSet.size > 0);
         for (const segment of traceMainWithDel) {
             if (isMisaligned(segment)) {

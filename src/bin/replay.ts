@@ -5,7 +5,7 @@ import { ContractInfo, PartialSolcOutput } from "sol-dbg";
 import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, makeSolMessage } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
-import { hasMisaligned } from "../alignment/trace_builder";
+import { hasMisaligned } from "../alignment";
 import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
 import { AccountMap } from "../interp";
 import * as fse from "fs-extra";
