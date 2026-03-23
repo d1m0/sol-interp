@@ -270,20 +270,18 @@ export class AlignedTraceBuilder extends Chain {
      * When we hit a context with source info, we call execMsg
      * @param msg
      */
-    execMsgNoSource(msg: SolMessage): CallResult {
-        const calleeFirstStep = this.currentLLIdx;
+    execMsgNoSource(msg: SolMessage, calleeFirstStep: number): [CallResult, number] {
         const info = this.getContractInfo(msg, this.lowLevelTrace[calleeFirstStep]);
 
         // If we have an AST, run the interpreter
         if (info !== undefined) {
             sol.assert(calleeFirstStep >= this.lastSegmentEnd, ``);
-            this.currentLLIdx = calleeFirstStep;
 
-            if (this.currentLLIdx > this.lastSegmentEnd) {
+            if (calleeFirstStep > this.lastSegmentEnd) {
                 this.addNoSourceSegment(
                     makeEVMEventFromStep(
-                        this.lowLevelTrace[this.currentLLIdx - 1],
-                        this.currentLLIdx - 1
+                        this.lowLevelTrace[calleeFirstStep - 1],
+                        calleeFirstStep - 1
                     )
                 );
 
@@ -291,21 +289,25 @@ export class AlignedTraceBuilder extends Chain {
             }
 
             sol.assert(this.highLevelTrace.length === 0, `Missed high-level steps`);
-            return this.execMsg(msg, true);
+            this.currentLLIdx = calleeFirstStep;
+            const res = this.execMsg(msg, true);
+            return [res, this.currentLLIdx];
         }
 
+        let pos = calleeFirstStep;
+
         // Seek through the ll trace
-        while (this.currentLLIdx < this.lowLevelTrace.length) {
-            const nextEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+        while (pos < this.lowLevelTrace.length) {
+            const nextEvent = findNextEvent(this.lowLevelTrace, pos);
             this.expect(nextEvent !== undefined, `Ran out of the trace`);
             const step = this.lowLevelTrace[nextEvent.idx];
-            this.currentLLIdx = nextEvent.idx + 1;
+            pos = nextEvent.idx + 1;
 
             if (nextEvent instanceof EVMEmitEvent) {
                 // Nothing to do
             } else if (nextEvent instanceof EVMCallEvent || nextEvent instanceof EVMCreateEvent) {
                 const msg = makeSolMessageFromStep(step);
-                this.execMsgNoSource(msg); // result ignored
+                [, pos] = this.execMsgNoSource(msg, pos); // result ignored
             } else {
                 this.expect(
                     nextEvent instanceof EVMReturnEvent || nextEvent instanceof EVMExceptionEvent
@@ -313,12 +315,12 @@ export class AlignedTraceBuilder extends Chain {
                 const res = makeCallResultFromStep(step);
                 this.updateStateFromPrevLLStep();
 
-                if (this.currentLLIdx === this.lowLevelTrace.length) {
+                if (pos === this.lowLevelTrace.length) {
                     // Reached end of the trace in contract without code - add a final mis-alignment segment
                     this.addNoSourceSegment(nextEvent);
                 }
 
-                return res;
+                return [res, pos];
             }
         }
 
@@ -371,7 +373,9 @@ export class AlignedTraceBuilder extends Chain {
         const info = this.getContractInfo(msg, this.lowLevelTrace[calleeStartIdx]);
 
         if (!info) {
-            return this.execMsgNoSource(msg);
+            const [res, pos] = this.execMsgNoSource(msg, this.currentLLIdx);
+            this.currentLLIdx = pos;
+            return res;
         }
 
         let res: CallResult;
@@ -519,8 +523,7 @@ export class AlignedTraceBuilder extends Chain {
         };
 
         this.addVisitor(visitor);
-        this.currentLLIdx = 0;
-        this.execMsgNoSource(this.msg);
+        this.execMsgNoSource(this.msg, 0);
 
         return [this.alignedTraces, this.state];
     }
