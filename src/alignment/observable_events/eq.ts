@@ -127,7 +127,12 @@ export function eventsMatch(
         const hlAddress = hlData.delegatingContract ? hlData.delegatingContract : hlData.to;
         const hlCodeAddress = hlData.to;
 
-        const llAccountInfo = llStep.snapshot;
+        assert(
+            llStep.snapshotInfo !== undefined && llStep.snapshotInfo.changedAccounts.length === 1,
+            ``
+        );
+        const llAccountInfo = llStep.snapshotInfo.changedAccounts[0];
+
         assert(llAccountInfo !== undefined, ``);
 
         return (
@@ -155,7 +160,12 @@ export function eventsMatch(
             }
         }
 
-        const llAccountInfo = llStep.snapshot;
+        assert(
+            llStep.snapshotInfo !== undefined && llStep.snapshotInfo.changedAccounts.length === 1,
+            ``
+        );
+        const llAccountInfo = llStep.snapshotInfo.changedAccounts[0];
+
         assert(llAccountInfo !== undefined, ``);
 
         return (
@@ -169,7 +179,12 @@ export function eventsMatch(
         const llData = llEvent.data;
         const hlData = hlEvent.data;
 
-        const llAccountInfo = llStep.snapshot;
+        assert(
+            llStep.snapshotInfo !== undefined && llStep.snapshotInfo.changedAccounts.length === 1,
+            ``
+        );
+        const llAccountInfo = llStep.snapshotInfo.changedAccounts[0];
+
         assert(llAccountInfo !== undefined, ``);
 
         return (

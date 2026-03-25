@@ -1,18 +1,24 @@
 import { StateManagerInterface, StorageDump } from "@ethereumjs/common";
 import { Address, hexToBigInt, setLengthLeft } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
-import { BasicStepInfo, Storage, OpInfo, ImmMap } from "sol-dbg";
+import { BasicStepInfo, Storage, OpInfo, ImmMap, OPCODES, wordToAddress } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import { assert } from "../../../utils";
-import { WithCreateInfo } from "./create";
+import { CreateInfo, WithCreateInfo } from "./create";
 import { WithCallInfo } from "./call";
 import { WithExceptionInfo } from "./exceptions";
 import { WithReturnInfo } from "./return";
 import { AccountInfo } from "../../../interp";
 import { RLP } from "@ethereumjs/rlp";
+import { TypedTransaction } from "@ethereumjs/tx";
+
+export interface SnapshotInfo {
+    changedAccounts: AccountInfo[];
+    deletedAccounts: Set<string>;
+}
 
 export interface WithStateSnapshot {
-    snapshot: AccountInfo | undefined;
+    snapshotInfo: SnapshotInfo | undefined;
 }
 
 type LowerStep = BasicStepInfo &
@@ -32,7 +38,7 @@ function storageDumpToStorage(dump: StorageDump): Storage {
     return ImmMap.fromEntries(entries);
 }
 
-export async function stateManagerToAccountMap(
+export async function stateManagerToAccountInfo(
     address: Address,
     stateManager: StateManagerInterface
 ): Promise<AccountInfo> {
@@ -54,34 +60,88 @@ export async function stateManagerToAccountMap(
 
 /**
  * Adds deployment info for steps that are about to deploy a contract
+ * @todo refactor this to allow multiple effects stacking in a single step.
+ *       e.g. a contract containing just selfdestruct() should have 3 changed contracts (tx sender, this, selfdestruct target) and 1 deleted (this)
  */
 export async function addSnapshotInfo<T extends object & LowerStep>(
     vm: VM,
     step: InterpreterStep,
     state: T,
-    trace: Array<T & WithStateSnapshot>
+    trace: Array<T & WithStateSnapshot>,
+    tx: TypedTransaction
 ): Promise<T & WithStateSnapshot> {
     const lastStep = trace.length > 0 ? trace[trace.length - 1] : undefined;
 
-    // Take a snapshot of the caller context after a failed call
-    if (lastStep && lastStep.exceptionInfo !== undefined) {
+    // At the first step record the states of the current contract and the caller
+    if (!lastStep) {
         return {
             ...state,
-            snapshot: await stateManagerToAccountMap(state.address, vm.stateManager)
+            snapshotInfo: {
+                changedAccounts: [
+                    await stateManagerToAccountInfo(tx.getSenderAddress(), vm.stateManager),
+                    await stateManagerToAccountInfo(state.address, vm.stateManager)
+                ],
+                deletedAccounts: new Set()
+            }
+        };
+    }
+
+    /**
+     * Right before a call/create/return take a snapshot of the currently executing context
+     */
+    if (
+        state.callInfo !== undefined ||
+        state.createInfo !== undefined ||
+        state.returnInfo !== undefined
+    ) {
+        return {
+            ...state,
+            snapshotInfo: {
+                changedAccounts: [await stateManagerToAccountInfo(state.address, vm.stateManager)],
+                deletedAccounts: new Set()
+            }
+        };
+    }
+
+    // Right after a call or create (including calls to contracts with no code, e.g. send/transfer)
+    // Take a snapshot of the caller and receiver to record the changes in balances
+    if (
+        lastStep &&
+        (lastStep.callInfo || lastStep.createInfo) &&
+        (state.depth === lastStep.depth + 1 ||
+            (lastStep.callInfo && lastStep.callInfo.callToNoCodeAccount))
+    ) {
+        const fromAddr = lastStep.address;
+        const toAddr = lastStep.callInfo
+            ? lastStep.callInfo.address
+            : (lastStep.createInfo as CreateInfo).address;
+
+        return {
+            ...state,
+            snapshotInfo: {
+                changedAccounts: [
+                    await stateManagerToAccountInfo(fromAddr, vm.stateManager),
+                    await stateManagerToAccountInfo(toAddr, vm.stateManager)
+                ],
+                deletedAccounts: new Set()
+            }
         };
     }
 
     // Otherwise take a snapshot right before calls,creates,returns and exceptions
-    if (
-        state.callInfo === undefined &&
-        state.createInfo === undefined &&
-        state.returnInfo === undefined
-    ) {
-        return { ...state, snapshot: undefined };
+    if (lastStep && lastStep.op.opcode === OPCODES.SELFDESTRUCT) {
+        const receiverArg = wordToAddress(lastStep.evmStack[lastStep.evmStack.length - 1]);
+        return {
+            ...state,
+            snapshotInfo: {
+                changedAccounts: [await stateManagerToAccountInfo(receiverArg, vm.stateManager)],
+                deletedAccounts: new Set([lastStep.address.toString()])
+            }
+        };
     }
 
     return {
         ...state,
-        snapshot: await stateManagerToAccountMap(state.address, vm.stateManager)
+        snapshotInfo: undefined
     };
 }

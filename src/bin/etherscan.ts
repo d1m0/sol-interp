@@ -25,7 +25,7 @@ export interface EtherscanSourceResponse {
     SwamSource: string;
 }
 
-class EtherscanCache extends JSONCache {
+class EtherscanCache extends JSONCache<EtherscanSourceResponse> {
     makeKey(apiKey: string, address: string): string {
         return address;
     }
@@ -85,32 +85,83 @@ function getCompilerVersion(raw: string): string {
     return m[1];
 }
 
+function tryGetInputJSON(srcStr: string): any {
+    try {
+        const jsonRes = JSON.parse(srcStr);
+        return jsonRes;
+    } catch (e) {
+        if (srcStr.startsWith("{{") && srcStr.endsWith("}}")) {
+            try {
+                const jsonRes = JSON.parse(srcStr.slice(1, -1));
+                return jsonRes;
+            } catch (e) {
+                // nothing to do
+            }
+        }
+        // nothing to do
+    }
+
+    return undefined;
+}
+
 export async function getArtifact(
     address: Address | string,
     apiKey: string
 ): Promise<[PartialSolcOutput, string, string] | undefined> {
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
+    const fileName = eInfo.ContractFileName === "" ? "dummy.sol" : eInfo.ContractFileName;
+    const settings = {
+        optimizer: {
+            enabled: eInfo.OptimizationUsed === "1",
+            runs: Number(eInfo.Runs)
+        }
+    };
+
+    const version = getCompilerVersion(eInfo.CompilerVersion);
+
     if (eInfo.SourceCode === "") {
         return undefined;
     }
 
-    try {
-        const jsonRes = JSON.parse(eInfo.SourceCode);
-        return jsonRes;
-    } catch {
-        // nothing to do
+    const inJson = tryGetInputJSON(eInfo.SourceCode);
+    if (inJson !== undefined) {
+        try {
+            const compiler = await sol.getCompilerForVersion(version, sol.CompilerKind.WASM);
+
+            assert(
+                compiler !== undefined,
+                `Couldn't find wasm compiler for version ${version} for current platform`
+            );
+
+            const data = await compiler.compile(inJson);
+            const files: sol.FileMap = new Map();
+            for (const [path, fileData] of Object.entries(inJson.sources)) {
+                assert(false, `${path},${fileData}, ${files}`);
+            }
+
+            return [data, fileName, eInfo.ContractName];
+        } catch (e: any) {
+            if (e instanceof sol.CompileFailedError) {
+                for (const failure of e.failures) {
+                    console.error(
+                        failure.compilerVersion
+                            ? `SolcJS ${failure.compilerVersion}:`
+                            : "Unknown compiler:"
+                    );
+
+                    for (const error of failure.errors) {
+                        console.error(error);
+                    }
+                }
+
+                error("Unable to compile due to errors above.");
+            }
+
+            error(e.message);
+        }
     }
 
-    const version = getCompilerVersion(eInfo.CompilerVersion);
-    const fileName = eInfo.ContractFileName === "" ? "dummy.sol" : eInfo.ContractFileName;
-
     try {
-        const settings = {
-            optimizer: {
-                enabled: eInfo.OptimizationUsed === "1",
-                runs: Number(eInfo.Runs)
-            }
-        };
         const { data, files } = await sol.compileSourceString(
             fileName,
             eInfo.SourceCode,

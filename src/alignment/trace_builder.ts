@@ -36,6 +36,7 @@ import {
     makeSolMessageFromStep
 } from "./utils";
 import { AlignedTraces } from "./trace_pairs";
+import { Hardfork } from "@ethereumjs/common";
 
 /**
  * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
@@ -88,10 +89,17 @@ export async function buildAlignedTraces(
     sender: Address,
     blockData: BlockData,
     artifactManager: ArtifactManager,
-    maxNumSteps: number | undefined = undefined
+    maxNumSteps: number | undefined = undefined,
+    forceHardfork?: Hardfork
 ): Promise<[AlignedTraces, AccountMap, EVMStep[]]> {
     // 1. Get the low-level trace
-    const [trace, , , block, tx] = await replayEVM(initialState, txData, blockData, sender);
+    const [trace, , , block, tx] = await replayEVM(
+        initialState,
+        txData,
+        blockData,
+        sender,
+        forceHardfork
+    );
 
     // 2. Interpret at the Solidity level
     const builder = new AlignedTraceBuilder(
@@ -250,15 +258,27 @@ export class AlignedTraceBuilder extends Chain {
         return [evmEvent, solEvent];
     }
 
-    private getContractInfo(msg: SolMessage, step: EVMStep): ContractInfo | undefined {
+    private getContractInfo(msg: SolMessage): ContractInfo | undefined {
         if (msg.to.equals(ZERO_ADDRESS)) {
             return this.artifactManager.getContractFromCreationBytecode(msg.data);
         }
 
-        const addr = step.codeAddress !== undefined ? step.codeAddress : step.address;
-        const acc = this.getAccount(addr);
-        this.expect(acc !== undefined, `Missing account for ${addr.toString()}`);
+        const acc = this.getAccount(msg.to);
+
+        if (acc === undefined) {
+            return undefined;
+        }
+
         return acc.contract;
+    }
+
+    private isCallToAccountWithNoCode(msg: SolMessage): boolean {
+        if (msg.to.equals(ZERO_ADDRESS)) {
+            return false;
+        }
+
+        const acc = this.getAccount(msg.to);
+        return acc === undefined || acc.deployedBytecode.length === 0;
     }
 
     /**
@@ -268,7 +288,7 @@ export class AlignedTraceBuilder extends Chain {
      * @param msg
      */
     execMsgNoSource(msg: SolMessage, calleeFirstStep: number): [CallResult, number] {
-        const info = this.getContractInfo(msg, this.lowLevelTrace[calleeFirstStep]);
+        const info = this.getContractInfo(msg);
 
         // If we have an AST, run the interpreter
         if (info !== undefined) {
@@ -290,6 +310,31 @@ export class AlignedTraceBuilder extends Chain {
             return [res, this.currentLLIdx];
         }
 
+        // Special case - handle calls to contracts with no code
+        if (this.isCallToAccountWithNoCode(msg)) {
+            const fromAccount = this.getAccount(msg.from);
+            this.expect(fromAccount !== undefined);
+
+            const reverted = fromAccount.balance < msg.value;
+
+            // This should push an empty low-level no-source trace pair and leave currentLLIdx unchanged
+            if (calleeFirstStep > 0) {
+                this.addNoSourceSegment(
+                    new EVMReturnNoContractEvent(
+                        this.currentLLIdx - 1,
+                        this.lowLevelTrace[this.currentLLIdx - 1]
+                    )
+                );
+            }
+
+            // Need to update state from the next step to catch the changed balances
+            if (0 <= calleeFirstStep && calleeFirstStep < this.lowLevelTrace.length) {
+                this.updateStateFromLLStep(calleeFirstStep);
+            }
+
+            return [{ reverted, data: new Uint8Array() }, calleeFirstStep];
+        }
+
         let pos = calleeFirstStep;
 
         // Seek through the ll trace
@@ -304,6 +349,7 @@ export class AlignedTraceBuilder extends Chain {
             } else if (nextEvent instanceof EVMCallEvent || nextEvent instanceof EVMCreateEvent) {
                 const msg = makeSolMessageFromStep(step);
                 this.addNoSourceSegment(nextEvent);
+                this.updateStateFromPrevLLStep();
                 [, pos] = this.execMsgNoSource(msg, pos); // result ignored
             } else {
                 this.expect(
@@ -367,7 +413,7 @@ export class AlignedTraceBuilder extends Chain {
         // Index of the first low-level step in the callee context
         const calleeStartIdx = this.currentLLIdx;
         const callerDepth = this.lowLevelTrace[this.currentLLIdx].depth - 1;
-        const info = this.getContractInfo(msg, this.lowLevelTrace[calleeStartIdx]);
+        const info = this.getContractInfo(msg);
 
         if (!info) {
             const [res] = this.execMsgNoSource(msg, this.currentLLIdx);

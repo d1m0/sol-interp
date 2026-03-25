@@ -3,8 +3,8 @@ const sol = require("solc-typed-ast")
 const util = require("@ethereumjs/util");
 const { assert } = require("console");
 
-//const BASE_DIR = "test/samples/sol2maruir"
-const BASE_DIR = "test/samples/misalignment"
+const BASE_DIR = "test/samples/sol2maruir"
+//const BASE_DIR = "test/samples/misalignment"
 
 let samples = fse
     .readdirSync(BASE_DIR)
@@ -55,6 +55,7 @@ const libToAddr = new Map();
         let nonce = 0;
 
         config = {
+            hardfork: "cancun",
             initialState: {
                 accounts: {
                     "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97": {

@@ -1,6 +1,13 @@
 import { InterpreterStep } from "@ethereumjs/evm";
 import { VM } from "@ethereumjs/vm";
-import { addBasicInfo, addOpInfo, StepVMState, EventDesc, BaseSolTxTracer } from "sol-dbg";
+import {
+    addBasicInfo,
+    addOpInfo,
+    StepVMState,
+    EventDesc,
+    BaseSolTxTracer,
+    TracerOpts
+} from "sol-dbg";
 import {
     addCallInfo,
     addCreateInfo,
@@ -13,8 +20,7 @@ import {
     ReturnInfo
 } from "./transformers";
 import { TypedTransaction } from "@ethereumjs/tx";
-import { addSnapshotInfo } from "./transformers/state_snapshot";
-import { AccountInfo } from "../../interp";
+import { addSnapshotInfo, SnapshotInfo } from "./transformers/state_snapshot";
 import { ArtifactManager } from "../../interp/artifactManager";
 import { addCodeInfo, CodeInfo } from "./transformers/code";
 
@@ -27,7 +33,7 @@ export interface EVMStep extends StepVMState {
     returnInfo: ReturnInfo | undefined;
     emittedEvent: EventDesc | undefined;
     exceptionInfo: ExceptionInfo | undefined;
-    snapshot: AccountInfo | undefined;
+    snapshotInfo: SnapshotInfo | undefined;
     codeInfo: CodeInfo;
 }
 
@@ -37,9 +43,9 @@ interface TracerContext {
 }
 
 export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
-    constructor() {
+    constructor(opts: TracerOpts = {}) {
         // Artifact Manager not used in this tracer
-        super(new ArtifactManager([]), { strict: false, foundryCheatcodes: false });
+        super(new ArtifactManager([]), { strict: false, foundryCheatcodes: false, ...opts });
     }
     async processRawTraceStep(
         vm: VM,
@@ -55,7 +61,7 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
         const withCall = await addCallInfo(vm, step, withCreate, trace, ctx.callStack);
         const withRet = await addReturnInfo(vm, step, withCall, trace, ctx.callStack, tx);
         const withExceptions = await addExceptionInfo(vm, step, withRet, trace, ctx.callStack);
-        const withSnapshot = await addSnapshotInfo(vm, step, withExceptions, trace);
+        const withSnapshot = await addSnapshotInfo(vm, step, withExceptions, trace, tx);
         const withCode = await addCodeInfo(vm, step, withSnapshot, trace, tx);
 
         return [withCode, ctx];

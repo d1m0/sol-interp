@@ -1,4 +1,5 @@
 {
+    "hardfork": "cancun",
     "initialState": {
         "accounts": {
             "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97": {

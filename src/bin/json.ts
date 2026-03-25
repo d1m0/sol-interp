@@ -15,7 +15,7 @@ export async function jsonCall(url: string, method: string, params: any[]): Prom
     }
 
     if (res.data.error !== undefined) {
-        throw new Error(`JSONRPC Error: ${res.data.erorr.message}`);
+        throw new Error(`JSONRPC Error: ${res.data.error.message}`);
     }
 
     if (res.data.result === undefined) {
@@ -28,17 +28,17 @@ export async function jsonCall(url: string, method: string, params: any[]): Prom
 import * as fse from "fs-extra";
 import * as path from "path";
 
-export abstract class JSONCache {
+export abstract class JSONCache<T> {
     constructor(private readonly cacheDir: string) {
         if (!fse.existsSync(cacheDir)) {
-            fse.mkdirSync(cacheDir);
+            fse.mkdirpSync(cacheDir);
         }
     }
 
     abstract makeKey(...args: any): string;
     abstract make(...args: any): any;
 
-    async get(...args: any): Promise<any> {
+    async get(...args: any): Promise<T> {
         const key = this.makeKey(...args);
 
         const cachedFilePath = path.join(this.cacheDir, key + ".json");

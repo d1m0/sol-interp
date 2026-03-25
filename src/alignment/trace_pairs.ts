@@ -1,3 +1,4 @@
+import { ContractInfo } from "sol-dbg";
 import { BaseStep } from "../interp";
 import { ArtifactManager } from "../interp/artifactManager";
 import { EVMStep } from "./evm_trace";
@@ -73,7 +74,8 @@ export function hasNoSource(ps: AlignedTraces): boolean {
 export function alignedTraceWellFormed(
     t: AlignedTraces,
     llTrace: EVMStep[],
-    artifactManager: ArtifactManager
+    artifactManager: ArtifactManager,
+    addrToInfoMap: Map<string, ContractInfo> | undefined = undefined
 ): boolean {
     const llTraceFromAligned: EVMStep[] = [];
     for (const segment of t) {
@@ -99,9 +101,16 @@ export function alignedTraceWellFormed(
         }
 
         const step = segment.llTrace[0];
-        const info = step.codeInfo.isCreation
-            ? artifactManager.getContractFromCreationBytecode(step.codeInfo.code)
-            : artifactManager.getContractFromDeployedBytecode(step.codeInfo.code);
+        let info: ContractInfo | undefined;
+
+        if (addrToInfoMap) {
+            const addr = step.codeAddress !== undefined ? step.codeAddress : step.address;
+            info = addrToInfoMap.get(addr.toString());
+        } else {
+            info = step.codeInfo.isCreation
+                ? artifactManager.getContractFromCreationBytecode(step.codeInfo.code)
+                : artifactManager.getContractFromDeployedBytecode(step.codeInfo.code);
+        }
 
         const hasAST = info !== undefined && info.ast !== undefined;
 

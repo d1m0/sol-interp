@@ -1,13 +1,14 @@
 import { TypedTxData } from "@ethereumjs/tx";
 import { AccountMap } from "../interp";
 import { JSONCache, jsonCall } from "./json";
-import { ImmMap } from "sol-dbg";
+import { ImmMap, toHexString } from "sol-dbg";
 import { Address, createAddressFromString, hexToBigInt, hexToBytes } from "@ethereumjs/util";
 import { BlockData } from "@ethereumjs/block";
+import { join } from "path";
 
 interface QuicknodeAccountDesc {
     balance: `0x${string}`;
-    nonce: number;
+    nonce: number | undefined;
     code: `0x${string}` | undefined;
     codeHash: `0x${string}` | undefined;
     storage: { [key: `0x${string}`]: `0x${string}` } | undefined;
@@ -88,7 +89,7 @@ function makeAccountMap(qState: QuicknodeStateDesc): AccountMap {
                           ])
                 ),
                 balance: hexToBigInt(accDesc.balance),
-                nonce: BigInt(accDesc.nonce)
+                nonce: BigInt(accDesc.nonce === undefined ? 0n : accDesc.nonce)
             }
         ])
     );
@@ -144,37 +145,74 @@ export interface QuicknodeReplayInfo {
     preState: QuicknodeStateDesc;
 }
 
-class QuicknodeCache extends JSONCache {
-    makeKey(endpoint: string, txHash: string): string {
-        return txHash;
+class QuicknodeBlockNoTx extends JSONCache<QuicknodeBlock> {
+    constructor(basePath: string) {
+        super(join(basePath, "blocks_wo_txs"));
     }
-    async make(endpoint: string, txHash: string): Promise<QuicknodeReplayInfo> {
-        const qTxData = await jsonCall(endpoint, "eth_getTransactionByHash", [txHash]);
-        const qBlockData = await jsonCall(endpoint, "eth_getBlockByNumber", [
-            qTxData.blockNumber,
-            false
-        ]);
-        const qPreState = await jsonCall(endpoint, "debug_traceTransaction", [
+    makeKey(endpoint: string, blockNum: number): string {
+        return `${blockNum}`;
+    }
+    async make(endpoint: string, blockNum: number): Promise<QuicknodeBlock> {
+        const qBlockData = await jsonCall(endpoint, "eth_getBlockByNumber", [blockNum, false]);
+        return qBlockData;
+    }
+}
+
+class QuicknodeBlockWithTxs extends JSONCache<QuicknodeBlock> {
+    constructor(basePath: string) {
+        super(join(basePath, "blocks_with_txs"));
+    }
+
+    makeKey(endpoint: string, blockNum: number): string {
+        return `${blockNum}`;
+    }
+    async make(endpoint: string, blockNum: number): Promise<QuicknodeBlock> {
+        return await jsonCall(endpoint, "eth_getBlockByNumber", [toHexString(blockNum), true]);
+    }
+}
+
+class QuicknodeTxs extends JSONCache<QuicknodeTransaction> {
+    constructor(basePath: string) {
+        super(join(basePath, "txs"));
+    }
+
+    makeKey(endpoint: string, txHash: string): string {
+        return `${txHash}`;
+    }
+    async make(endpoint: string, txHash: string): Promise<QuicknodeTransaction> {
+        return await jsonCall(endpoint, "eth_getTransactionByHash", [txHash]);
+    }
+}
+
+class QuicknodePreState extends JSONCache<QuicknodeStateDesc> {
+    constructor(basePath: string) {
+        super(join(basePath, "txs_pre_state"));
+    }
+
+    makeKey(endpoint: string, blockNum: number): string {
+        return `${blockNum}`;
+    }
+    async make(endpoint: string, txHash: string): Promise<QuicknodeTransaction> {
+        return await jsonCall(endpoint, "debug_traceTransaction", [
             txHash,
             { tracer: "prestateTracer" }
         ]);
-
-        return {
-            block: qBlockData,
-            tx: qTxData,
-            preState: qPreState
-        };
     }
 }
 
 const QUICKNODE_CACHE_DIR = ".quicknode_cache/";
-const qCache = new QuicknodeCache(QUICKNODE_CACHE_DIR);
+const qBlocksNoTx = new QuicknodeBlockNoTx(QUICKNODE_CACHE_DIR);
+const qBlocksWithTx = new QuicknodeBlockWithTxs(QUICKNODE_CACHE_DIR);
+const qTxs = new QuicknodeTxs(QUICKNODE_CACHE_DIR);
+const qPreState = new QuicknodePreState(QUICKNODE_CACHE_DIR);
 
 export interface ReplayInfo {
     block: BlockData;
     tx: TypedTxData;
     preState: AccountMap;
     sender: Address;
+    blockHash: string;
+    txHash: string;
 }
 
 /**
@@ -183,11 +221,41 @@ export interface ReplayInfo {
  * @param txHash
  */
 export async function getTXReplayInfo(endpoint: string, txHash: string): Promise<ReplayInfo> {
-    const rawData: QuicknodeReplayInfo = await qCache.get(endpoint, txHash);
+    const tx = await qTxs.get(endpoint, txHash);
+    const block = await qBlocksNoTx.get(endpoint, tx.blockNumber);
+    const preState = await qPreState.get(endpoint, txHash);
     return {
-        block: makeBlockData(rawData.block),
-        tx: makeTxData(rawData.tx),
-        preState: makeAccountMap(rawData.preState),
-        sender: createAddressFromString(rawData.tx.from)
+        block: makeBlockData(block),
+        tx: makeTxData(tx),
+        preState: makeAccountMap(preState),
+        sender: createAddressFromString(tx.from),
+        blockHash: tx.blockHash,
+        txHash: tx.hash
     };
+}
+
+/**
+ * Get sufficient info from the given Quicknode `endpoint` to replay all transactions in the given `blockNum`
+ * @param endpoint
+ * @param txHash
+ */
+export async function getBlockReplayInfo(
+    endpoint: string,
+    blockNum: number
+): Promise<ReplayInfo[]> {
+    const res: ReplayInfo[] = [];
+    const blockData = await qBlocksWithTx.get(endpoint, blockNum);
+    const block = makeBlockData(blockData);
+    for (const tx of blockData.transactions) {
+        const preState = await qPreState.get(endpoint, tx.hash);
+        res.push({
+            block,
+            tx: makeTxData(tx),
+            preState: makeAccountMap(preState),
+            sender: createAddressFromString(tx.from),
+            blockHash: tx.blockHash,
+            txHash: tx.hash
+        });
+    }
+    return res;
 }

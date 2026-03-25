@@ -315,14 +315,20 @@ export class ContractScope extends BaseScope {
         }
 
         const contractInfo = artifactManager.getContractInfo(contract);
-        sol.assert(contractInfo !== undefined && contractInfo.deployedBytecode !== undefined, ``);
-        for (const v of immVars) {
-            const ref = contractInfo.deployedBytecode.immutableReferences.get(v.id);
-            sol.assert(ref !== undefined && ref.length >= 1, ``);
+        sol.assert(contractInfo !== undefined, ``);
 
-            const type = typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory);
-            declToView.set(v, new CodeView(type, BigInt(ref[0].start)));
-            defTypes.set(v, type);
+        // Note: Its possible to get here with no deployedBytecode during gatherConstants
+        // when called on an abstract base contract. In those cases we don't expect the
+        // interpreter to ever reference immutable vars as part of constant evaluation
+        if (contractInfo.deployedBytecode !== undefined) {
+            for (const v of immVars) {
+                const ref = contractInfo.deployedBytecode.immutableReferences.get(v.id);
+                sol.assert(ref !== undefined && ref.length >= 1, ``);
+
+                const type = typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory);
+                declToView.set(v, new CodeView(type, BigInt(ref[0].start)));
+                defTypes.set(v, type);
+            }
         }
 
         super(`<contract ${contract.name}>`, defTypes, state, _next);

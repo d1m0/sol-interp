@@ -8,7 +8,7 @@ import {
 import { AccountMap } from "../../interp/env";
 import { createTx, TypedTransaction, TypedTxData } from "@ethereumjs/tx";
 import { Block, BlockData, createBlock } from "@ethereumjs/block";
-import { Common, Hardfork, Mainnet, StateManagerInterface } from "@ethereumjs/common";
+import { Common, Hardfork, StateManagerInterface } from "@ethereumjs/common";
 import { MerkleStateManager } from "@ethereumjs/statemanager";
 import { RunTxResult } from "@ethereumjs/vm";
 import { EVMStep, EVMTracer } from "./tracer";
@@ -16,6 +16,7 @@ import { BasicStepInfo, ImmMap, OPCODES, OpInfo } from "sol-dbg";
 import { WithExceptionInfo } from "./transformers";
 import { isCall, isCreate } from "./utils";
 import { assert } from "../../utils";
+import { getCommonForBlock, getCommon } from "sol-dbg/dist/debug/tracers/common";
 
 /**
  * Build a `MerkleStateManager` corresponding to the provided `initialState`.
@@ -56,10 +57,6 @@ async function makeStateManager(initialState: AccountMap): Promise<MerkleStateMa
     return state;
 }
 
-export function getCommon(): Common {
-    return new Common({ chain: Mainnet, hardfork: Hardfork.Cancun });
-}
-
 function makeFakeTransaction(
     txData: TypedTxData,
     sender: Address,
@@ -83,14 +80,17 @@ export interface EVMReplayDesc {
     block: Block;
     initialState?: StateDesc;
     txs: TypedTransaction[];
+    hardfork?: Hardfork;
 }
 
 export async function makeEVMReplayDesc(
     blockData: BlockData,
     txDatas: Array<[Address, TypedTxData]>,
-    initialState: AccountMap
+    initialState: AccountMap,
+    hardfork?: Hardfork
 ): Promise<EVMReplayDesc> {
-    const common = getCommon();
+    const common: Common =
+        hardfork === undefined ? getCommonForBlock(blockData) : getCommon(hardfork);
     const block = createBlock(blockData, { common });
     const stateManager = await makeStateManager(initialState);
     const liveAccounts = new Set([...initialState.entries()].map((t) => t[0]));
@@ -104,7 +104,8 @@ export async function makeEVMReplayDesc(
             state: stateManager,
             liveAccounts
         },
-        txs
+        txs,
+        hardfork
     };
 }
 
@@ -194,7 +195,7 @@ export class EVMReplay {
             };
 
             for (const tx of info.txs) {
-                const tracer = new EVMTracer();
+                const tracer = new EVMTracer(info.hardfork ? { forceHardfork: info.hardfork } : {});
                 const [trace, result, stateAfter] = await tracer.debugTx(
                     tx,
                     info.block,
@@ -239,15 +240,17 @@ export async function replayEVM(
     initialState: AccountMap,
     txData: TypedTxData,
     blockData: BlockData,
-    sender: Address
+    sender: Address,
+    forceHardfork?: Hardfork
 ): Promise<[EVMStep[], RunTxResult, StateManagerInterface, Block, TypedTransaction]> {
-    const common = getCommon();
+    const common: Common =
+        forceHardfork !== undefined ? getCommon(forceHardfork) : getCommonForBlock(blockData);
     const tx = makeFakeTransaction(txData, sender, common);
 
     const block = createBlock(blockData, { common });
     const stateManager = await makeStateManager(initialState);
 
-    const tracer = new EVMTracer();
+    const tracer = new EVMTracer(forceHardfork ? { forceHardfork } : {});
     const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager, {
         callStack: [-1]
     });

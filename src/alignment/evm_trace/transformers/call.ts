@@ -22,6 +22,7 @@ export interface CallInfo {
     gas: bigint; // gas forwarded
     msgData: Uint8Array; // msg data
     nonce: bigint; // caller nonce
+    callToNoCodeAccount: boolean; // call to an account with no code
 }
 
 export interface WithCallInfo {
@@ -65,6 +66,8 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     const address = op.opcode === OPCODES.DELEGATECALL ? state.address : receiverArg;
     const codeAddress = receiverArg;
 
+    const receiverCode = await vm.stateManager.getCode(receiverArg);
+
     const gas = bigEndianBufToBigint(state.evmStack[stackTop]);
     let value = 0n;
 
@@ -85,7 +88,8 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
         value,
         gas,
         msgData,
-        nonce: callerAccount.nonce
+        nonce: callerAccount.nonce,
+        callToNoCodeAccount: receiverCode.length === 0
     };
 
     return {

@@ -22,7 +22,8 @@ import {
     StateDesc
 } from "../../src/alignment/evm_trace";
 import { assert } from "../../src";
-import { stateManagerToAccountMap } from "../../src/alignment/evm_trace/transformers";
+import { stateManagerToAccountInfo } from "../../src/alignment/evm_trace/transformers";
+import { Hardfork } from "@ethereumjs/common";
 
 const misalignmentSamples: Array<[string, any]> = [
     [
@@ -47,7 +48,8 @@ export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMRepla
     return makeEVMReplayDesc(
         block,
         scenario.steps.map((step) => [createAddressFromString(step.origin), txDescToTxData(step)]),
-        scenarioInitialStateToAccountMap(scenario.initialState)
+        scenarioInitialStateToAccountMap(scenario.initialState),
+        scenario.hardfork as Hardfork | undefined
     );
 }
 
@@ -96,7 +98,8 @@ describe("Trace Alignment Tests", () => {
                     sender,
                     txDescToBlockData(txDesc),
                     artifactManager,
-                    10000
+                    10000,
+                    scenario.hardfork as Hardfork | undefined
                 );
                 state = stateAfter;
                 expect(
@@ -146,12 +149,16 @@ describe("Trace Misalignment Tests", () => {
                     sender,
                     txDescToBlockData(txDesc),
                     artifactManager,
-                    10000
+                    10000,
+                    scenario.hardfork as Hardfork | undefined
                 );
+
                 state = stateAfter;
+
                 expect(
                     alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)
                 ).toBeTruthy();
+
                 if (i === 1) {
                     expect(hasMisaligned(alignedTraces)).toEqual(true);
                     expect(alignedTraceToDesc(alignedTraces)).toEqual(desc);
@@ -164,7 +171,7 @@ describe("Trace Misalignment Tests", () => {
 async function stateDescToAccountMap(state: StateDesc): Promise<AccountMap> {
     const accounts: AccountInfo[] = [];
     for (const addr of state.liveAccounts) {
-        accounts.push(await stateManagerToAccountMap(createAddressFromString(addr), state.state));
+        accounts.push(await stateManagerToAccountInfo(createAddressFromString(addr), state.state));
     }
 
     return ImmMap.fromEntries(accounts.map((acc) => [acc.address.toString(), acc]));

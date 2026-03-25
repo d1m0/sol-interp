@@ -4,7 +4,7 @@ import { AccountInfo, AccountMap } from "../../interp";
 import { assert } from "../../utils";
 import { StateManagerInterface } from "@ethereumjs/common";
 import { Address } from "@ethereumjs/util";
-import { stateManagerToAccountMap } from "./transformers";
+import { stateManagerToAccountInfo } from "./transformers";
 
 /**
  * Return true IFF the EVM runs out of gas on the given step.
@@ -55,11 +55,7 @@ export function rebuildStateFromTrace(
     for (let i = 0; i <= idx; i++) {
         const step = trace[i];
 
-        if (step.callInfo || step.createInfo || step.returnInfo) {
-            assert(step.snapshot !== undefined, ``);
-            state = state.set(step.address.toString(), step.snapshot);
-            stateMap.set(i, state);
-        } else if (step.exceptionInfo) {
+        if (step.exceptionInfo) {
             const oldState = stateMap.get(step.exceptionInfo.correspCallIdx);
             assert(oldState !== undefined, ``);
             // Restore the caller contract to the recorded state right after the exception.
@@ -67,9 +63,16 @@ export function rebuildStateFromTrace(
             state = oldState;
         }
 
-        // Right after SELFDESTRUCT delete the destroyed contract
-        if (step && step.op.opcode === OPCODES.SELFDESTRUCT && step.exceptionInfo === undefined) {
-            state = state.delete(step.address.toString());
+        if (step.snapshotInfo) {
+            for (const changedAcc of step.snapshotInfo.changedAccounts) {
+                state = state.set(changedAcc.address.toString(), changedAcc);
+            }
+
+            for (const deletedAcc of step.snapshotInfo.deletedAccounts) {
+                state = state.delete(deletedAcc);
+            }
+
+            stateMap.set(i, state);
         }
     }
 
@@ -83,7 +86,7 @@ export async function getStorageDumpFromStateManager(
     assert(stateManager.dumpStorage !== undefined, ``);
     const accounts: AccountInfo[] = [];
     for (const addr of addresses) {
-        accounts.push(await stateManagerToAccountMap(addr, stateManager));
+        accounts.push(await stateManagerToAccountInfo(addr, stateManager));
     }
     return ImmMap.fromEntries(accounts.map((acc) => [acc.address.toString(), acc]));
 }

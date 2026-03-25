@@ -2,7 +2,12 @@ import { Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
 import { makeStateForAccount } from "../state";
 import { Interpreter } from "../interp";
 import { ArtifactManager } from "../artifactManager";
-import { Address, createContractAddress, createContractAddress2 } from "@ethereumjs/util";
+import {
+    Address,
+    createAddressFromString,
+    createContractAddress,
+    createContractAddress2
+} from "@ethereumjs/util";
 import { InterpVisitor } from "../visitors";
 import { ppAccount } from "../pp";
 import { AccountInfo, CallResult, EnvInterface, AccountMap, SolMessage } from "./types";
@@ -56,6 +61,22 @@ export class Chain implements EnvInterface {
                   balance: val.balance,
                   nonce: val.nonce
               };
+    }
+
+    getOrMakeAccount(address: string | Address): AccountInfo {
+        const acc = this.getAccount(address);
+        if (acc !== undefined) {
+            return acc;
+        }
+
+        return {
+            address: address instanceof Address ? address : createAddressFromString(address),
+            contract: undefined,
+            deployedBytecode: new Uint8Array(),
+            storage: ImmMap.fromEntries([]),
+            balance: 0n,
+            nonce: 0n
+        };
     }
 
     setAccount(address: string | Address, account: AccountInfo): void {
