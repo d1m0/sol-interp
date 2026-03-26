@@ -10,6 +10,7 @@ import { error, getExecutedAddresses, tracerStorageToStorageDump } from "./utils
 import { AccountMap } from "../interp";
 import * as fse from "fs-extra";
 import { join, normalize } from "path";
+import { dump, record } from "./stats";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -59,6 +60,7 @@ function addArtifactToAccountMap(
         "Dump the sources for any contracts in the given directory."
     );
     program.option("--max-num-steps <max-num-steps>", "Maximum Number of steps", "1000000000");
+    program.option("--stats <stats-file>", "Path to a file in which to dump stats");
 
     program.parse(process.argv);
     const opts = program.opts();
@@ -84,67 +86,84 @@ function addArtifactToAccountMap(
     }
 
     for (const txReplayInfo of replayInfos) {
-        console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
+        try {
+            console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
+            record(`trace_replay_attempt`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
 
-        const [trace, , , block, evmTx] = await replayEVM(
-            txReplayInfo.preState,
-            txReplayInfo.tx,
-            txReplayInfo.block,
-            txReplayInfo.sender
-        );
-        const addrsTouched = getExecutedAddresses(trace);
-        const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
-        const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
-        const artifactManager = new ArtifactManager(artifacts);
+            const [trace, , , block, evmTx] = await replayEVM(
+                txReplayInfo.preState,
+                txReplayInfo.tx,
+                txReplayInfo.block,
+                txReplayInfo.sender
+            );
+            const addrsTouched = getExecutedAddresses(trace);
+            const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
+            const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
+            const artifactManager = new ArtifactManager(artifacts);
 
-        const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
-        addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
+            const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
+            addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
 
-        if (opts.dumpSources) {
-            const srcBase = opts.dumpSources;
-            fse.mkdirpSync(srcBase);
-            for (const [addr, [artifact]] of addrToContract.entries()) {
-                const addrBase = join(srcBase, addr);
-                fse.mkdirpSync(addrBase);
-                for (const [file, source] of Object.entries(artifact.sources)) {
-                    if (source.contents === undefined) {
-                        continue;
+            if (opts.dumpSources) {
+                const srcBase = opts.dumpSources;
+                fse.mkdirpSync(srcBase);
+                for (const [addr, [artifact]] of addrToContract.entries()) {
+                    const addrBase = join(srcBase, addr);
+                    fse.mkdirpSync(addrBase);
+                    for (const [file, source] of Object.entries(artifact.sources)) {
+                        if (source.contents === undefined) {
+                            continue;
+                        }
+                        const filePath = join(addrBase, normalize(file));
+                        fse.writeFileSync(filePath, source.contents);
                     }
-                    const filePath = join(addrBase, normalize(file));
-                    fse.writeFileSync(filePath, source.contents);
                 }
             }
+
+            const builder = new AlignedTraceBuilder(
+                artifactManager,
+                interpPreState,
+                trace,
+                makeSolMessage(evmTx),
+                block,
+                Number(opts.maxNumSteps)
+            );
+
+            const [alignedTraces] = builder.buildAlignedTraces();
+
+            const addrToInfoMap = new Map<string, ContractInfo>(
+                [...addrToContract.entries()].map(([strAddr, [, contractId]]) => [
+                    strAddr,
+                    artifactManager
+                        .contracts()
+                        .filter((ci) => contractId === `${ci.fileName}:${ci.contractName}`)[0]
+                ])
+            );
+            const wellFormed = alignedTraceWellFormed(
+                alignedTraces,
+                trace,
+                artifactManager,
+                addrToInfoMap
+            );
+
+            if (!wellFormed) {
+                record(`trace_mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            }
+            if (hasMisaligned(alignedTraces)) {
+                record(`trace_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+                console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
+            } else {
+                record(`trace_no_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            }
+        } catch (e) {
+            record(`${(e as any).constructor.name}:${(e as any).message}`, [
+                txReplayInfo.blockHash,
+                txReplayInfo.txHash
+            ]);
         }
+    }
 
-        const builder = new AlignedTraceBuilder(
-            artifactManager,
-            interpPreState,
-            trace,
-            makeSolMessage(evmTx),
-            block,
-            Number(opts.maxNumSteps)
-        );
-
-        const [alignedTraces] = builder.buildAlignedTraces();
-
-        const addrToInfoMap = new Map<string, ContractInfo>(
-            [...addrToContract.entries()].map(([strAddr, [, contractId]]) => [
-                strAddr,
-                artifactManager
-                    .contracts()
-                    .filter((ci) => contractId === `${ci.fileName}:${ci.contractName}`)[0]
-            ])
-        );
-        const wellFormed = alignedTraceWellFormed(
-            alignedTraces,
-            trace,
-            artifactManager,
-            addrToInfoMap
-        );
-
-        if (!wellFormed) {
-            console.error(`Trace mallformed!`);
-        }
-        console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
+    if (opts.stats) {
+        dump(opts.stats);
     }
 })();

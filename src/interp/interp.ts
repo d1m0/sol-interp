@@ -3146,7 +3146,11 @@ export class Interpreter {
             const evt = expr.vReferencedDeclaration;
             const args = expr.vArguments.map((arg) => this.evalNP(arg, state));
 
-            const lowLevelEvent = buildEvent(evt, args, state);
+            const formalArgTs = evt.vParameters.vParameters.map((p) =>
+                this.varDeclToRuntimeType(p)
+            );
+            const castedArgs = this.castNTo(args, formalArgTs, state);
+            const lowLevelEvent = buildEvent(evt, castedArgs, state);
 
             for (const v of this.visitors) {
                 v.emit(this, state, lowLevelEvent);
@@ -3523,6 +3527,10 @@ export class Interpreter {
 
         if (baseVal instanceof Uint8Array && expr.memberName === "length") {
             return BigInt(baseVal.length);
+        }
+
+        if (baseVal instanceof MsgDataView && expr.memberName === "length") {
+            return BigInt(getMsg(state).length);
         }
 
         if (baseVal instanceof DefValue) {

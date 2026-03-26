@@ -4,7 +4,8 @@ import axios from "axios";
 import * as sol from "solc-typed-ast";
 import { JSONCache } from "./json";
 import { PartialSolcOutput } from "sol-dbg";
-import { addSourcesToResult, error } from "./utils";
+import { addSourcesToResult } from "./utils";
+import { record } from "./stats";
 
 export interface EtherscanSourceResponse {
     ABI: string;
@@ -117,7 +118,16 @@ export async function getArtifact(
         }
     };
 
-    const version = getCompilerVersion(eInfo.CompilerVersion);
+    let version;
+    try {
+        version = getCompilerVersion(eInfo.CompilerVersion);
+    } catch (e) {
+        record(
+            `etherscan_bad_compiler_version:${eInfo.CompilerVersion}`,
+            address instanceof Address ? address.toString() : address
+        );
+        throw new Error("etherscan_bad_compiler_version");
+    }
 
     if (eInfo.SourceCode === "") {
         return undefined;
@@ -153,11 +163,9 @@ export async function getArtifact(
                         console.error(error);
                     }
                 }
-
-                error("Unable to compile due to errors above.");
             }
 
-            error(e.message);
+            throw e;
         }
     }
 
@@ -187,10 +195,11 @@ export async function getArtifact(
                 }
             }
 
-            error("Unable to compile due to errors above.");
+            //error("Unable to compile due to errors above.");
         }
 
-        error(e.message);
+        //error(e.message);
+        throw e;
     }
 }
 
