@@ -29,7 +29,12 @@ import * as fse from "fs-extra";
 import * as path from "path";
 
 export abstract class JSONCache<T> {
-    constructor(private readonly cacheDir: string) {
+    lastTime!: number;
+
+    constructor(
+        private readonly cacheDir: string,
+        private readonly throttleReqPerSec?: number
+    ) {
         if (!fse.existsSync(cacheDir)) {
             fse.mkdirpSync(cacheDir);
         }
@@ -46,6 +51,19 @@ export abstract class JSONCache<T> {
             return fse.readJsonSync(cachedFilePath);
         }
 
+        if (this.throttleReqPerSec !== undefined) {
+            const minDelta = 1000 / this.throttleReqPerSec;
+            const time = Date.now();
+
+            if (this.lastTime !== undefined) {
+                const elapsed = time - this.lastTime;
+                if (elapsed < minDelta) {
+                    await new Promise((r) => setTimeout(r, minDelta - elapsed));
+                }
+            }
+
+            this.lastTime = time;
+        }
         let res = this.make(...args);
 
         if (res instanceof Promise) {

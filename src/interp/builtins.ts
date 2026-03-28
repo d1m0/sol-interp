@@ -43,7 +43,13 @@ import {
     memStringT,
     stringT
 } from "./utils";
-import { Address, bytesToUtf8, concatBytes } from "@ethereumjs/util";
+import {
+    Address,
+    bytesToUtf8,
+    concatBytes,
+    createAddressFromPublicKey,
+    ecrecover
+} from "@ethereumjs/util";
 import { decode, encode, encodePacked, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
@@ -990,6 +996,31 @@ const blockBuiltinStructDesc: BuiltinDescriptor = [
     ]
 ];
 
+const ecrecoverBuiltin = new BuiltinFunction(
+    "ecrecover",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(
+            args.length === 4 &&
+                args[0] instanceof Uint8Array &&
+                typeof args[1] === "bigint" &&
+                args[2] instanceof Uint8Array &&
+                args[3] instanceof Uint8Array,
+            `ecrecover expects (bytes32 hash, uint8 v, bytes32 r, bytes32 s)`
+        );
+
+        const [hash, v, r, s] = args;
+        interp.expect(rtt.fits(v, rtt.uint8), `v must be a uint8`);
+
+        const res = ecrecover(hash, v, r, s);
+
+        return [createAddressFromPublicKey(res)];
+    },
+    false,
+    false,
+    false
+);
+
 const now = blockTimestampBuiltin.alias("now");
 const blockHashBuiltin = blockBlockhashBuiltin.alias("blockhash");
 
@@ -1011,7 +1042,8 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         typeBuiltin,
         blockBuiltinStructDesc,
         [[now, "<0.7.0"]],
-        [[blockHashBuiltin, "<0.7.0"]]
+        [[blockHashBuiltin, "<0.7.0"]],
+        ecrecoverBuiltin
     ]
 ];
 

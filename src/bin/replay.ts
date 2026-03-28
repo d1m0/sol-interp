@@ -6,7 +6,7 @@ import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, alignedTraceWellFormed, makeSolMessage } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
 import { hasMisaligned } from "../alignment";
-import { error, getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
+import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
 import { AccountMap } from "../interp";
 import * as fse from "fs-extra";
 import { join, normalize } from "path";
@@ -41,6 +41,84 @@ function addArtifactToAccountMap(
     }
 }
 
+async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
+    try {
+        console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
+        record(`trace_replay_attempt`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+
+        const [trace, , , block, evmTx] = await replayEVM(
+            txReplayInfo.preState,
+            txReplayInfo.tx,
+            txReplayInfo.block,
+            txReplayInfo.sender
+        );
+        const addrsTouched = getExecutedAddresses(trace);
+        const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
+        const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
+        const artifactManager = new ArtifactManager(artifacts);
+
+        const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
+        addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
+
+        if (opts.dumpSources) {
+            const srcBase = opts.dumpSources;
+            fse.mkdirpSync(srcBase);
+            for (const [addr, [artifact]] of addrToContract.entries()) {
+                const addrBase = join(srcBase, addr);
+                fse.mkdirpSync(addrBase);
+                for (const [file, source] of Object.entries(artifact.sources)) {
+                    if (source.contents === undefined) {
+                        continue;
+                    }
+                    const filePath = join(addrBase, normalize(file));
+                    fse.writeFileSync(filePath, source.contents);
+                }
+            }
+        }
+
+        const builder = new AlignedTraceBuilder(
+            artifactManager,
+            interpPreState,
+            trace,
+            makeSolMessage(evmTx),
+            block,
+            Number(opts.maxNumSteps)
+        );
+
+        const [alignedTraces] = builder.buildAlignedTraces();
+
+        const addrToInfoMap = new Map<string, ContractInfo>(
+            [...addrToContract.entries()].map(([strAddr, [, contractId]]) => [
+                strAddr,
+                artifactManager
+                    .contracts()
+                    .filter((ci) => contractId === `${ci.fileName}:${ci.contractName}`)[0]
+            ])
+        );
+        const wellFormed = alignedTraceWellFormed(
+            alignedTraces,
+            trace,
+            artifactManager,
+            addrToInfoMap
+        );
+
+        if (!wellFormed) {
+            record(`trace_mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        }
+        if (hasMisaligned(alignedTraces)) {
+            record(`trace_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
+        } else {
+            record(`trace_no_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        }
+    } catch (e) {
+        record(`${(e as any).constructor.name}:${(e as any).message}`, [
+            txReplayInfo.blockHash,
+            txReplayInfo.txHash
+        ]);
+    }
+}
+
 (async () => {
     const program = new Command();
 
@@ -65,101 +143,20 @@ function addArtifactToAccountMap(
     program.parse(process.argv);
     const opts = program.opts();
 
-    const replayInfos: ReplayInfo[] = [];
-
     if (opts.txHashes) {
         for (const hash of opts.txHashes) {
-            replayInfos.push(await getTXReplayInfo(opts.quicknodeEndpoint, hash));
+            await replayTX(await getTXReplayInfo(opts.quicknodeEndpoint, hash), opts);
         }
     }
 
     if (opts.blockNums) {
         for (const blockNum of opts.blockNums) {
-            replayInfos.push(
-                ...(await getBlockReplayInfo(opts.quicknodeEndpoint, Number(blockNum)))
-            );
-        }
-    }
-
-    if (replayInfos.length === 0) {
-        error(`Need to specify at least one of --tx-hashes and --block-nums`);
-    }
-
-    for (const txReplayInfo of replayInfos) {
-        try {
-            console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
-            record(`trace_replay_attempt`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-
-            const [trace, , , block, evmTx] = await replayEVM(
-                txReplayInfo.preState,
-                txReplayInfo.tx,
-                txReplayInfo.block,
-                txReplayInfo.sender
-            );
-            const addrsTouched = getExecutedAddresses(trace);
-            const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
-            const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
-            const artifactManager = new ArtifactManager(artifacts);
-
-            const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
-            addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
-
-            if (opts.dumpSources) {
-                const srcBase = opts.dumpSources;
-                fse.mkdirpSync(srcBase);
-                for (const [addr, [artifact]] of addrToContract.entries()) {
-                    const addrBase = join(srcBase, addr);
-                    fse.mkdirpSync(addrBase);
-                    for (const [file, source] of Object.entries(artifact.sources)) {
-                        if (source.contents === undefined) {
-                            continue;
-                        }
-                        const filePath = join(addrBase, normalize(file));
-                        fse.writeFileSync(filePath, source.contents);
-                    }
-                }
+            for (const txReplayInfo of await getBlockReplayInfo(
+                opts.quicknodeEndpoint,
+                Number(blockNum)
+            )) {
+                await replayTX(txReplayInfo, opts);
             }
-
-            const builder = new AlignedTraceBuilder(
-                artifactManager,
-                interpPreState,
-                trace,
-                makeSolMessage(evmTx),
-                block,
-                Number(opts.maxNumSteps)
-            );
-
-            const [alignedTraces] = builder.buildAlignedTraces();
-
-            const addrToInfoMap = new Map<string, ContractInfo>(
-                [...addrToContract.entries()].map(([strAddr, [, contractId]]) => [
-                    strAddr,
-                    artifactManager
-                        .contracts()
-                        .filter((ci) => contractId === `${ci.fileName}:${ci.contractName}`)[0]
-                ])
-            );
-            const wellFormed = alignedTraceWellFormed(
-                alignedTraces,
-                trace,
-                artifactManager,
-                addrToInfoMap
-            );
-
-            if (!wellFormed) {
-                record(`trace_mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-            }
-            if (hasMisaligned(alignedTraces)) {
-                record(`trace_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-                console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
-            } else {
-                record(`trace_no_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-            }
-        } catch (e) {
-            record(`${(e as any).constructor.name}:${(e as any).message}`, [
-                txReplayInfo.blockHash,
-                txReplayInfo.txHash
-            ]);
         }
     }
 
