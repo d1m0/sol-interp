@@ -352,13 +352,7 @@ Leftovers:
 Easy:
     - blockhash(uint blockNumber)/block.blockhash (<0.5.0)
     - blobhash(uint index)
-    - block.basefee
     - block.blobbasefee
-    - block.chainid
-    - block.coinbase
-    - block.gaslimit
-    - block.number
-    - block.timestamp/now (<0.7.0)
     - tx.gasprice
     - tx.origin
     - bytes.concat
@@ -369,7 +363,6 @@ Medium:
     - block.difficulty
     - block.prevrandao
     - ripemd160
-    - ecrecover
     - address.callcode
 
 Difficult:

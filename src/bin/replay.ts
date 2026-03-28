@@ -9,7 +9,7 @@ import { hasMisaligned } from "../alignment";
 import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
 import { AccountMap } from "../interp";
 import * as fse from "fs-extra";
-import { join, normalize } from "path";
+import { basename, dirname, join, normalize } from "path";
 import { dump, record } from "./stats";
 
 /**
@@ -54,11 +54,6 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
         );
         const addrsTouched = getExecutedAddresses(trace);
         const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
-        const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
-        const artifactManager = new ArtifactManager(artifacts);
-
-        const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
-        addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
 
         if (opts.dumpSources) {
             const srcBase = opts.dumpSources;
@@ -70,11 +65,20 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
                     if (source.contents === undefined) {
                         continue;
                     }
-                    const filePath = join(addrBase, normalize(file));
+                    const dirPath = join(addrBase, normalize(dirname(file)));
+                    fse.mkdirpSync(dirPath);
+                    const baseName = basename(file);
+                    const filePath = join(dirPath, baseName);
                     fse.writeFileSync(filePath, source.contents);
                 }
             }
         }
+
+        const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
+        const artifactManager = new ArtifactManager(artifacts);
+
+        const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
+        addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
 
         const builder = new AlignedTraceBuilder(
             artifactManager,
