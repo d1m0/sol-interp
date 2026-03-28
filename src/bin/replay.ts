@@ -163,7 +163,5 @@ function addArtifactToAccountMap(
         }
     }
 
-    if (opts.stats) {
-        dump(opts.stats);
-    }
+    dump(opts.stats ? opts.stats : "-");
 })();

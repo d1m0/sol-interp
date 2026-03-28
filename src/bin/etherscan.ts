@@ -5,7 +5,6 @@ import * as sol from "solc-typed-ast";
 import { JSONCache } from "./json";
 import { PartialSolcOutput } from "sol-dbg";
 import { addSourcesToResult } from "./utils";
-import { record } from "./stats";
 
 export interface EtherscanSourceResponse {
     ABI: string;
@@ -86,9 +85,16 @@ function getCompilerVersion(raw: string): string {
     return m[1];
 }
 
-function tryGetInputJSON(srcStr: string): any {
+function tryGetInputJSON(srcStr: string, settings: any): any {
     try {
         const jsonRes = JSON.parse(srcStr);
+        if (!("language" in jsonRes)) {
+            return {
+                language: "Solidity",
+                sources: jsonRes,
+                settings
+            };
+        }
         return jsonRes;
     } catch (e) {
         if (srcStr.startsWith("{{") && srcStr.endsWith("}}")) {
@@ -122,18 +128,14 @@ export async function getArtifact(
     try {
         version = getCompilerVersion(eInfo.CompilerVersion);
     } catch (e) {
-        record(
-            `etherscan_bad_compiler_version:${eInfo.CompilerVersion}`,
-            address instanceof Address ? address.toString() : address
-        );
-        throw new Error("etherscan_bad_compiler_version");
+        throw new Error(`etherscan_bad_compiler_version:${eInfo.CompilerVersion}`);
     }
 
     if (eInfo.SourceCode === "") {
         return undefined;
     }
 
-    const inJson = tryGetInputJSON(eInfo.SourceCode);
+    const inJson = tryGetInputJSON(eInfo.SourceCode, settings);
     if (inJson !== undefined) {
         try {
             const compiler = await sol.getCompilerForVersion(version, sol.CompilerKind.WASM);
@@ -144,9 +146,17 @@ export async function getArtifact(
             );
 
             const data = await compiler.compile(inJson);
-            const files: sol.FileMap = new Map();
-            for (const [path, fileData] of Object.entries(inJson.sources)) {
-                assert(false, `${path},${fileData}, ${files}`);
+
+            if (data.contracts === undefined) {
+                throw new Error(`Compilation succeded but no contracts (ver ${version})`);
+            }
+
+            if (data.sources) {
+                for (const fileName in data.sources) {
+                    if (fileName in inJson.sources) {
+                        data.sources[fileName].contents = inJson.sources[fileName].content;
+                    }
+                }
             }
 
             return [data, fileName, eInfo.ContractName];

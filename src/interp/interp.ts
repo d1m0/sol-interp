@@ -62,7 +62,8 @@ import {
     TypeConstructorToValueType,
     TypeValue,
     Value,
-    ValueTypeConstructors
+    ValueTypeConstructors,
+    NoneValue
 } from "./value";
 import {
     Address,
@@ -1129,9 +1130,18 @@ export class Interpreter {
         let retVals: Value[] = [];
 
         if (stmt.vExpression) {
-            const retVal = this.evalNP(stmt.vExpression, state);
+            const retVal = this.eval(stmt.vExpression, state);
             const retExprT = this.typeOf(stmt.vExpression);
             retVals = retExprT instanceof rtt.TupleType ? (retVal as Value[]) : [retVal];
+
+            // Its possible to return something that is of type `()` in a function that doesnt return anything. (e.g. returning the result of another call)
+            if (
+                retVals instanceof NoneValue &&
+                retExprT instanceof rtt.TupleType &&
+                retExprT.elementTypes.length === 0
+            ) {
+                retVals = [];
+            }
         } else {
             retVals = [];
         }

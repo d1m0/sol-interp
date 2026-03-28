@@ -29,5 +29,9 @@ export function record(name: string, witness: any): void {
 }
 
 export function dump(fName: string): void {
-    fse.writeJsonSync(fName, stats, { spaces: 2 });
+    if (fName === "-") {
+        console.error(stats);
+    } else {
+        fse.writeJsonSync(fName, stats, { spaces: 2 });
+    }
 }

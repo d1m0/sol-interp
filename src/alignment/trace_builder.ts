@@ -245,7 +245,10 @@ export class AlignedTraceBuilder extends Chain {
             resyncLLIdx = findFirstIdxAtDepthAfter(this.lowLevelTrace, expDepth, this.currentLLIdx);
         }
 
-        assert(resyncLLIdx > 0, ``);
+        assert(
+            resyncLLIdx > 0,
+            `Couldn't find an indx at depth ${expDepth} after idx ${this.currentLLIdx}`
+        );
         const lastStep = this.lowLevelTrace[resyncLLIdx - 1];
 
         const evmEvent: EVMObservableEvent = makeEVMEventFromStep(lastStep, resyncLLIdx - 1);
