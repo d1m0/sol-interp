@@ -538,6 +538,17 @@ export class Interpreter {
         let res: Value[];
         let resTs: rtt.BaseRuntimeType[];
 
+        for (const arg of calldataArgs) {
+            if (rtt.hasPoison(arg)) {
+                const err = new NoPayloadError(entryPoint);
+                for (const v of this.visitors) {
+                    v.exception(this, state, err);
+                }
+
+                return err;
+            }
+        }
+
         // Execute actual call
         try {
             if (entryPoint instanceof sol.FunctionDefinition) {
@@ -3514,6 +3525,28 @@ export class Interpreter {
 
         let baseVal = this.evalNP(expr.vExpression, state);
 
+        /**
+         * By definition user-defined functions must be library or free functions.
+         * So if we detect a:
+         *  - member access referring to a library or free function
+         *  - where the base is NOT the name of the Library (i.e. `Lib.foo(val)` vs `val.foo()`)
+         *
+         * Then we assume that this is an instance of a `using for` function
+         */
+        if (
+            expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
+            (expr.vReferencedDeclaration.vScope instanceof sol.SourceUnit ||
+                (expr.vReferencedDeclaration.vScope instanceof sol.ContractDefinition &&
+                    expr.vReferencedDeclaration.vScope.kind === sol.ContractKind.Library)) &&
+            !(baseVal instanceof DefValue)
+        ) {
+            return new CurriedVal(
+                [baseVal],
+                [this.typeOf(expr.vExpression)],
+                new rtt.InternalFunRef(expr.vReferencedDeclaration)
+            );
+        }
+
         if (baseVal instanceof Address) {
             // Builtin field of address
             if (expr.vReferencedDeclaration === undefined) {
@@ -3631,30 +3664,6 @@ export class Interpreter {
             const builtinF = this.arrayBuiltins.getField(expr.memberName);
             this.expect(builtinF instanceof BuiltinFunction);
             return this.evalBuiltinMemberAccess(expr, builtinF, baseVal, state);
-        }
-
-        /**
-         * Using-for member access. Note that we disambiguate `val.foo()` and `Lib.foo(val)`
-         * using the second part of the condition.
-         *
-         * @todo - this check maybe weak. Here we assume that any member-access
-         * to a function, that is not a) `Scope.FunName` b) a builtin and c) a
-         * contract method call, must be a call to a function where the base val is an
-         * implicit first arg. Is this actually true?
-         */
-        if (
-            expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
-            !(
-                baseVal instanceof DefValue &&
-                (baseVal.def instanceof sol.ContractDefinition ||
-                    baseVal.def instanceof sol.SourceUnit)
-            )
-        ) {
-            return new CurriedVal(
-                [baseVal],
-                [this.typeOf(expr.vExpression)],
-                new rtt.InternalFunRef(expr.vReferencedDeclaration)
-            );
         }
 
         /**

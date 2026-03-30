@@ -153,6 +153,7 @@ export async function getArtifact(
     address: Address | string,
     apiKey: string
 ): Promise<[PartialSolcOutput, string, string] | undefined> {
+    const strAddr = address instanceof Address ? address.toString() : address;
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
     const fileName = eInfo.ContractFileName === "" ? "dummy.sol" : eInfo.ContractFileName;
     const settings = {
@@ -167,11 +168,12 @@ export async function getArtifact(
     try {
         version = getCompilerVersion(eInfo.CompilerVersion);
     } catch (e) {
-        record(`Compile:BadCompilerVersion`, eInfo.CompilerVersion);
+        record(`Artifact:BadCompilerVersion`, strAddr);
         return undefined;
     }
 
     if (eInfo.SourceCode === "") {
+        record(`Artifact:NoSource`, strAddr);
         return undefined;
     }
 
@@ -194,7 +196,14 @@ export async function getArtifact(
 
             const data = await compiler.compile(inJson);
 
+            const errors = sol.detectCompileErrors(data);
+
+            if (errors.length > 0) {
+                throw new sol.CompileFailedError([{ compilerVersion: version, errors }]);
+            }
+
             if (data.contracts === undefined) {
+                record(`Artifact:NoContracts`, strAddr);
                 throw new Error(`Compilation succeded but no contracts (ver ${version})`);
             }
 
@@ -206,10 +215,14 @@ export async function getArtifact(
                 }
             }
 
+            record(`Artifact:Success`, strAddr);
             return [data, fileName, eInfo.ContractName];
         } catch (e: any) {
-            if (e.message !== undefined && e.message.startsWith('Unsupported wasm compiler version')) {
-                record(`Compile:UnsupportedWasmVersion`, address);
+            if (
+                e.message !== undefined &&
+                e.message.startsWith("Unsupported wasm compiler version")
+            ) {
+                record(`Artifact:UnsupportedWasmVersion`, strAddr);
                 return undefined;
             }
 
@@ -227,6 +240,7 @@ export async function getArtifact(
                 }
             }
 
+            record(`Artifact:CompileError`, strAddr);
             throw e;
         }
     }
@@ -242,8 +256,14 @@ export async function getArtifact(
         );
         addSourcesToResult(data, files);
 
+        record(`Artifact:Success`, strAddr);
         return [data, fileName, eInfo.ContractName];
     } catch (e: any) {
+        if (e.message !== undefined && e.message.startsWith("Unsupported wasm compiler version")) {
+            record(`Artifact:UnsupportedWasmVersion`, strAddr);
+            return undefined;
+        }
+
         if (e instanceof sol.CompileFailedError) {
             for (const failure of e.failures) {
                 console.error(
@@ -256,11 +276,9 @@ export async function getArtifact(
                     console.error(error);
                 }
             }
-
-            //error("Unable to compile due to errors above.");
         }
 
-        //error(e.message);
+        record(`Artifact:CompileError`, strAddr);
         throw e;
     }
 }
@@ -286,7 +304,7 @@ export async function getArtifacts(
         ) {
             assert(
                 art.fileName in art.artifact.contracts &&
-                art.contractName in art.artifact.contracts[art.fileName],
+                    art.contractName in art.artifact.contracts[art.fileName],
                 `Missing info for main contract {0}:{1}`,
                 art.fileName,
                 art.contractName

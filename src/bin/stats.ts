@@ -1,37 +1,54 @@
 import * as fse from "fs-extra";
 
-interface Stat {
+interface Counter {
     count: number;
     witnesses: any[];
+    breakdown: { [name: string]: Counter };
 }
 
-interface Stats {
-    [name: string]: Stat;
-}
+const root: Counter = {
+    count: 0,
+    witnesses: [],
+    breakdown: {}
+};
 
-const stats: Stats = {};
+export function record(name: string, witness: any, allWitnesses = false): void {
+    const el = name.split(":");
 
-export function record(name: string, witness: any): void {
-    let stat: Stat;
+    let stat: Counter = root;
+    let i;
 
-    if (name in stats) {
-        stat = stats[name];
+    for (i = 0; i < el.length - 1; i++) {
+        if (!(el[i] in stat.breakdown)) {
+            stat.breakdown[el[i]] = {
+                count: 0,
+                witnesses: [],
+                breakdown: {}
+            };
+        }
+
+        stat = stat.breakdown[el[i]];
         stat.count++;
-        stat.witnesses.push(witness);
-    } else {
-        stat = {
-            count: 1,
-            witnesses: [witness]
-        };
     }
 
-    stats[name] = stat;
+    if (!(el[i] in stat.breakdown)) {
+        stat.breakdown[el[i]] = {
+            count: 1,
+            witnesses: [witness],
+            breakdown: {}
+        };
+    } else {
+        stat.breakdown[el[i]].count++;
+        if (allWitnesses) {
+            stat.breakdown[el[i]].witnesses.push(witness);
+        }
+    }
 }
 
 export function dump(fName: string): void {
     if (fName === "-") {
-        console.error(stats);
+        console.error(root);
     } else {
-        fse.writeJsonSync(fName, stats, { spaces: 2 });
+        fse.writeJsonSync(fName, root, { spaces: 2 });
     }
 }

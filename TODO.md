@@ -350,9 +350,6 @@ Tests requiring inline assembly:
 
 Leftovers:
 Easy:
-    - blockhash(uint blockNumber)/block.blockhash (<0.5.0)
-    - blobhash(uint index)
-    - block.blobbasefee
     - tx.gasprice
     - tx.origin
     - addmod
@@ -362,6 +359,9 @@ Medium:
     - block.prevrandao
     - ripemd160
     - address.callcode
+    - blockhash(uint blockNumber)/block.blockhash (<0.5.0)
+    - blobhash(uint index)
+    - block.blobbasefee
 
 Difficult:
     - gasleft/msg.gas <0.5.0

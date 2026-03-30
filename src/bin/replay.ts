@@ -44,7 +44,7 @@ function addArtifactToAccountMap(
 async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
     try {
         console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
-        record(`trace_replay_attempt`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        record(`trace`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
 
         const [trace, , , block, evmTx] = await replayEVM(
             txReplayInfo.preState,
@@ -52,6 +52,9 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
             txReplayInfo.block,
             txReplayInfo.sender
         );
+        if (trace.length === 0) {
+            record(`zero_length`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        }
         const addrsTouched = getExecutedAddresses(trace);
         const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
 
@@ -107,13 +110,13 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
         );
 
         if (!wellFormed) {
-            record(`trace_mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-        }
-        if (hasMisaligned(alignedTraces)) {
-            record(`trace_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            record(`mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            console.error(`Trace MALFORMED!`);
+        } else if (hasMisaligned(alignedTraces)) {
+            record(`misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
             console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
         } else {
-            record(`trace_no_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            record(`aligned`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
         }
     } catch (e) {
         record(`${(e as any).constructor.name}:${(e as any).message}`, [
