@@ -6,10 +6,11 @@ import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, alignedTraceWellFormed, makeSolMessage } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
 import { hasMisaligned } from "../alignment";
-import { error, getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
+import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
 import { AccountMap } from "../interp";
 import * as fse from "fs-extra";
-import { join, normalize } from "path";
+import { basename, dirname, join, normalize } from "path";
+import { dump, record } from "./stats";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -40,51 +41,10 @@ function addArtifactToAccountMap(
     }
 }
 
-(async () => {
-    const program = new Command();
-
-    program
-        .name("sol-replay")
-        .description("Replay a mainnet TX fetching source info from etherscan")
-        .helpOption("-h, --help", "Print help message.");
-
-    program.option("-q, --quicknode-endpoint <quicknode>", "Quicknode Endpoint");
-    program.option("-e, --etherscan-key <etherscan-api-key>", "Etherscan api key");
-
-    program.option("-t, --tx-hashes <hashes...>", "A list of hashes of Mainnet TXs to replay.");
-    program.option("-b, --block-nums <nums...>", "A list of numbers of Mainnet Blocks to replay.");
-
-    program.option(
-        "-d, --dump-sources <dir>",
-        "Dump the sources for any contracts in the given directory."
-    );
-    program.option("--max-num-steps <max-num-steps>", "Maximum Number of steps", "1000000000");
-
-    program.parse(process.argv);
-    const opts = program.opts();
-
-    const replayInfos: ReplayInfo[] = [];
-
-    if (opts.txHashes) {
-        for (const hash of opts.txHashes) {
-            replayInfos.push(await getTXReplayInfo(opts.quicknodeEndpoint, hash));
-        }
-    }
-
-    if (opts.blockNums) {
-        for (const blockNum of opts.blockNums) {
-            replayInfos.push(
-                ...(await getBlockReplayInfo(opts.quicknodeEndpoint, Number(blockNum)))
-            );
-        }
-    }
-
-    if (replayInfos.length === 0) {
-        error(`Need to specify at least one of --tx-hashes and --block-nums`);
-    }
-
-    for (const txReplayInfo of replayInfos) {
+async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
+    try {
         console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
+        record(`trace_replay_attempt`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
 
         const [trace, , , block, evmTx] = await replayEVM(
             txReplayInfo.preState,
@@ -94,11 +54,6 @@ function addArtifactToAccountMap(
         );
         const addrsTouched = getExecutedAddresses(trace);
         const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
-        const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
-        const artifactManager = new ArtifactManager(artifacts);
-
-        const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
-        addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
 
         if (opts.dumpSources) {
             const srcBase = opts.dumpSources;
@@ -110,11 +65,20 @@ function addArtifactToAccountMap(
                     if (source.contents === undefined) {
                         continue;
                     }
-                    const filePath = join(addrBase, normalize(file));
+                    const dirPath = join(addrBase, normalize(dirname(file)));
+                    fse.mkdirpSync(dirPath);
+                    const baseName = basename(file);
+                    const filePath = join(dirPath, baseName);
                     fse.writeFileSync(filePath, source.contents);
                 }
             }
         }
+
+        const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
+        const artifactManager = new ArtifactManager(artifacts);
+
+        const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
+        addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
 
         const builder = new AlignedTraceBuilder(
             artifactManager,
@@ -143,8 +107,62 @@ function addArtifactToAccountMap(
         );
 
         if (!wellFormed) {
-            console.error(`Trace mallformed!`);
+            record(`trace_mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
         }
-        console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
+        if (hasMisaligned(alignedTraces)) {
+            record(`trace_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
+        } else {
+            record(`trace_no_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        }
+    } catch (e) {
+        record(`${(e as any).constructor.name}:${(e as any).message}`, [
+            txReplayInfo.blockHash,
+            txReplayInfo.txHash
+        ]);
     }
+}
+
+(async () => {
+    const program = new Command();
+
+    program
+        .name("sol-replay")
+        .description("Replay a mainnet TX fetching source info from etherscan")
+        .helpOption("-h, --help", "Print help message.");
+
+    program.option("-q, --quicknode-endpoint <quicknode>", "Quicknode Endpoint");
+    program.option("-e, --etherscan-key <etherscan-api-key>", "Etherscan api key");
+
+    program.option("-t, --tx-hashes <hashes...>", "A list of hashes of Mainnet TXs to replay.");
+    program.option("-b, --block-nums <nums...>", "A list of numbers of Mainnet Blocks to replay.");
+
+    program.option(
+        "-d, --dump-sources <dir>",
+        "Dump the sources for any contracts in the given directory."
+    );
+    program.option("--max-num-steps <max-num-steps>", "Maximum Number of steps", "1000000000");
+    program.option("--stats <stats-file>", "Path to a file in which to dump stats");
+
+    program.parse(process.argv);
+    const opts = program.opts();
+
+    if (opts.txHashes) {
+        for (const hash of opts.txHashes) {
+            await replayTX(await getTXReplayInfo(opts.quicknodeEndpoint, hash), opts);
+        }
+    }
+
+    if (opts.blockNums) {
+        for (const blockNum of opts.blockNums) {
+            for (const txReplayInfo of await getBlockReplayInfo(
+                opts.quicknodeEndpoint,
+                Number(blockNum)
+            )) {
+                await replayTX(txReplayInfo, opts);
+            }
+        }
+    }
+
+    dump(opts.stats ? opts.stats : "-");
 })();

@@ -62,7 +62,8 @@ import {
     TypeConstructorToValueType,
     TypeValue,
     Value,
-    ValueTypeConstructors
+    ValueTypeConstructors,
+    NoneValue
 } from "./value";
 import {
     Address,
@@ -137,14 +138,22 @@ import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
     ADDRESS_BUILTIN_STRUCT_NAME,
     arrayBuiltinDecs,
+    bytesConcatBuiltin,
     EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
     globalBuiltinStructDesc,
     makeBuiltin,
-    revertBuiltin
+    revertBuiltin,
+    stringConcatBuiltin
 } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
-import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
+import {
+    ArraySliceType,
+    BaseInterpType,
+    RationalNumberType,
+    typeIdToRuntimeType,
+    WrappedType
+} from "./types";
 import { InterpVisitor } from "./visitors";
 import { decodeLinkMap, isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bshl, bshr } from "./bitwise";
@@ -1129,9 +1138,18 @@ export class Interpreter {
         let retVals: Value[] = [];
 
         if (stmt.vExpression) {
-            const retVal = this.evalNP(stmt.vExpression, state);
+            const retVal = this.eval(stmt.vExpression, state);
             const retExprT = this.typeOf(stmt.vExpression);
             retVals = retExprT instanceof rtt.TupleType ? (retVal as Value[]) : [retVal];
+
+            // Its possible to return something that is of type `()` in a function that doesnt return anything. (e.g. returning the result of another call)
+            if (
+                retVals instanceof NoneValue &&
+                retExprT instanceof rtt.TupleType &&
+                retExprT.elementTypes.length === 0
+            ) {
+                retVals = [];
+            }
         } else {
             retVals = [];
         }
@@ -2089,10 +2107,16 @@ export class Interpreter {
             nyi("User-defined operators");
         }
 
-        this.expect(isPrimitiveValue(left) && isPrimitiveValue(right));
+        this.expect(
+            isPrimitiveValue(left) && isPrimitiveValue(right),
+            `One of these is not a primitive value`
+        );
 
         if (sol.BINARY_OPERATOR_GROUPS.Logical.includes(operator)) {
-            this.expect(typeof left === "boolean" && typeof right === "boolean");
+            this.expect(
+                typeof left === "boolean" && typeof right === "boolean",
+                `Expected 2 booleans`
+            );
 
             if (operator === "&&") {
                 return left && right;
@@ -2157,7 +2181,8 @@ export class Interpreter {
 
             this.expect(
                 (typeof sleft === "bigint" && typeof sright === "bigint") ||
-                    (typeof sleft === "string" && typeof sright === "string")
+                    (typeof sleft === "string" && typeof sright === "string"),
+                `Expected 2 bigints or 2 strings for comparison binop`
             );
 
             if (operator === "<") {
@@ -2180,7 +2205,10 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Arithmetic.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint");
+            this.expect(
+                typeof left === "bigint" && typeof right === "bigint",
+                `Expected 2 bigints for arithemtic binop`
+            );
             let res: bigint;
 
             if ((operator === "/" || operator === "%") && right === 0n) {
@@ -2263,6 +2291,15 @@ export class Interpreter {
 
         if (expr.operator === "||" || expr.operator === "&&") {
             lVal = this.evalNP(expr.vLeftExpression, state);
+
+            // Logical short-circuiting
+            if (
+                (lVal && expr.operator === "||") ||
+                (!lVal && expr.operator === "&&" && expr.vUserFunction === undefined)
+            ) {
+                return lVal;
+            }
+
             rVal = this.evalNP(expr.vRightExpression, state);
         } else {
             rVal = this.evalNP(expr.vRightExpression, state);
@@ -2403,14 +2440,15 @@ export class Interpreter {
 
         // string literals -> fixed bytes
         if (
-            fromT instanceof rtt.PointerType &&
-            fromT.toType instanceof rtt.BytesType &&
+            ((fromT instanceof rtt.PointerType && fromT.toType instanceof rtt.BytesType) ||
+                fromT instanceof ArraySliceType) &&
             toT instanceof rtt.FixedBytesType
         ) {
             this.expect(
                 fromV instanceof rtt.BytesMemView ||
                     fromV instanceof rtt.BytesCalldataView ||
-                    fromV instanceof rtt.BytesStorageView,
+                    fromV instanceof rtt.BytesStorageView ||
+                    fromV instanceof rtt.BytesSliceCalldataView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -3146,7 +3184,11 @@ export class Interpreter {
             const evt = expr.vReferencedDeclaration;
             const args = expr.vArguments.map((arg) => this.evalNP(arg, state));
 
-            const lowLevelEvent = buildEvent(evt, args, state);
+            const formalArgTs = evt.vParameters.vParameters.map((p) =>
+                this.varDeclToRuntimeType(p)
+            );
+            const castedArgs = this.castNTo(args, formalArgTs, state);
+            const lowLevelEvent = buildEvent(evt, castedArgs, state);
 
             for (const v of this.visitors) {
                 v.emit(this, state, lowLevelEvent);
@@ -3227,6 +3269,12 @@ export class Interpreter {
 
             const res = this.builtins.getField(expr.name);
             this.expect(res !== undefined, `Uknown builtin ${expr.name}`);
+
+            if (res instanceof BuiltinFunction && res.isField) {
+                const realRes = this._execCall(res, [], [], state);
+                this.expect(realRes.length === 1);
+                return realRes[0];
+            }
             return res;
         }
 
@@ -3450,6 +3498,20 @@ export class Interpreter {
     }
 
     evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
+        if (expr.vExpression instanceof sol.ElementaryTypeNameExpression) {
+            const typeName =
+                expr.vExpression.typeName instanceof sol.TypeName
+                    ? expr.vExpression.typeName.name
+                    : expr.vExpression.typeName;
+            if (typeName === "string" && expr.memberName === "concat") {
+                return stringConcatBuiltin;
+            } else if (typeName === "bytes" && expr.memberName === "concat") {
+                return bytesConcatBuiltin;
+            } else {
+                nyi(`Member access of ${expr.memberName} in ${expr.vExpression.print()}`);
+            }
+        }
+
         let baseVal = this.evalNP(expr.vExpression, state);
 
         if (baseVal instanceof Address) {
@@ -3523,6 +3585,10 @@ export class Interpreter {
 
         if (baseVal instanceof Uint8Array && expr.memberName === "length") {
             return BigInt(baseVal.length);
+        }
+
+        if (baseVal instanceof MsgDataView && expr.memberName === "length") {
+            return BigInt(getMsg(state).length);
         }
 
         if (baseVal instanceof DefValue) {

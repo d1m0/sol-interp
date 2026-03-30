@@ -47,6 +47,7 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
         // Artifact Manager not used in this tracer
         super(new ArtifactManager([]), { strict: false, foundryCheatcodes: false, ...opts });
     }
+
     async processRawTraceStep(
         vm: VM,
         step: InterpreterStep,

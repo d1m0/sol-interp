@@ -147,7 +147,7 @@ export interface QuicknodeReplayInfo {
 
 class QuicknodeBlockNoTx extends JSONCache<QuicknodeBlock> {
     constructor(basePath: string) {
-        super(join(basePath, "blocks_wo_txs"));
+        super(join(basePath, "blocks_wo_txs"), 5);
     }
     makeKey(endpoint: string, blockNum: number): string {
         return `${blockNum}`;
@@ -160,7 +160,7 @@ class QuicknodeBlockNoTx extends JSONCache<QuicknodeBlock> {
 
 class QuicknodeBlockWithTxs extends JSONCache<QuicknodeBlock> {
     constructor(basePath: string) {
-        super(join(basePath, "blocks_with_txs"));
+        super(join(basePath, "blocks_with_txs"), 5);
     }
 
     makeKey(endpoint: string, blockNum: number): string {
@@ -173,7 +173,7 @@ class QuicknodeBlockWithTxs extends JSONCache<QuicknodeBlock> {
 
 class QuicknodeTxs extends JSONCache<QuicknodeTransaction> {
     constructor(basePath: string) {
-        super(join(basePath, "txs"));
+        super(join(basePath, "txs"), 5);
     }
 
     makeKey(endpoint: string, txHash: string): string {
@@ -186,7 +186,7 @@ class QuicknodeTxs extends JSONCache<QuicknodeTransaction> {
 
 class QuicknodePreState extends JSONCache<QuicknodeStateDesc> {
     constructor(basePath: string) {
-        super(join(basePath, "txs_pre_state"));
+        super(join(basePath, "txs_pre_state"), 5);
     }
 
     makeKey(endpoint: string, blockNum: number): string {

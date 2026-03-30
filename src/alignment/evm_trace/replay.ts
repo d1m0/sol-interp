@@ -205,6 +205,10 @@ export class EVMReplay {
                     }
                 );
 
+                if (tracer.failed) {
+                    throw new EVMReplayError(...(tracer.failInfo as [number, any]));
+                }
+
                 await (stateAfter as MerkleStateManager).flush();
                 const liveAccountsAfter = computeLiveContracts(trace, res._curState.liveAccounts);
 
@@ -236,6 +240,15 @@ export class EVMReplay {
     }
 }
 
+export class EVMReplayError extends Error {
+    constructor(
+        public readonly step: number,
+        public readonly nesteExc: any
+    ) {
+        super(`EVMReplayError[${step}]: ${nesteExc}`);
+    }
+}
+
 export async function replayEVM(
     initialState: AccountMap,
     txData: TypedTxData,
@@ -254,6 +267,10 @@ export async function replayEVM(
     const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager, {
         callStack: [-1]
     });
+
+    if (tracer.failed) {
+        throw new EVMReplayError(...(tracer.failInfo as [number, any]));
+    }
 
     await (stateAfter as MerkleStateManager).flush();
 
