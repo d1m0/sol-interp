@@ -1057,3 +1057,61 @@ export const arrayBuiltinDecs: BuiltinDescriptor = [
         popBuiltin
     ]
 ];
+
+export const stringConcatBuiltin = new BuiltinFunction(
+    "string.concat",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        const vals: Uint8Array[] = [];
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+
+            interp.expect(
+                arg instanceof View && arg.type instanceof rtt.StringType,
+                `string.concat expects strings`
+            );
+
+            const val = decodeView(arg, state);
+            interp.expect(val instanceof Uint8Array, `Expected a decoded uint8 array from tring`);
+            vals.push(val);
+        }
+
+        const res = concatBytes(...vals);
+        const resView = PointerMemView.allocMemFor(res, stringT, state.memAllocator);
+        resView.encode(res, state.memory, state.memAllocator);
+        return [resView];
+    },
+    false,
+    false,
+    false
+);
+
+export const bytesConcatBuiltin = new BuiltinFunction(
+    "bytes.concat",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        const vals: Uint8Array[] = [];
+        for (let i = 0; i < args.length; i++) {
+            const arg = args[i];
+
+            interp.expect(
+                arg instanceof Uint8Array ||
+                    (arg instanceof View &&
+                        (arg.type instanceof rtt.BytesType || arg.type instanceof rtt.StringType)),
+                `string.concat expects strings`
+            );
+
+            const val = arg instanceof Uint8Array ? arg : decodeView(arg, state);
+            interp.expect(val instanceof Uint8Array, `Expected a decoded uint8 array`);
+            vals.push(val);
+        }
+
+        const res = concatBytes(...vals);
+        const resView = PointerMemView.allocMemFor(res, bytesT, state.memAllocator);
+        resView.encode(res, state.memory, state.memAllocator);
+        return [resView];
+    },
+    false,
+    false,
+    false
+);

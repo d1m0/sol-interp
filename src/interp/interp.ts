@@ -138,10 +138,12 @@ import { ppLValue, ppValue, ppValueTypeConstructor } from "./pp";
 import {
     ADDRESS_BUILTIN_STRUCT_NAME,
     arrayBuiltinDecs,
+    bytesConcatBuiltin,
     EXTERNAL_CALL_CALLABLE_FIELDS_NAME,
     globalBuiltinStructDesc,
     makeBuiltin,
-    revertBuiltin
+    revertBuiltin,
+    stringConcatBuiltin
 } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
@@ -3496,6 +3498,20 @@ export class Interpreter {
     }
 
     evalMemberAccess(expr: sol.MemberAccess, state: State): Value {
+        if (expr.vExpression instanceof sol.ElementaryTypeNameExpression) {
+            const typeName =
+                expr.vExpression.typeName instanceof sol.TypeName
+                    ? expr.vExpression.typeName.name
+                    : expr.vExpression.typeName;
+            if (typeName === "string" && expr.memberName === "concat") {
+                return stringConcatBuiltin;
+            } else if (typeName === "bytes" && expr.memberName === "concat") {
+                return bytesConcatBuiltin;
+            } else {
+                nyi(`Member access of ${expr.memberName} in ${expr.vExpression.print()}`);
+            }
+        }
+
         let baseVal = this.evalNP(expr.vExpression, state);
 
         if (baseVal instanceof Address) {
