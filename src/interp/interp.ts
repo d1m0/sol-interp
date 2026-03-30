@@ -145,7 +145,13 @@ import {
 } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
 import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
-import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
+import {
+    ArraySliceType,
+    BaseInterpType,
+    RationalNumberType,
+    typeIdToRuntimeType,
+    WrappedType
+} from "./types";
 import { InterpVisitor } from "./visitors";
 import { decodeLinkMap, isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bshl, bshr } from "./bitwise";
@@ -2099,10 +2105,16 @@ export class Interpreter {
             nyi("User-defined operators");
         }
 
-        this.expect(isPrimitiveValue(left) && isPrimitiveValue(right));
+        this.expect(
+            isPrimitiveValue(left) && isPrimitiveValue(right),
+            `One of these is not a primitive value`
+        );
 
         if (sol.BINARY_OPERATOR_GROUPS.Logical.includes(operator)) {
-            this.expect(typeof left === "boolean" && typeof right === "boolean");
+            this.expect(
+                typeof left === "boolean" && typeof right === "boolean",
+                `Expected 2 booleans`
+            );
 
             if (operator === "&&") {
                 return left && right;
@@ -2167,7 +2179,8 @@ export class Interpreter {
 
             this.expect(
                 (typeof sleft === "bigint" && typeof sright === "bigint") ||
-                    (typeof sleft === "string" && typeof sright === "string")
+                    (typeof sleft === "string" && typeof sright === "string"),
+                `Expected 2 bigints or 2 strings for comparison binop`
             );
 
             if (operator === "<") {
@@ -2190,7 +2203,10 @@ export class Interpreter {
         }
 
         if (sol.BINARY_OPERATOR_GROUPS.Arithmetic.includes(operator)) {
-            this.expect(typeof left === "bigint" && typeof right === "bigint");
+            this.expect(
+                typeof left === "bigint" && typeof right === "bigint",
+                `Expected 2 bigints for arithemtic binop`
+            );
             let res: bigint;
 
             if ((operator === "/" || operator === "%") && right === 0n) {
@@ -2273,6 +2289,15 @@ export class Interpreter {
 
         if (expr.operator === "||" || expr.operator === "&&") {
             lVal = this.evalNP(expr.vLeftExpression, state);
+
+            // Logical short-circuiting
+            if (
+                (lVal && expr.operator === "||") ||
+                (!lVal && expr.operator === "&&" && expr.vUserFunction === undefined)
+            ) {
+                return lVal;
+            }
+
             rVal = this.evalNP(expr.vRightExpression, state);
         } else {
             rVal = this.evalNP(expr.vRightExpression, state);
@@ -2413,14 +2438,15 @@ export class Interpreter {
 
         // string literals -> fixed bytes
         if (
-            fromT instanceof rtt.PointerType &&
-            fromT.toType instanceof rtt.BytesType &&
+            ((fromT instanceof rtt.PointerType && fromT.toType instanceof rtt.BytesType) ||
+                fromT instanceof ArraySliceType) &&
             toT instanceof rtt.FixedBytesType
         ) {
             this.expect(
                 fromV instanceof rtt.BytesMemView ||
                     fromV instanceof rtt.BytesCalldataView ||
-                    fromV instanceof rtt.BytesStorageView,
+                    fromV instanceof rtt.BytesStorageView ||
+                    fromV instanceof rtt.BytesSliceCalldataView,
                 `Expected string pointer not ${ppValue(fromV)}`
             );
 
@@ -3241,6 +3267,12 @@ export class Interpreter {
 
             const res = this.builtins.getField(expr.name);
             this.expect(res !== undefined, `Uknown builtin ${expr.name}`);
+
+            if (res instanceof BuiltinFunction && res.isField) {
+                const realRes = this._execCall(res, [], [], state);
+                this.expect(realRes.length === 1);
+                return realRes[0];
+            }
             return res;
         }
 
