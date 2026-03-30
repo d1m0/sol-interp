@@ -355,8 +355,6 @@ Easy:
     - block.blobbasefee
     - tx.gasprice
     - tx.origin
-    - bytes.concat
-    - string.concat
     - addmod
     - mulmod
 Medium:
