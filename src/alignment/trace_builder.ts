@@ -275,13 +275,23 @@ export class AlignedTraceBuilder extends Chain {
         return acc.contract;
     }
 
-    private isCallToAccountWithNoCode(msg: SolMessage): boolean {
-        if (msg.to.equals(ZERO_ADDRESS)) {
-            return false;
+    private isCallToAccountWithNoCode(callStep: number): boolean {
+        // If we have a call step and an next step (i.e. this is not the root call and not the last step in the trace)
+        // Then just check the depths
+        if (callStep >= 0 && callStep < this.lowLevelTrace.length - 1) {
+            return this.lowLevelTrace[callStep].depth === this.lowLevelTrace[callStep + 1].depth;
         }
 
-        const acc = this.getAccount(msg.to);
-        return acc === undefined || acc.deployedBytecode.length === 0;
+        // Otherwise if this is the root call (callStep === -1) check if the trace is empty
+        if (callStep < 0) {
+            return this.lowLevelTrace.length === 0;
+        }
+
+        // Finally if this call is the last step in the trace, then we ran into an exception
+        // The call never happened. We shouldn't really get here, as earlier exception event matching should have happened.
+        assert(callStep == this.lowLevelTrace.length - 1, `Must be last step`);
+        assert(this.lowLevelTrace[callStep].exceptionInfo !== undefined, `Must be an exception`);
+        assert(false, `Shouldn't get here`);
     }
 
     /**
@@ -314,7 +324,7 @@ export class AlignedTraceBuilder extends Chain {
         }
 
         // Special case - handle calls to contracts with no code
-        if (this.isCallToAccountWithNoCode(msg)) {
+        if (this.isCallToAccountWithNoCode(calleeFirstStep - 1)) {
             const fromAccount = this.getAccount(msg.from);
             this.expect(fromAccount !== undefined);
 
@@ -339,6 +349,7 @@ export class AlignedTraceBuilder extends Chain {
         }
 
         let pos = calleeFirstStep;
+        let res: CallResult;
 
         // Seek through the ll trace
         while (pos < this.lowLevelTrace.length) {
@@ -353,16 +364,20 @@ export class AlignedTraceBuilder extends Chain {
                 const msg = makeSolMessageFromStep(step);
                 this.addNoSourceSegment(nextEvent);
                 this.updateStateFromPrevLLStep();
-                [, pos] = this.execMsgNoSource(msg, pos); // result ignored
+                [res, pos] = this.execMsgNoSource(msg, pos); // result ignored
+
+                if (pos >= this.lowLevelTrace.length) {
+                    return [res, pos];
+                }
             } else {
                 this.expect(
                     nextEvent instanceof EVMReturnEvent || nextEvent instanceof EVMExceptionEvent
                 );
-                const res = makeCallResultFromStep(step);
+                const resFromStep = makeCallResultFromStep(step);
                 this.addNoSourceSegment(nextEvent);
                 this.updateStateFromPrevLLStep();
 
-                return [res, pos];
+                return [resFromStep, pos];
             }
         }
 

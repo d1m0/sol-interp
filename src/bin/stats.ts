@@ -12,7 +12,7 @@ const root: Counter = {
     breakdown: {}
 };
 
-export function record(name: string, witness: any, allWitnesses = false): void {
+export function record(name: string, witness: any, allWitnesses = true): void {
     const el = name.split(":");
 
     let stat: Counter = root;

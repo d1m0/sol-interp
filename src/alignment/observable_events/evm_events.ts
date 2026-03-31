@@ -73,7 +73,7 @@ export type EVMObservableEvent =
     | EVMEmitEvent;
 
 export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservableEvent | undefined {
-    for (let i = afterIdx + 1; i < trace.length; i++) {
+    for (let i = afterIdx; i < trace.length; i++) {
         const step = trace[i];
 
         if (step.exceptionInfo) {

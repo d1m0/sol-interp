@@ -66,26 +66,25 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
             ctx
         );
 
-        // Fix-up last step to account for traces ending with a weird exception
-        const lastStep = trace[trace.length - 1];
+        if (trace.length > 0) {
+            // Fix-up last step to account for traces ending with a weird exception
+            const lastStep = trace[trace.length - 1];
 
-        // If the trace doesnt terminate with a known return or an exception, assume that it terminates with an unknown exception
-        if (lastStep.returnInfo === undefined && lastStep.exceptionInfo === undefined) {
-            assert(
-                !new Set([
-                    OPCODES.RETURN,
-                    OPCODES.REVERT,
-                    OPCODES.SELFDESTRUCT,
-                    OPCODES.REVERT
-                ]).has(lastStep.op.opcode),
-                `Unexpected last opcode with missing info {0}`,
-                lastStep.op.mnemonic
-            );
-            lastStep.exceptionInfo = {
-                excData: new Uint8Array(),
-                isImplicit: true,
-                correspCallIdx: -1
-            };
+            // If the trace doesnt terminate with a known return or an exception, assume that it terminates with an unknown exception
+            if (lastStep.returnInfo === undefined && lastStep.exceptionInfo === undefined) {
+                assert(
+                    !new Set([OPCODES.RETURN, OPCODES.REVERT, OPCODES.SELFDESTRUCT]).has(
+                        lastStep.op.opcode
+                    ) && lastStep.op.valid,
+                    `Unexpected last opcode with missing info {0}`,
+                    lastStep.op.mnemonic
+                );
+                lastStep.exceptionInfo = {
+                    excData: new Uint8Array(),
+                    isExplicit: false,
+                    correspCallIdx: -1
+                };
+            }
         }
 
         return [trace, txRes, stateAfter, tracerCtx];
