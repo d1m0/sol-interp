@@ -8,7 +8,8 @@ import {
     BaseSolTxTracer,
     TracerOpts,
     FoundryTxResult,
-    OPCODES
+    OPCODES,
+    TxReplayInfo
 } from "sol-dbg";
 import {
     addCallInfo,
@@ -25,7 +26,6 @@ import { TypedTransaction } from "@ethereumjs/tx";
 import { addSnapshotInfo, SnapshotInfo } from "./transformers/state_snapshot";
 import { ArtifactManager } from "../../interp/artifactManager";
 import { addCodeInfo, CodeInfo } from "./transformers/code";
-import { Block } from "@ethereumjs/block";
 import { StateManagerInterface } from "@ethereumjs/common";
 import { assert } from "../../utils";
 
@@ -54,17 +54,10 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
     }
 
     async debugTx(
-        tx: TypedTransaction,
-        block: Block,
-        stateBefore: StateManagerInterface,
+        info: TxReplayInfo,
         ctx: TracerContext
     ): Promise<[EVMStep[], FoundryTxResult, StateManagerInterface, TracerContext]> {
-        const [trace, txRes, stateAfter, tracerCtx] = await super.debugTx(
-            tx,
-            block,
-            stateBefore,
-            ctx
-        );
+        const [trace, txRes, stateAfter, tracerCtx] = await super.debugTx(info, ctx);
 
         if (trace.length > 0) {
             // Fix-up last step to account for traces ending with a weird exception

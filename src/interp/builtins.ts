@@ -953,7 +953,7 @@ const blockTimestampBuiltin = new BuiltinFunction(
     false
 );
 
-const blockBlockhashBuiltin = new BuiltinFunction(
+const blockhashBuiltinOldField = new BuiltinFunction(
     "blockhash",
     dummyFunT,
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
@@ -971,11 +971,10 @@ const blockBlockhashBuiltin = new BuiltinFunction(
             return [new Uint8Array(32)];
         }
 
-        if (state.block.header.number === blockNum) {
-            return [state.block.hash()];
-        }
+        const res = interp.world.getBlock(blockNum);
 
-        rtt.nyi(`blockhash(${blockNum})`);
+        interp.expect(res !== undefined);
+        return [res.hash()];
     },
     false,
     false,
@@ -992,7 +991,7 @@ const blockBuiltinStructDesc: BuiltinDescriptor = [
         blockGasLimitBuiltin,
         blockNumberBuiltin,
         blockTimestampBuiltin,
-        [[blockBlockhashBuiltin, "<0.5.0"]]
+        [[blockhashBuiltinOldField, "<0.5.0"]]
     ]
 ];
 
@@ -1022,7 +1021,7 @@ const ecrecoverBuiltin = new BuiltinFunction(
 );
 
 const now = blockTimestampBuiltin.alias("now");
-const blockHashBuiltin = blockBlockhashBuiltin.alias("blockhash");
+const globalBlockashBuiltin = blockhashBuiltinOldField.alias("blockhash");
 
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
@@ -1042,7 +1041,7 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         typeBuiltin,
         blockBuiltinStructDesc,
         [[now, "<0.7.0"]],
-        [[blockHashBuiltin, "<0.7.0"]],
+        globalBlockashBuiltin,
         ecrecoverBuiltin
     ]
 ];

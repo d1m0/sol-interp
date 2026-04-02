@@ -1,16 +1,22 @@
-import { Address } from "@ethereumjs/util";
-import { AccountInfo, AccountMap, CallResult, Chain, SolMessage } from "../interp/env";
+import {
+    AccountInfo,
+    AccountMap,
+    CallResult,
+    BaseEEI,
+    SolMessage,
+    BlockManagerI
+} from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
-import { TypedTransaction, TypedTxData } from "@ethereumjs/tx";
-import { Block, BlockData } from "@ethereumjs/block";
+import { TypedTransaction } from "@ethereumjs/tx";
+import { Block } from "@ethereumjs/block";
 import { ContractInfo, EventDesc, ImmMap, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
 import { State } from "../interp/state";
 import { Value, LValue } from "../interp/value";
-import { EVMStep, isCall, rebuildStateFromTrace, replayEVM } from "./evm_trace";
+import { EVMStep, isCall, rebuildStateFromTrace } from "./evm_trace";
 import { assert } from "../utils";
 import {
     eventsMatch,
@@ -36,7 +42,6 @@ import {
     makeSolMessageFromStep
 } from "./utils";
 import { AlignedTraces } from "./trace_pairs";
-import { Hardfork } from "@ethereumjs/common";
 
 /**
  * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
@@ -77,42 +82,6 @@ export function makeSolMessage(tx: TypedTransaction): SolMessage {
     };
 }
 
-/**
- * Given an initial account state, tx and block data, and an artifactManager:
- * 1. Replay the TX and generate an EVM debug trace
- * 2. Interepter the TX at the Solidity level
- * 3. Align the 2 traces and return an aligned traces tree
- */
-export async function buildAlignedTraces(
-    initialState: AccountMap,
-    txData: TypedTxData,
-    sender: Address,
-    blockData: BlockData,
-    artifactManager: ArtifactManager,
-    maxNumSteps: number | undefined = undefined,
-    forceHardfork?: Hardfork
-): Promise<[AlignedTraces, AccountMap, EVMStep[]]> {
-    // 1. Get the low-level trace
-    const [trace, , , block, tx] = await replayEVM(
-        initialState,
-        txData,
-        blockData,
-        sender,
-        forceHardfork
-    );
-
-    // 2. Interpret at the Solidity level
-    const builder = new AlignedTraceBuilder(
-        artifactManager,
-        initialState,
-        trace,
-        makeSolMessage(tx),
-        block,
-        maxNumSteps
-    );
-    return [...builder.buildAlignedTraces(), trace];
-}
-
 class MisalignmentError extends Error {
     constructor(
         public readonly llEvent: EVMObservableEvent,
@@ -124,7 +93,7 @@ class MisalignmentError extends Error {
 
 class MatchedInfiniteLoop extends Error {}
 
-export class AlignedTraceBuilder extends Chain {
+export class AlignedTraceBuilder extends BaseEEI {
     highLevelTrace: BaseStep[] = [];
     alignedTraces: AlignedTraces = [];
     // Map from LL trace indices of starts of new exection context to the LL trace idx right after their corresponding return/revert
@@ -136,9 +105,10 @@ export class AlignedTraceBuilder extends Chain {
         private readonly lowLevelTrace: EVMStep[],
         private readonly msg: SolMessage,
         block: Block,
+        blockManager: BlockManagerI,
         maxNumSteps: number | undefined = undefined
     ) {
-        super(artifactManager, initialState, block, maxNumSteps);
+        super(artifactManager, initialState, block, blockManager, maxNumSteps);
         for (let i = 0; i < this.lowLevelTrace.length; i++) {
             const step = this.lowLevelTrace[i];
 

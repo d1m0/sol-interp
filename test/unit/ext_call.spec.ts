@@ -1,5 +1,5 @@
 import { Value, ImmMap, typeIdToRuntimeType, EventDesc } from "sol-dbg";
-import { Chain, EmitStep } from "../../src";
+import { BaseEEI, EmitStep, FixedSetBlockManager } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
 import { loadSamples, SampleInfo, SampleMap } from "./utils";
@@ -192,7 +192,12 @@ describe("Simple function call tests", () => {
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
 
             const traceVis = new TraceVisitor();
-            const chain = new Chain(artifactManager, undefined, createBlock({}));
+            const chain = new BaseEEI(
+                artifactManager,
+                undefined,
+                createBlock({}),
+                new FixedSetBlockManager([])
+            );
 
             chain.addVisitor(traceVis);
             const contractInfo = artifactManager.getContractInfo(fun);

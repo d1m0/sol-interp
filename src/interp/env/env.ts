@@ -10,7 +10,7 @@ import {
 } from "@ethereumjs/util";
 import { InterpVisitor } from "../visitors";
 import { ppAccount } from "../pp";
-import { AccountInfo, CallResult, EnvInterface, AccountMap, SolMessage } from "./types";
+import { AccountInfo, CallResult, EthereumEnvInterface, AccountMap, SolMessage } from "./types";
 import { Block } from "@ethereumjs/block";
 
 export function ppChainState(state: AccountMap): string {
@@ -24,10 +24,44 @@ export function ppChainState(state: AccountMap): string {
         ${t.join(",\n")}
         }`;
 }
+
+export interface BlockManagerI {
+    getBlock(number: bigint): Block | undefined;
+}
+
+export interface AsyncBlockManagerI {
+    getBlock(number: bigint): Promise<Block | undefined>;
+}
+
+export class FixedSetBlockManager implements BlockManagerI {
+    private blockM: Map<bigint, Block>;
+    constructor(blocks: Iterable<Block>) {
+        this.blockM = new Map([...blocks].map((b) => [b.header.number, b]));
+    }
+
+    getBlock(number: bigint): Block | undefined {
+        return this.blockM.get(number);
+    }
+}
+
+/**
+ * This block manager is mostly used for testing
+ */
+export class FixedSetAsyncBlockManager implements AsyncBlockManagerI {
+    private blockM: Map<bigint, Block>;
+    constructor(blocks: Iterable<Block>) {
+        this.blockM = new Map([...blocks].map((b) => [b.header.number, b]));
+    }
+
+    async getBlock(number: bigint): Promise<Block | undefined> {
+        return this.blockM.get(number);
+    }
+}
+
 /**
  * Simple BlockChain implementation supporting only contracts with source artifacts within a single block.
  */
-export class Chain implements EnvInterface {
+export class BaseEEI implements EthereumEnvInterface {
     state: AccountMap;
     visitors: InterpVisitor[];
 
@@ -35,6 +69,7 @@ export class Chain implements EnvInterface {
         public readonly artifactManager: ArtifactManager,
         initialState: AccountMap = ImmMap.fromEntries([]),
         private readonly block: Block,
+        private readonly blockManager: BlockManagerI,
         private readonly maxNumSteps: undefined | number = undefined
     ) {
         this.state = initialState;
@@ -247,5 +282,9 @@ export class Chain implements EnvInterface {
                 data: res.payload
             };
         }
+    }
+
+    getBlock(number: bigint): Block | undefined {
+        return this.blockManager.getBlock(number);
     }
 }

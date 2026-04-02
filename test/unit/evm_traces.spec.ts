@@ -8,6 +8,7 @@ import {} from "@ethereumjs/block";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
 import { isReturn, replayEVM } from "../../src/alignment/evm_trace";
 import { CallInfo, CreateInfo, ReturnInfo } from "../../src/alignment/evm_trace/transformers";
+import { FixedSetAsyncBlockManager } from "../../src";
 
 const sol2maruirScenarios: string[] = fse
     .readdirSync("test/samples/sol2maruir")
@@ -27,7 +28,13 @@ describe("EVM Tracer tests", () => {
                 const sender = createAddressFromString(txDesc.origin);
                 const txData = txDescToTxData(txDesc);
                 const blockData = txDescToBlockData(txDesc);
-                const [evmTrace] = await replayEVM(state, txData, blockData, sender);
+                const [evmTrace] = await replayEVM(
+                    state,
+                    txData,
+                    blockData,
+                    new FixedSetAsyncBlockManager([]),
+                    sender
+                );
 
                 const stack: Array<CreateInfo | CallInfo> = [];
 

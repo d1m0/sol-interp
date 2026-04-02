@@ -1,5 +1,10 @@
 import { Command } from "commander";
-import { getBlockReplayInfo, getTXReplayInfo, ReplayInfo } from "./quicknode";
+import {
+    getBlockReplayInfo,
+    getTXReplayInfo,
+    QuicknodeBlockManager,
+    ReplayInfo
+} from "./quicknode";
 import { getArtifacts } from "./etherscan";
 import { ContractInfo, PartialSolcOutput } from "sol-dbg";
 import { replayEVM } from "../alignment/evm_trace";
@@ -7,7 +12,7 @@ import { AlignedTraceBuilder, alignedTraceWellFormed, makeSolMessage } from "../
 import { ArtifactManager } from "../interp/artifactManager";
 import { hasMisaligned } from "../alignment";
 import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
-import { AccountMap } from "../interp";
+import { AccountMap, FixedSetBlockManager } from "../interp";
 import * as fse from "fs-extra";
 import { basename, dirname, join, normalize } from "path";
 import { dump, record } from "./stats";
@@ -46,12 +51,16 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
         console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
         record(`trace`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
 
+        const blockManager = new QuicknodeBlockManager(opts.quicknodeEndpoint);
+
         const [trace, , , block, evmTx] = await replayEVM(
             txReplayInfo.preState,
             txReplayInfo.tx,
             txReplayInfo.block,
+            blockManager,
             txReplayInfo.sender
         );
+
         if (trace.length === 0) {
             record(`zero_length`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
         }
@@ -83,12 +92,15 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
         const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
         addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
 
+        const prevBlocks = blockManager.getCachedBlocks();
+
         const builder = new AlignedTraceBuilder(
             artifactManager,
             interpPreState,
             trace,
             makeSolMessage(evmTx),
             block,
+            new FixedSetBlockManager([...prevBlocks, block]),
             Number(opts.maxNumSteps)
         );
 

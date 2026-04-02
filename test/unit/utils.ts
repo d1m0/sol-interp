@@ -22,6 +22,7 @@ import { AccountInfo, AccountMap, Interpreter } from "../../src";
 import { BlockData } from "@ethereumjs/block";
 import { TypedTxData } from "@ethereumjs/tx";
 import { hexToBigInt, hexToBytes, createAddressFromString } from "@ethereumjs/util";
+import { join } from "path";
 
 export function makeState(
     loc: sol.ASTNode,
@@ -130,7 +131,7 @@ export async function loadSamples(
             settings = undefined;
         }
 
-        const file = fse.readFileSync(`${basePath}/${fileName}`, {
+        const file = fse.readFileSync(join(basePath, fileName), {
             encoding: "utf-8"
         });
         const version = getVersion(file);

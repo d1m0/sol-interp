@@ -158,7 +158,7 @@ import { InterpVisitor } from "./visitors";
 import { decodeLinkMap, isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bshl, bshr } from "./bitwise";
 import { buildEvent } from "./events";
-import { CallResult, EnvInterface, SolMessage } from "./env";
+import { CallResult, EthereumEnvInterface, SolMessage } from "./env";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -206,7 +206,7 @@ export class Interpreter {
     arrayBuiltins: BuiltinStruct;
 
     constructor(
-        public readonly world: EnvInterface,
+        public readonly world: EthereumEnvInterface,
         public readonly artifactManager: ArtifactManager,
         public readonly artifact: ArtifactInfo,
         private readonly visitors: InterpVisitor[]
