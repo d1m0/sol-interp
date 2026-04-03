@@ -28,7 +28,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { State } from "./state";
+import { makeStateWithConstants, State } from "./state";
 import {
     InternalError,
     NoScope,
@@ -3066,11 +3066,21 @@ export class Interpreter {
         return res;
     }
 
-    evalInternalCall(expr: sol.FunctionCall, callee: InternalCallTargetValue, state: State): Value {
+    evalInternalCall(
+        expr: sol.FunctionCall,
+        callee: InternalCallTargetValue,
+        state: State,
+        calleeState: State | undefined = undefined
+    ): Value {
         const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
         const argTs = expr.vArguments.map((arg) => this.typeOf(arg));
 
-        const results = this._execCall(callee, argVals, argTs, state);
+        const results = this._execCall(
+            callee,
+            argVals,
+            argTs,
+            calleeState === undefined ? state : calleeState
+        );
 
         if (results.length === 0) {
             return none;
@@ -3242,6 +3252,24 @@ export class Interpreter {
             (callee instanceof ExternalCallDescription && callee.target instanceof NewCall)
         ) {
             return this.evalNewCall(expr, callee, state);
+        }
+
+        // Special case: External calls to pure library functions in constant evaluation are treated as internal
+        if (
+            callee instanceof DefValue &&
+            callee.def instanceof sol.FunctionDefinition &&
+            callee.def.vScope instanceof sol.ContractDefinition &&
+            callee.def.vScope.kind === sol.ContractKind.Library &&
+            state.isConstants
+        ) {
+            this.expect(callee.def.stateMutability === sol.FunctionStateMutability.Pure, ``);
+            const libInfo = this.artifactManager.getContractInfo(callee.def);
+            this.expect(
+                libInfo !== undefined,
+                `Missing contract information for library ${callee.def.vScope.name}`
+            );
+            const libState = makeStateWithConstants(this.artifactManager, libInfo);
+            return this.evalInternalCall(expr, new rtt.InternalFunRef(callee.def), state, libState);
         }
 
         // External calls

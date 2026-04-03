@@ -36,6 +36,7 @@ export interface State {
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
     storageReadOnly: boolean;
     block: Block;
+    isConstants: boolean;
 }
 
 /**
@@ -71,7 +72,8 @@ export function makeNoContractState(): State {
         scope: undefined,
         constantsMap: new Map(),
         storageReadOnly: true,
-        block: createBlock()
+        block: createBlock(),
+        isConstants: true
     };
 }
 
@@ -115,7 +117,8 @@ export function makeStateForAccount(
         scope: undefined,
         constantsMap: constantsMap,
         storageReadOnly,
-        block: createBlock()
+        block: createBlock(),
+        isConstants: false
     };
 }
 
