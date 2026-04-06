@@ -1307,8 +1307,7 @@ export class Interpreter {
             this.expect(gte(this.compilerVersion, "0.5.0"));
             this.popScope(state);
         } else {
-            // In < 0.5.0 there should be a signle global scope
-            this.expect(lt(this.compilerVersion, "0.5.0"));
+            // Nothing to do
         }
 
         return ControlFlow.Fallthrough;
