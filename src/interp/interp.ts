@@ -160,6 +160,7 @@ import { decodeLinkMap, isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bshl, bshr } from "./bitwise";
 import { buildEvent } from "./events";
 import { CallResult, EthereumEnvInterface, SolMessage } from "./env";
+import { isBlock04Scope } from "../utils";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -1071,7 +1072,7 @@ export class Interpreter {
 
         // VariableDeclarationStatements are their own scope on solidity >0.5.0 and
         // when they are in the initialization of a for loop.
-        if (gte(this.compilerVersion, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
+        if (gte(this.compilerVersion, "0.5.0")) {
             this.pushScope(
                 stmt,
                 stmt.vDeclarations.map((d) => [d, none]),
@@ -1111,19 +1112,23 @@ export class Interpreter {
 
         const localVals: Array<[sol.VariableDeclaration, Value]> = [];
 
-        // For Solidity <0.5.0 block locals are live for the whole block. So 0-init them at the start of the block
         if (lt(this.compilerVersion, "0.5.0")) {
-            for (const stmt of block.vStatements) {
-                if (stmt instanceof sol.VariableDeclarationStatement) {
+            // For Solidity <0.5.0 there is a single scope for the whole function/modifier
+            if (isBlock04Scope(block)) {
+                for (const stmt of block.getChildrenByType(sol.VariableDeclarationStatement)) {
                     for (const decl of stmt.vDeclarations) {
                         const type = this.varDeclToRuntimeType(decl);
                         localVals.push([decl, makeZeroValue(type, state)]);
                     }
                 }
-            }
-        }
 
-        this.pushScope(block, localVals, state);
+                this.pushScope(block, localVals, state);
+            }
+        } else {
+            // For Solidity >=0.5.0 each variable statement is a start of a scope up to the enclosing block/for statement
+            // Push an empty scope at each block just as a marker for where the current locals start
+            this.pushScope(block, [], state);
+        }
 
         for (const stmt of block.vStatements) {
             flow = this.exec(stmt, state);
@@ -1139,9 +1144,14 @@ export class Interpreter {
             while (!(state.scope instanceof LocalsScope && state.scope.node === block)) {
                 this.popScope(state);
             }
+
+            this.popScope(state);
+        } else {
+            if (isBlock04Scope(block)) {
+                this.popScope(state);
+            }
         }
 
-        this.popScope(state);
         return flow;
     }
 
@@ -1289,12 +1299,16 @@ export class Interpreter {
             }
         }
 
-        // We added a scope for the for loop initialization statement. Pop it here.
+        // In >=0.5.0 we added a scope for the for loop initialization statement. Pop it here.
         if (
             state.scope instanceof LocalsScope &&
             state.scope.node === stmt.vInitializationExpression
         ) {
+            this.expect(gte(this.compilerVersion, "0.5.0"));
             this.popScope(state);
+        } else {
+            // In < 0.5.0 there should be a signle global scope
+            this.expect(lt(this.compilerVersion, "0.5.0"));
         }
 
         return ControlFlow.Fallthrough;
