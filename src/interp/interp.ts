@@ -3837,7 +3837,7 @@ export class Interpreter {
             this.expect(typeof subVal === "bigint" || subVal instanceof Uint8Array);
 
             if (typeof subVal === "bigint") {
-                res = ~subVal;
+                res = clampIntToType(~subVal, t as rtt.IntType);
             } else {
                 res = bytesBitwiseNot(subVal);
             }
