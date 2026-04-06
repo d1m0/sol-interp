@@ -63,7 +63,8 @@ import {
     TypeValue,
     Value,
     ValueTypeConstructors,
-    NoneValue
+    NoneValue,
+    SuperVal
 } from "./value";
 import {
     Address,
@@ -3270,12 +3271,10 @@ export class Interpreter {
             }
 
             if (expr.name === "super") {
-                const contract = getCodeContract(state);
-                this.expect(
-                    contract.vLinearizedBaseContracts.length > 1,
-                    `Unexpected call to super() in contract with no bases`
-                );
-                return new DefValue(contract.vLinearizedBaseContracts[1]);
+                // Note we purposefully choose the current function's syntactically containing contract, and not the current MDC here
+                const contract = expr.getClosestParentByType(sol.ContractDefinition);
+                this.expect(contract !== undefined, `Can't have super outside of a contract`);
+                return new SuperVal(contract);
             }
 
             const res = this.builtins.getField(expr.name);
@@ -3624,6 +3623,28 @@ export class Interpreter {
             return BigInt(getMsg(state).length);
         }
 
+        if (baseVal instanceof SuperVal) {
+            const def = expr.vReferencedDeclaration;
+            this.expect(
+                def instanceof sol.FunctionDefinition ||
+                    def instanceof sol.VariableDeclaration ||
+                    def instanceof sol.ModifierDefinition ||
+                    def instanceof sol.EventDefinition
+            );
+            for (const base of baseVal.conrtact.vLinearizedBaseContracts.slice(1)) {
+                const t = sol.resolve(base, def);
+                this.expect(!(t instanceof sol.VariableDeclaration));
+                if (t && (!(t instanceof sol.FunctionDefinition) || t.vBody !== undefined)) {
+                    return new DefValue(t);
+                }
+            }
+
+            this.fail(
+                InternalError,
+                `Couldn't resolve ${baseVal.conrtact.name}.super.${expr.memberName}`
+            );
+        }
+
         if (baseVal instanceof DefValue) {
             // Handle Event/Error/Function definition selectors
             if (
@@ -3968,6 +3989,10 @@ export class Interpreter {
 
             if (v instanceof Array) {
                 this.assertNotPoison(state, v);
+                continue;
+            }
+
+            if (v instanceof SuperVal) {
                 continue;
             }
 
