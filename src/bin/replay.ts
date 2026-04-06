@@ -40,7 +40,7 @@ function addArtifactToAccountMap(
             assert(matchingContracts.length <= 1, `Unexpected multiple contracts with id ${id}`);
             if (matchingContracts.length === 1) {
                 accountInfo.contract = matchingContracts[0];
-                break;
+                continue
             }
             assert(false, `Shouldn't get here`);
         }
