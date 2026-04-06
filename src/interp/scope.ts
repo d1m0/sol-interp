@@ -392,8 +392,15 @@ export class GlobalScope extends BaseScope {
 
     private static gatherConstVars(
         unit: sol.SourceUnit,
-        res = new Set<sol.VariableDeclaration>()
+        res = new Set<sol.VariableDeclaration>(),
+        visited = new Set<sol.SourceUnit>()
     ): Set<sol.VariableDeclaration> {
+        if (visited.has(unit)) {
+            return res;
+        }
+
+        visited.add(unit);
+
         for (const v of unit.vVariables) {
             res.add(v);
         }
@@ -412,7 +419,7 @@ export class GlobalScope extends BaseScope {
                 }
             } else {
                 // import "foo"
-                for (const varDecl of GlobalScope.gatherConstVars(imp.vSourceUnit, res)) {
+                for (const varDecl of GlobalScope.gatherConstVars(imp.vSourceUnit, res, visited)) {
                     res.add(varDecl);
                 }
             }
