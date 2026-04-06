@@ -105,10 +105,11 @@ export class AlignedTraceBuilder extends BaseEEI {
         private readonly lowLevelTrace: EVMStep[],
         private readonly msg: SolMessage,
         block: Block,
+        tx: TypedTransaction,
         blockManager: BlockManagerI,
         maxNumSteps: number | undefined = undefined
     ) {
-        super(artifactManager, initialState, block, blockManager, maxNumSteps);
+        super(artifactManager, initialState, block, tx, blockManager, maxNumSteps);
         for (let i = 0; i < this.lowLevelTrace.length; i++) {
             const step = this.lowLevelTrace[i];
 

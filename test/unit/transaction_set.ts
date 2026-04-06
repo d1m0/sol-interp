@@ -29,6 +29,7 @@ import { CallResult, BaseEEI, SolMessage, Trace, FixedSetBlockManager } from "..
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
 import { TraceVisitor } from "../../src/interp/visitors";
 import { createBlock } from "@ethereumjs/block";
+import { createTx } from "@ethereumjs/tx";
 
 const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
 
@@ -90,6 +91,7 @@ export class TransactionSet {
             this._artifactManager,
             ImmMap.fromEntries([]),
             createBlock(),
+            createTx({}),
             new FixedSetBlockManager([]),
             1000
         );

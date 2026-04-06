@@ -100,6 +100,7 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
             trace,
             makeSolMessage(evmTx),
             block,
+            evmTx,
             new FixedSetBlockManager([...prevBlocks, block]),
             Number(opts.maxNumSteps)
         );

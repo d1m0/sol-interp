@@ -13,6 +13,7 @@ import {
 } from "../../src/interp/abi";
 import { TraceVisitor } from "../../src/interp/visitors";
 import { createBlock } from "@ethereumjs/block";
+import { createTx } from "@ethereumjs/tx";
 
 type ExceptionConstructors = typeof AssertError;
 const samples: Array<
@@ -196,6 +197,7 @@ describe("Simple function call tests", () => {
                 artifactManager,
                 undefined,
                 createBlock({}),
+                createTx({}),
                 new FixedSetBlockManager([])
             );
 

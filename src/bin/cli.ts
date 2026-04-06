@@ -10,6 +10,7 @@ import { ppTrace } from "../interp/pp";
 import { CallResult } from "../interp";
 import { addSourcesToResult, error } from "./utils";
 import { createBlock } from "../utils";
+import { createTx } from "@ethereumjs/tx";
 
 function ppBaseValue(v: BaseValue): string {
     if (v instanceof Address) {
@@ -101,7 +102,7 @@ function ppRes(res: CallResult, decodedReturns: BaseValue[] | undefined): string
     }
 
     const artifactManager = new ArtifactManager(artifacts);
-    const runner = new Runner(artifactManager, createBlock({}));
+    const runner = new Runner(artifactManager, createBlock({}), createTx({}));
 
     for (const step of options.steps) {
         try {

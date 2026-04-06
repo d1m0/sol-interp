@@ -12,6 +12,7 @@ import { InterpVisitor } from "../visitors";
 import { ppAccount } from "../pp";
 import { AccountInfo, CallResult, EthereumEnvInterface, AccountMap, SolMessage } from "./types";
 import { Block } from "@ethereumjs/block";
+import { TypedTransaction } from "@ethereumjs/tx";
 
 export function ppChainState(state: AccountMap): string {
     const t: string[] = [];
@@ -69,6 +70,7 @@ export class BaseEEI implements EthereumEnvInterface {
         public readonly artifactManager: ArtifactManager,
         initialState: AccountMap = ImmMap.fromEntries([]),
         private readonly block: Block,
+        private readonly tx: TypedTransaction,
         private readonly blockManager: BlockManagerI,
         private readonly maxNumSteps: undefined | number = undefined
     ) {
@@ -258,6 +260,7 @@ export class BaseEEI implements EthereumEnvInterface {
         );
 
         interpState.block = this.block;
+        interpState.tx = this.tx;
 
         const isCall = !msg.to.equals(ZERO_ADDRESS);
         const res = isCall ? interp.call(msg, interpState) : interp.create(msg, interpState);

@@ -57,6 +57,7 @@ import { ppValue } from "./pp";
 import { lt, satisfies } from "semver";
 import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
 import { xor } from "./bitwise";
+import { isLegacyTx } from "@ethereumjs/tx";
 
 /**
  * A version-dependent buitlin description. This is a recursive datatype with several cases:
@@ -981,6 +982,35 @@ const blockhashBuiltinOldField = new BuiltinFunction(
     false
 );
 
+const txGasPriceBuiltin = new BuiltinFunction(
+    "gasprice",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        const tx = state.tx;
+        if (isLegacyTx(tx)) {
+            return [tx.gasPrice];
+        }
+
+        rtt.nyi(`tx.gasPrice for tx of type ${tx.type}`);
+    },
+    false,
+    true,
+    false
+);
+
+const txOriginBuiltin = new BuiltinFunction(
+    "origin",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.tx.getSenderAddress()];
+    },
+    false,
+    true,
+    false
+);
+
+const txBuiltinStructDesc: BuiltinDescriptor = ["tx", [txGasPriceBuiltin, txOriginBuiltin]];
+
 const blockBuiltinStructDesc: BuiltinDescriptor = [
     "block",
     [
@@ -1040,6 +1070,7 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         msgBuiltinStructDesc,
         typeBuiltin,
         blockBuiltinStructDesc,
+        txBuiltinStructDesc,
         [[now, "<0.7.0"]],
         globalBlockashBuiltin,
         ecrecoverBuiltin
