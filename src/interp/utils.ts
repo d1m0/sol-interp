@@ -36,6 +36,7 @@ import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
 import { Block } from "@ethereumjs/block";
+const shajs = require("sha.js");
 
 export function castBytesViewToString<
     T extends
@@ -961,4 +962,8 @@ export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
 export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition {
     sol.assert(ref.opaque instanceof sol.FunctionDefinition, ``);
     return ref.opaque;
+}
+
+export function sha256(input: Uint8Array): Uint8Array {
+    return new shajs.sha256().end(input).read();
 }

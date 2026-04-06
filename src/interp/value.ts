@@ -196,7 +196,7 @@ export class CurriedVal {
 }
 
 export class SuperVal {
-    constructor(public readonly conrtact: sol.ContractDefinition) {}
+    constructor(public readonly bases: sol.ContractDefinition[]) {}
 }
 
 export const none = new NoneValue();

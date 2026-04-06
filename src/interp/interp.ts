@@ -3271,10 +3271,23 @@ export class Interpreter {
             }
 
             if (expr.name === "super") {
-                // Note we purposefully choose the current function's syntactically containing contract, and not the current MDC here
-                const contract = expr.getClosestParentByType(sol.ContractDefinition);
-                this.expect(contract !== undefined, `Can't have super outside of a contract`);
-                return new SuperVal(contract);
+                const mdc = getCodeContract(state);
+                const bases = mdc.vLinearizedBaseContracts;
+
+                const syntacticContract = expr.getClosestParentByType(sol.ContractDefinition);
+                this.expect(
+                    syntacticContract !== undefined,
+                    `Can't have super outside of a contract`
+                );
+
+                const idx = bases.indexOf(syntacticContract);
+                this.expect(
+                    idx >= 0,
+                    `Current base ${syntacticContract.name} not found in mdc's(${mdc.name}) base list `
+                );
+
+                this.expect(idx < bases.length - 1, `Can't have a call to super in toplevel base`);
+                return new SuperVal(bases.slice(idx + 1));
             }
 
             const res = this.builtins.getField(expr.name);
@@ -3631,7 +3644,7 @@ export class Interpreter {
                     def instanceof sol.ModifierDefinition ||
                     def instanceof sol.EventDefinition
             );
-            for (const base of baseVal.conrtact.vLinearizedBaseContracts.slice(1)) {
+            for (const base of baseVal.bases) {
                 const t = sol.resolve(base, def);
                 this.expect(!(t instanceof sol.VariableDeclaration));
                 if (t && (!(t instanceof sol.FunctionDefinition) || t.vBody !== undefined)) {
@@ -3641,7 +3654,7 @@ export class Interpreter {
 
             this.fail(
                 InternalError,
-                `Couldn't resolve ${baseVal.conrtact.name}.super.${expr.memberName}`
+                `Couldn't resolve ${baseVal.bases[0].name}.super.${expr.memberName}`
             );
         }
 

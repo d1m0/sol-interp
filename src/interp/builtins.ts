@@ -41,6 +41,7 @@ import {
     liftExtCalRef,
     memBytesT,
     memStringT,
+    sha256,
     stringT
 } from "./utils";
 import {
@@ -749,6 +750,41 @@ const keccak256v04Builtin = new BuiltinFunction(
     false
 );
 
+const sha256v04Builtin = new BuiltinFunction(
+    "sha256",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[]): Value[] => {
+        const encTs = getEncodeTypes(argTs, interp.ctx, true);
+        const encoded = encodePacked(args, encTs, state);
+        const hash = sha256(encoded);
+        interp.expect(hash.length === 32);
+
+        return [hash];
+    },
+    false,
+    false,
+    false
+);
+
+const sha256v05Builtin = new BuiltinFunction(
+    "sha256",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(
+            args.length === 1 && args[0] instanceof View,
+            `sha256 expects a bytes array as argument`
+        );
+        const bytes = decodeView(args[0], state);
+        interp.expect(bytes instanceof Uint8Array, `sha256 expects a bytes array as argument`);
+        const res = sha256(bytes);
+        interp.expect(res.length === 32);
+        return [res];
+    },
+    false,
+    false,
+    false
+);
+
 const keccak256v05Builtin = new BuiltinFunction(
     "keccak256",
     dummyFunT,
@@ -1066,6 +1102,10 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         [
             [keccak256v04Builtin, "<0.5.0"],
             [keccak256v05Builtin, ">=0.5.0"]
+        ],
+        [
+            [sha256v04Builtin, "<0.5.0"],
+            [sha256v05Builtin, ">=0.5.0"]
         ],
         msgBuiltinStructDesc,
         typeBuiltin,
