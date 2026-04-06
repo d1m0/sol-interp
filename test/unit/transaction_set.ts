@@ -25,10 +25,11 @@ import {
     abiValueToBaseValue,
     toABIEncodedType
 } from "../../src/interp/abi";
-import { CallResult, Chain, SolMessage, Trace } from "../../src";
+import { CallResult, BaseEEI, SolMessage, Trace, FixedSetBlockManager } from "../../src";
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
 import { TraceVisitor } from "../../src/interp/visitors";
 import { createBlock } from "@ethereumjs/block";
+import { createTx } from "@ethereumjs/tx";
 
 const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
 
@@ -78,7 +79,7 @@ export class TransactionSet {
     contractMap = new Map<string, Address>();
     libMap = new Map<string, Address>();
     traceVisitor: TraceVisitor;
-    chain: Chain;
+    chain: BaseEEI;
     msgs: SolMessage[] = [];
 
     constructor(
@@ -86,7 +87,14 @@ export class TransactionSet {
         private readonly steps: TransactionDesc[]
     ) {
         this.traceVisitor = new TraceVisitor();
-        this.chain = new Chain(this._artifactManager, ImmMap.fromEntries([]), createBlock(), 1000);
+        this.chain = new BaseEEI(
+            this._artifactManager,
+            ImmMap.fromEntries([]),
+            createBlock(),
+            createTx({}),
+            new FixedSetBlockManager([]),
+            1000
+        );
         this.chain.addVisitor(this.traceVisitor);
         this.chain.makeEmptyAccount(SENDER, 1000000n);
     }

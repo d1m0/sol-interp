@@ -1,10 +1,11 @@
 import { TypedTxData } from "@ethereumjs/tx";
-import { AccountMap } from "../interp";
+import { AccountMap, AsyncBlockManagerI } from "../interp";
 import { JSONCache, jsonCall } from "./json";
 import { ImmMap, toHexString } from "sol-dbg";
 import { Address, createAddressFromString, hexToBigInt, hexToBytes } from "@ethereumjs/util";
-import { BlockData } from "@ethereumjs/block";
+import { Block, BlockData } from "@ethereumjs/block";
 import { join } from "path";
+import { assert, createBlock } from "../utils";
 
 interface QuicknodeAccountDesc {
     balance: `0x${string}`;
@@ -145,20 +146,7 @@ export interface QuicknodeReplayInfo {
     preState: QuicknodeStateDesc;
 }
 
-class QuicknodeBlockNoTx extends JSONCache<QuicknodeBlock> {
-    constructor(basePath: string) {
-        super(join(basePath, "blocks_wo_txs"), 5);
-    }
-    makeKey(endpoint: string, blockNum: number): string {
-        return `${blockNum}`;
-    }
-    async make(endpoint: string, blockNum: number): Promise<QuicknodeBlock> {
-        const qBlockData = await jsonCall(endpoint, "eth_getBlockByNumber", [blockNum, false]);
-        return qBlockData;
-    }
-}
-
-class QuicknodeBlockWithTxs extends JSONCache<QuicknodeBlock> {
+class QuicknodeBlockWithTxs extends JSONCache<QuicknodeBlock | undefined> {
     constructor(basePath: string) {
         super(join(basePath, "blocks_with_txs"), 5);
     }
@@ -166,8 +154,9 @@ class QuicknodeBlockWithTxs extends JSONCache<QuicknodeBlock> {
     makeKey(endpoint: string, blockNum: number): string {
         return `${blockNum}`;
     }
-    async make(endpoint: string, blockNum: number): Promise<QuicknodeBlock> {
-        return await jsonCall(endpoint, "eth_getBlockByNumber", [toHexString(blockNum), true]);
+    async make(endpoint: string, blockNum: number): Promise<QuicknodeBlock | undefined> {
+        const res = await jsonCall(endpoint, "eth_getBlockByNumber", [toHexString(blockNum), true]);
+        return res === null ? undefined : res;
     }
 }
 
@@ -201,7 +190,6 @@ class QuicknodePreState extends JSONCache<QuicknodeStateDesc> {
 }
 
 const QUICKNODE_CACHE_DIR = ".quicknode_cache/";
-const qBlocksNoTx = new QuicknodeBlockNoTx(QUICKNODE_CACHE_DIR);
 const qBlocksWithTx = new QuicknodeBlockWithTxs(QUICKNODE_CACHE_DIR);
 const qTxs = new QuicknodeTxs(QUICKNODE_CACHE_DIR);
 const qPreState = new QuicknodePreState(QUICKNODE_CACHE_DIR);
@@ -222,10 +210,14 @@ export interface ReplayInfo {
  */
 export async function getTXReplayInfo(endpoint: string, txHash: string): Promise<ReplayInfo> {
     const tx = await qTxs.get(endpoint, txHash);
-    const block = await qBlocksNoTx.get(endpoint, tx.blockNumber);
+    const blockNum = hexToBigInt(tx.blockNumber);
+    const qBlockData = await qBlocksWithTx.get(endpoint, blockNum);
+    assert(qBlockData !== undefined, `No block with number {0}`, blockNum);
+    const blockData = makeBlockData(qBlockData);
+
     const preState = await qPreState.get(endpoint, txHash);
     return {
-        block: makeBlockData(block),
+        block: blockData,
         tx: makeTxData(tx),
         preState: makeAccountMap(preState),
         sender: createAddressFromString(tx.from),
@@ -245,7 +237,9 @@ export async function getBlockReplayInfo(
 ): Promise<ReplayInfo[]> {
     const res: ReplayInfo[] = [];
     const blockData = await qBlocksWithTx.get(endpoint, blockNum);
+    assert(blockData !== undefined, `No block with number {0}`, blockNum);
     const block = makeBlockData(blockData);
+
     for (const tx of blockData.transactions) {
         const preState = await qPreState.get(endpoint, tx.hash);
         res.push({
@@ -258,4 +252,30 @@ export async function getBlockReplayInfo(
         });
     }
     return res;
+}
+
+// @todo Uncomment and use in bin/replay.ts after fixing #55
+export class QuicknodeBlockManager implements AsyncBlockManagerI {
+    blockCache = new Map<bigint, Block>();
+    constructor(private readonly endpoint: string) {}
+
+    getCachedBlocks(): Block[] {
+        return [...this.blockCache.values()];
+    }
+
+    async getBlock(number: bigint): Promise<Block | undefined> {
+        let res = this.blockCache.get(number);
+        if (res !== undefined) {
+            return res;
+        }
+
+        const blockData = await qBlocksWithTx.get(this.endpoint, number);
+        res = blockData === undefined ? undefined : createBlock(makeBlockData(blockData));
+
+        if (res) {
+            this.blockCache.set(res.header.number, res);
+        }
+
+        return res;
+    }
 }

@@ -195,6 +195,10 @@ export class CurriedVal {
     }
 }
 
+export class SuperVal {
+    constructor(public readonly bases: sol.ContractDefinition[]) {}
+}
+
 export const none = new NoneValue();
 
 export type Value =
@@ -206,7 +210,8 @@ export type Value =
     | ExternalCallDescription
     | NewCall
     | Value[]
-    | CurriedVal;
+    | CurriedVal
+    | SuperVal;
 
 /**
  * Primitive values are those that can be persisted in memory,storage,calldata or in a local varibale
@@ -230,7 +235,8 @@ export type NonPoisonValue =
     | BuiltinStruct
     | DefValue
     | CurriedVal
-    | Value[];
+    | Value[]
+    | SuperVal;
 
 // Values that represent possible external call targets. Must determine at least an address and a selector
 export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDescription;

@@ -1,3 +1,4 @@
+import { Block } from "@ethereumjs/block";
 import { Address } from "@ethereumjs/util";
 import * as rtt from "sol-dbg";
 
@@ -31,9 +32,10 @@ export interface SolMessage {
     depth: number;
 }
 
-export interface EnvInterface {
+export interface EthereumEnvInterface {
     execMsg(msg: SolMessage): CallResult;
     getAccount(address: string | Address): AccountInfo | undefined;
     setAccount(address: string | Address, account: AccountInfo): void;
     updateAccount(account: AccountInfo): void;
+    getBlock(number: bigint): Block | undefined;
 }

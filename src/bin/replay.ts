@@ -1,16 +1,22 @@
 import { Command } from "commander";
-import { getBlockReplayInfo, getTXReplayInfo, ReplayInfo } from "./quicknode";
+import {
+    getBlockReplayInfo,
+    getTXReplayInfo,
+    QuicknodeBlockManager,
+    ReplayInfo
+} from "./quicknode";
 import { getArtifacts } from "./etherscan";
-import { ContractInfo, PartialSolcOutput } from "sol-dbg";
+import { ArtifactInfo, ContractInfo, PartialSolcOutput, zip3 } from "sol-dbg";
 import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, alignedTraceWellFormed, makeSolMessage } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
 import { hasMisaligned } from "../alignment";
 import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
-import { AccountMap } from "../interp";
+import { AccountMap, FixedSetBlockManager } from "../interp";
 import * as fse from "fs-extra";
 import { basename, dirname, join, normalize } from "path";
 import { dump, record } from "./stats";
+import { assert } from "../utils";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -19,24 +25,24 @@ import { dump, record } from "./stats";
  */
 function addArtifactToAccountMap(
     state: AccountMap,
-    artifactManager: ArtifactManager,
-    addrToNameMap: Map<string, [PartialSolcOutput, string]>
+    addrToArtifact: Map<string, [ArtifactInfo, string]>
 ): void {
-    const nameToArtifact = new Map<string, ContractInfo>();
-    for (const info of artifactManager.contracts()) {
-        nameToArtifact.set(`${info.fileName}:${info.contractName}`, info);
-    }
-
     // Add contract info to initial state
     for (const [, accountInfo] of state.entries()) {
-        const t = addrToNameMap.get(accountInfo.address.toString());
+        const t = addrToArtifact.get(accountInfo.address.toString());
 
         if (t) {
-            const info = nameToArtifact.get(t[1]);
+            const [artifactInfo, id] = t;
+            const matchingContracts = artifactInfo.contracts.filter(
+                (info) => id === `${info.fileName}:${info.contractName}`
+            );
 
-            if (info) {
-                accountInfo.contract = info;
+            assert(matchingContracts.length <= 1, `Unexpected multiple contracts with id ${id}`);
+            if (matchingContracts.length === 1) {
+                accountInfo.contract = matchingContracts[0];
+                continue;
             }
+            assert(false, `Shouldn't get here`);
         }
     }
 }
@@ -44,14 +50,21 @@ function addArtifactToAccountMap(
 async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
     try {
         console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
-        record(`trace_replay_attempt`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        record(`trace`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+
+        const blockManager = new QuicknodeBlockManager(opts.quicknodeEndpoint);
 
         const [trace, , , block, evmTx] = await replayEVM(
             txReplayInfo.preState,
             txReplayInfo.tx,
             txReplayInfo.block,
+            blockManager,
             txReplayInfo.sender
         );
+
+        if (trace.length === 0) {
+            record(`zero_length`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        }
         const addrsTouched = getExecutedAddresses(trace);
         const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
 
@@ -74,11 +87,23 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
             }
         }
 
-        const artifacts: PartialSolcOutput[] = [...addrToContract.values()].map((p) => p[0]);
-        const artifactManager = new ArtifactManager(artifacts);
+        const addrsAndSolcJSONs: Array<[string, [PartialSolcOutput, string]]> = [
+            ...addrToContract.entries()
+        ];
+        const artifactManager = new ArtifactManager(addrsAndSolcJSONs.map((p) => p[1][0]));
+        const addrsArtifactInfoAndMainContractId = zip3(
+            addrsAndSolcJSONs.map((k) => k[0]),
+            artifactManager.artifacts(),
+            addrsAndSolcJSONs.map((k) => k[1][1])
+        );
+        const addrToArtifactAndContractId = new Map<string, [ArtifactInfo, string]>(
+            addrsArtifactInfoAndMainContractId.map(([addr, info, id]) => [addr, [info, id]])
+        );
 
         const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
-        addArtifactToAccountMap(interpPreState, artifactManager, addrToContract);
+        addArtifactToAccountMap(interpPreState, addrToArtifactAndContractId);
+
+        const prevBlocks = blockManager.getCachedBlocks();
 
         const builder = new AlignedTraceBuilder(
             artifactManager,
@@ -86,6 +111,8 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
             trace,
             makeSolMessage(evmTx),
             block,
+            evmTx,
+            new FixedSetBlockManager([...prevBlocks, block]),
             Number(opts.maxNumSteps)
         );
 
@@ -107,13 +134,13 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
         );
 
         if (!wellFormed) {
-            record(`trace_mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-        }
-        if (hasMisaligned(alignedTraces)) {
-            record(`trace_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            record(`mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            console.error(`Trace MALFORMED!`);
+        } else if (hasMisaligned(alignedTraces)) {
+            record(`misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
             console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
         } else {
-            record(`trace_no_misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            record(`aligned`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
         }
     } catch (e) {
         record(`${(e as any).constructor.name}:${(e as any).message}`, [

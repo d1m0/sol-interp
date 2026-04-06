@@ -14,6 +14,7 @@ import { BuiltinFunction } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { AccountInfo, SolMessage } from "./env";
 import { Block, createBlock } from "@ethereumjs/block";
+import { createTx, TypedTransaction } from "@ethereumjs/tx";
 
 export interface InternalCallFrame {
     callee: sol.FunctionDefinition | sol.VariableDeclaration | BuiltinFunction;
@@ -36,6 +37,7 @@ export interface State {
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
     storageReadOnly: boolean;
     block: Block;
+    tx: TypedTransaction;
 }
 
 /**
@@ -71,7 +73,8 @@ export function makeNoContractState(): State {
         scope: undefined,
         constantsMap: new Map(),
         storageReadOnly: true,
-        block: createBlock()
+        block: createBlock(),
+        tx: createTx({})
     };
 }
 
@@ -115,7 +118,8 @@ export function makeStateForAccount(
         scope: undefined,
         constantsMap: constantsMap,
         storageReadOnly,
-        block: createBlock()
+        block: createBlock(),
+        tx: createTx({})
     };
 }
 

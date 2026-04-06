@@ -6,7 +6,7 @@ import {
     createAddressFromString,
     hexToBytes
 } from "@ethereumjs/util";
-import { CallResult, Chain, SolMessage } from "../interp";
+import { CallResult, BaseEEI, SolMessage, FixedSetBlockManager } from "../interp";
 import { ArtifactManager } from "../interp/artifactManager";
 import { TraceVisitor } from "../interp/visitors";
 import { ParsedStep } from "./ast/parser";
@@ -31,12 +31,13 @@ import * as ethABI from "web3-eth-abi";
 import { abiTypeToCanonicalName, abiValueToBaseValue, toABIEncodedType } from "../interp/abi";
 import { getGetterArgAndReturnTs } from "../interp/utils";
 import { Block } from "@ethereumjs/block";
+import { TypedTransaction } from "@ethereumjs/tx";
 
 /**
  * Helper class to run a set of steps
  */
 export class Runner {
-    chain: Chain;
+    chain: BaseEEI;
     visitor: TraceVisitor;
     varToAddr = new Map<string, Address>();
     libMap = new Map<string, Address>();
@@ -45,9 +46,16 @@ export class Runner {
 
     constructor(
         private readonly artifactManager: ArtifactManager,
-        block: Block
+        block: Block,
+        tx: TypedTransaction
     ) {
-        this.chain = new Chain(this.artifactManager, ImmMap.fromEntries([]), block);
+        this.chain = new BaseEEI(
+            this.artifactManager,
+            ImmMap.fromEntries([]),
+            block,
+            tx,
+            new FixedSetBlockManager([block])
+        );
         this.visitor = new TraceVisitor();
         this.chain.addVisitor(this.visitor);
 

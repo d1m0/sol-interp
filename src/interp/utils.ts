@@ -29,12 +29,14 @@ import {
     TempView,
     CodeView
 } from "./view";
-import { AccountInfo, CallResult, EnvInterface } from "./env";
+import { AccountInfo, CallResult, EthereumEnvInterface } from "./env";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
 import { Address, setLengthLeft } from "@ethereumjs/util";
 import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
+import { Block } from "@ethereumjs/block";
+const shajs = require("sha.js");
 
 export function castBytesViewToString<
     T extends
@@ -694,7 +696,7 @@ export function topoSort<T extends sol.PPIsh>(things: T[], successors: Map<T, Se
     return res;
 }
 
-export const envFailMock: EnvInterface = {
+export const envFailMock: EthereumEnvInterface = {
     execMsg: function (): CallResult {
         throw new Error("Function not implemented.");
     },
@@ -705,6 +707,9 @@ export const envFailMock: EnvInterface = {
         throw new Error("Function not implemented.");
     },
     updateAccount: function (): void {
+        throw new Error("Function not implemented.");
+    },
+    getBlock: function (): Block | undefined {
         throw new Error("Function not implemented.");
     }
 };
@@ -957,4 +962,8 @@ export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
 export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition {
     sol.assert(ref.opaque instanceof sol.FunctionDefinition, ``);
     return ref.opaque;
+}
+
+export function sha256(input: Uint8Array): Uint8Array {
+    return new shajs.sha256().end(input).read();
 }

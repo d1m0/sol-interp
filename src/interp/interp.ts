@@ -63,7 +63,8 @@ import {
     TypeValue,
     Value,
     ValueTypeConstructors,
-    NoneValue
+    NoneValue,
+    SuperVal
 } from "./value";
 import {
     Address,
@@ -158,7 +159,8 @@ import { InterpVisitor } from "./visitors";
 import { decodeLinkMap, isFailure } from "sol-dbg/dist/debug/decoding/utils";
 import { bshl, bshr } from "./bitwise";
 import { buildEvent } from "./events";
-import { CallResult, EnvInterface, SolMessage } from "./env";
+import { CallResult, EthereumEnvInterface, SolMessage } from "./env";
+import { isBlock04Scope } from "../utils";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -206,7 +208,7 @@ export class Interpreter {
     arrayBuiltins: BuiltinStruct;
 
     constructor(
-        public readonly world: EnvInterface,
+        public readonly world: EthereumEnvInterface,
         public readonly artifactManager: ArtifactManager,
         public readonly artifact: ArtifactInfo,
         private readonly visitors: InterpVisitor[]
@@ -537,6 +539,17 @@ export class Interpreter {
         const [calldataArgs, argTs] = this.getCalldataArgsAndTypes(entryPoint, getMsg(state));
         let res: Value[];
         let resTs: rtt.BaseRuntimeType[];
+
+        for (const arg of calldataArgs) {
+            if (rtt.hasPoison(arg)) {
+                const err = new NoPayloadError(entryPoint);
+                for (const v of this.visitors) {
+                    v.exception(this, state, err);
+                }
+
+                return err;
+            }
+        }
 
         // Execute actual call
         try {
@@ -1059,7 +1072,7 @@ export class Interpreter {
 
         // VariableDeclarationStatements are their own scope on solidity >0.5.0 and
         // when they are in the initialization of a for loop.
-        if (gte(this.compilerVersion, "0.5.0") || stmt.parent instanceof sol.ForStatement) {
+        if (gte(this.compilerVersion, "0.5.0")) {
             this.pushScope(
                 stmt,
                 stmt.vDeclarations.map((d) => [d, none]),
@@ -1099,19 +1112,23 @@ export class Interpreter {
 
         const localVals: Array<[sol.VariableDeclaration, Value]> = [];
 
-        // For Solidity <0.5.0 block locals are live for the whole block. So 0-init them at the start of the block
         if (lt(this.compilerVersion, "0.5.0")) {
-            for (const stmt of block.vStatements) {
-                if (stmt instanceof sol.VariableDeclarationStatement) {
+            // For Solidity <0.5.0 there is a single scope for the whole function/modifier
+            if (isBlock04Scope(block)) {
+                for (const stmt of block.getChildrenByType(sol.VariableDeclarationStatement)) {
                     for (const decl of stmt.vDeclarations) {
                         const type = this.varDeclToRuntimeType(decl);
                         localVals.push([decl, makeZeroValue(type, state)]);
                     }
                 }
-            }
-        }
 
-        this.pushScope(block, localVals, state);
+                this.pushScope(block, localVals, state);
+            }
+        } else {
+            // For Solidity >=0.5.0 each variable statement is a start of a scope up to the enclosing block/for statement
+            // Push an empty scope at each block just as a marker for where the current locals start
+            this.pushScope(block, [], state);
+        }
 
         for (const stmt of block.vStatements) {
             flow = this.exec(stmt, state);
@@ -1127,9 +1144,14 @@ export class Interpreter {
             while (!(state.scope instanceof LocalsScope && state.scope.node === block)) {
                 this.popScope(state);
             }
+
+            this.popScope(state);
+        } else {
+            if (isBlock04Scope(block)) {
+                this.popScope(state);
+            }
         }
 
-        this.popScope(state);
         return flow;
     }
 
@@ -1277,12 +1299,15 @@ export class Interpreter {
             }
         }
 
-        // We added a scope for the for loop initialization statement. Pop it here.
+        // In >=0.5.0 we added a scope for the for loop initialization statement. Pop it here.
         if (
             state.scope instanceof LocalsScope &&
             state.scope.node === stmt.vInitializationExpression
         ) {
+            this.expect(gte(this.compilerVersion, "0.5.0"));
             this.popScope(state);
+        } else {
+            // Nothing to do
         }
 
         return ControlFlow.Fallthrough;
@@ -3259,12 +3284,23 @@ export class Interpreter {
             }
 
             if (expr.name === "super") {
-                const contract = getCodeContract(state);
+                const mdc = getCodeContract(state);
+                const bases = mdc.vLinearizedBaseContracts;
+
+                const syntacticContract = expr.getClosestParentByType(sol.ContractDefinition);
                 this.expect(
-                    contract.vLinearizedBaseContracts.length > 1,
-                    `Unexpected call to super() in contract with no bases`
+                    syntacticContract !== undefined,
+                    `Can't have super outside of a contract`
                 );
-                return new DefValue(contract.vLinearizedBaseContracts[1]);
+
+                const idx = bases.indexOf(syntacticContract);
+                this.expect(
+                    idx >= 0,
+                    `Current base ${syntacticContract.name} not found in mdc's(${mdc.name}) base list `
+                );
+
+                this.expect(idx < bases.length - 1, `Can't have a call to super in toplevel base`);
+                return new SuperVal(bases.slice(idx + 1));
             }
 
             const res = this.builtins.getField(expr.name);
@@ -3514,6 +3550,28 @@ export class Interpreter {
 
         let baseVal = this.evalNP(expr.vExpression, state);
 
+        /**
+         * By definition user-defined functions must be library or free functions.
+         * So if we detect a:
+         *  - member access referring to a library or free function
+         *  - where the base is NOT the name of the Library (i.e. `Lib.foo(val)` vs `val.foo()`)
+         *
+         * Then we assume that this is an instance of a `using for` function
+         */
+        if (
+            expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
+            (expr.vReferencedDeclaration.vScope instanceof sol.SourceUnit ||
+                (expr.vReferencedDeclaration.vScope instanceof sol.ContractDefinition &&
+                    expr.vReferencedDeclaration.vScope.kind === sol.ContractKind.Library)) &&
+            !(baseVal instanceof DefValue)
+        ) {
+            return new CurriedVal(
+                [baseVal],
+                [this.typeOf(expr.vExpression)],
+                new rtt.InternalFunRef(expr.vReferencedDeclaration)
+            );
+        }
+
         if (baseVal instanceof Address) {
             // Builtin field of address
             if (expr.vReferencedDeclaration === undefined) {
@@ -3591,6 +3649,28 @@ export class Interpreter {
             return BigInt(getMsg(state).length);
         }
 
+        if (baseVal instanceof SuperVal) {
+            const def = expr.vReferencedDeclaration;
+            this.expect(
+                def instanceof sol.FunctionDefinition ||
+                    def instanceof sol.VariableDeclaration ||
+                    def instanceof sol.ModifierDefinition ||
+                    def instanceof sol.EventDefinition
+            );
+            for (const base of baseVal.bases) {
+                const t = sol.resolve(base, def);
+                this.expect(!(t instanceof sol.VariableDeclaration));
+                if (t && (!(t instanceof sol.FunctionDefinition) || t.vBody !== undefined)) {
+                    return new DefValue(t);
+                }
+            }
+
+            this.fail(
+                InternalError,
+                `Couldn't resolve ${baseVal.bases[0].name}.super.${expr.memberName}`
+            );
+        }
+
         if (baseVal instanceof DefValue) {
             // Handle Event/Error/Function definition selectors
             if (
@@ -3631,30 +3711,6 @@ export class Interpreter {
             const builtinF = this.arrayBuiltins.getField(expr.memberName);
             this.expect(builtinF instanceof BuiltinFunction);
             return this.evalBuiltinMemberAccess(expr, builtinF, baseVal, state);
-        }
-
-        /**
-         * Using-for member access. Note that we disambiguate `val.foo()` and `Lib.foo(val)`
-         * using the second part of the condition.
-         *
-         * @todo - this check maybe weak. Here we assume that any member-access
-         * to a function, that is not a) `Scope.FunName` b) a builtin and c) a
-         * contract method call, must be a call to a function where the base val is an
-         * implicit first arg. Is this actually true?
-         */
-        if (
-            expr.vReferencedDeclaration instanceof sol.FunctionDefinition &&
-            !(
-                baseVal instanceof DefValue &&
-                (baseVal.def instanceof sol.ContractDefinition ||
-                    baseVal.def instanceof sol.SourceUnit)
-            )
-        ) {
-            return new CurriedVal(
-                [baseVal],
-                [this.typeOf(expr.vExpression)],
-                new rtt.InternalFunRef(expr.vReferencedDeclaration)
-            );
         }
 
         /**
@@ -3828,7 +3884,7 @@ export class Interpreter {
             this.expect(typeof subVal === "bigint" || subVal instanceof Uint8Array);
 
             if (typeof subVal === "bigint") {
-                res = ~subVal;
+                res = clampIntToType(~subVal, t as rtt.IntType);
             } else {
                 res = bytesBitwiseNot(subVal);
             }
@@ -3959,6 +4015,10 @@ export class Interpreter {
 
             if (v instanceof Array) {
                 this.assertNotPoison(state, v);
+                continue;
+            }
+
+            if (v instanceof SuperVal) {
                 continue;
             }
 

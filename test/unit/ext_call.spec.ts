@@ -1,5 +1,5 @@
 import { Value, ImmMap, typeIdToRuntimeType, EventDesc } from "sol-dbg";
-import { Chain, EmitStep } from "../../src";
+import { BaseEEI, EmitStep, FixedSetBlockManager } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
 import { loadSamples, SampleInfo, SampleMap } from "./utils";
@@ -13,6 +13,7 @@ import {
 } from "../../src/interp/abi";
 import { TraceVisitor } from "../../src/interp/visitors";
 import { createBlock } from "@ethereumjs/block";
+import { createTx } from "@ethereumjs/tx";
 
 type ExceptionConstructors = typeof AssertError;
 const samples: Array<
@@ -192,7 +193,13 @@ describe("Simple function call tests", () => {
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
 
             const traceVis = new TraceVisitor();
-            const chain = new Chain(artifactManager, undefined, createBlock({}));
+            const chain = new BaseEEI(
+                artifactManager,
+                undefined,
+                createBlock({}),
+                createTx({}),
+                new FixedSetBlockManager([])
+            );
 
             chain.addVisitor(traceVis);
             const contractInfo = artifactManager.getContractInfo(fun);

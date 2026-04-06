@@ -41,6 +41,7 @@ import {
     liftExtCalRef,
     memBytesT,
     memStringT,
+    sha256,
     stringT
 } from "./utils";
 import {
@@ -57,6 +58,7 @@ import { ppValue } from "./pp";
 import { lt, satisfies } from "semver";
 import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
 import { xor } from "./bitwise";
+import { isLegacyTx } from "@ethereumjs/tx";
 
 /**
  * A version-dependent buitlin description. This is a recursive datatype with several cases:
@@ -748,6 +750,41 @@ const keccak256v04Builtin = new BuiltinFunction(
     false
 );
 
+const sha256v04Builtin = new BuiltinFunction(
+    "sha256",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[]): Value[] => {
+        const encTs = getEncodeTypes(argTs, interp.ctx, true);
+        const encoded = encodePacked(args, encTs, state);
+        const hash = sha256(encoded);
+        interp.expect(hash.length === 32);
+
+        return [hash];
+    },
+    false,
+    false,
+    false
+);
+
+const sha256v05Builtin = new BuiltinFunction(
+    "sha256",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(
+            args.length === 1 && args[0] instanceof View,
+            `sha256 expects a bytes array as argument`
+        );
+        const bytes = decodeView(args[0], state);
+        interp.expect(bytes instanceof Uint8Array, `sha256 expects a bytes array as argument`);
+        const res = sha256(bytes);
+        interp.expect(res.length === 32);
+        return [res];
+    },
+    false,
+    false,
+    false
+);
+
 const keccak256v05Builtin = new BuiltinFunction(
     "keccak256",
     dummyFunT,
@@ -953,7 +990,7 @@ const blockTimestampBuiltin = new BuiltinFunction(
     false
 );
 
-const blockBlockhashBuiltin = new BuiltinFunction(
+const blockhashBuiltinOldField = new BuiltinFunction(
     "blockhash",
     dummyFunT,
     (interp: Interpreter, state: State, args: Value[]): Value[] => {
@@ -971,16 +1008,44 @@ const blockBlockhashBuiltin = new BuiltinFunction(
             return [new Uint8Array(32)];
         }
 
-        if (state.block.header.number === blockNum) {
-            return [state.block.hash()];
-        }
+        const res = interp.world.getBlock(blockNum);
 
-        rtt.nyi(`blockhash(${blockNum})`);
+        interp.expect(res !== undefined);
+        return [res.hash()];
     },
     false,
     false,
     false
 );
+
+const txGasPriceBuiltin = new BuiltinFunction(
+    "gasprice",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        const tx = state.tx;
+        if (isLegacyTx(tx)) {
+            return [tx.gasPrice];
+        }
+
+        rtt.nyi(`tx.gasPrice for tx of type ${tx.type}`);
+    },
+    false,
+    true,
+    false
+);
+
+const txOriginBuiltin = new BuiltinFunction(
+    "origin",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [state.tx.getSenderAddress()];
+    },
+    false,
+    true,
+    false
+);
+
+const txBuiltinStructDesc: BuiltinDescriptor = ["tx", [txGasPriceBuiltin, txOriginBuiltin]];
 
 const blockBuiltinStructDesc: BuiltinDescriptor = [
     "block",
@@ -992,7 +1057,7 @@ const blockBuiltinStructDesc: BuiltinDescriptor = [
         blockGasLimitBuiltin,
         blockNumberBuiltin,
         blockTimestampBuiltin,
-        [[blockBlockhashBuiltin, "<0.5.0"]]
+        [[blockhashBuiltinOldField, "<0.5.0"]]
     ]
 ];
 
@@ -1022,7 +1087,7 @@ const ecrecoverBuiltin = new BuiltinFunction(
 );
 
 const now = blockTimestampBuiltin.alias("now");
-const blockHashBuiltin = blockBlockhashBuiltin.alias("blockhash");
+const globalBlockashBuiltin = blockhashBuiltinOldField.alias("blockhash");
 
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
@@ -1038,11 +1103,16 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
             [keccak256v04Builtin, "<0.5.0"],
             [keccak256v05Builtin, ">=0.5.0"]
         ],
+        [
+            [sha256v04Builtin, "<0.5.0"],
+            [sha256v05Builtin, ">=0.5.0"]
+        ],
         msgBuiltinStructDesc,
         typeBuiltin,
         blockBuiltinStructDesc,
+        txBuiltinStructDesc,
         [[now, "<0.7.0"]],
-        [[blockHashBuiltin, "<0.7.0"]],
+        globalBlockashBuiltin,
         ecrecoverBuiltin
     ]
 ];

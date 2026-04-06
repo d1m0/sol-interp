@@ -7,7 +7,7 @@ import {
     WithReturnInfo
 } from "./evm_trace/transformers";
 import { assert } from "../utils";
-import { Address } from "@ethereumjs/util";
+import { Address, createAddressFromBigInt } from "@ethereumjs/util";
 import { EVMStep } from "./evm_trace";
 import {
     EVMCallEvent,
@@ -118,4 +118,29 @@ export function makeSolEventFromStep(s: EVMStep): SolObservableEvent {
         assert(s.emittedEvent !== undefined, `Step ${s} is not an externally observable EVM step`);
         return new SolEmitEvent(s.emittedEvent);
     }
+}
+
+export enum PrecomiledAddresses {
+    EC_RECOVER = 1,
+    SHA256,
+    RIPEMD160
+    // Not yet supported:
+    //    IDENTITY,
+    //    MODEXP
+}
+
+const precompiles: Address[] = [
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.EC_RECOVER)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.SHA256)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.RIPEMD160))
+];
+
+export function isPrecompile(addr: Address): boolean {
+    for (let i = 0; i < precompiles.length; i++) {
+        if (precompiles[i].equals(addr)) {
+            return true;
+        }
+    }
+
+    return false;
 }

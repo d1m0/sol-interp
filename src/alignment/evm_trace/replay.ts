@@ -5,7 +5,7 @@ import {
     createAddressFromString,
     setLengthLeft
 } from "@ethereumjs/util";
-import { AccountMap } from "../../interp/env";
+import { AccountMap, AsyncBlockManagerI } from "../../interp/env";
 import { createTx, TypedTransaction, TypedTxData } from "@ethereumjs/tx";
 import { Block, BlockData, createBlock } from "@ethereumjs/block";
 import { Common, Hardfork, StateManagerInterface } from "@ethereumjs/common";
@@ -174,7 +174,10 @@ export class EVMReplay {
 
     private constructor() {}
 
-    static async replay(blocks: EVMReplayDesc[]): Promise<EVMReplay> {
+    static async replay(
+        blocks: EVMReplayDesc[],
+        blockManager: AsyncBlockManagerI
+    ): Promise<EVMReplay> {
         const res = new EVMReplay();
         if (blocks.length === 0) {
             return res;
@@ -197,9 +200,12 @@ export class EVMReplay {
             for (const tx of info.txs) {
                 const tracer = new EVMTracer(info.hardfork ? { forceHardfork: info.hardfork } : {});
                 const [trace, result, stateAfter] = await tracer.debugTx(
-                    tx,
-                    info.block,
-                    res._curState.state,
+                    {
+                        tx,
+                        block: info.block,
+                        stateBefore: res._curState.state,
+                        getBlock: async (num: bigint | number) => blockManager.getBlock(BigInt(num))
+                    },
                     {
                         callStack: [-1]
                     }
@@ -253,6 +259,7 @@ export async function replayEVM(
     initialState: AccountMap,
     txData: TypedTxData,
     blockData: BlockData,
+    blockManager: AsyncBlockManagerI,
     sender: Address,
     forceHardfork?: Hardfork
 ): Promise<[EVMStep[], RunTxResult, StateManagerInterface, Block, TypedTransaction]> {
@@ -264,9 +271,17 @@ export async function replayEVM(
     const stateManager = await makeStateManager(initialState);
 
     const tracer = new EVMTracer(forceHardfork ? { forceHardfork } : {});
-    const [trace, res, stateAfter] = await tracer.debugTx(tx, block, stateManager, {
-        callStack: [-1]
-    });
+    const [trace, res, stateAfter] = await tracer.debugTx(
+        {
+            tx,
+            block,
+            stateBefore: stateManager,
+            getBlock: async (num) => blockManager.getBlock(BigInt(num))
+        },
+        {
+            callStack: [-1]
+        }
+    );
 
     if (tracer.failed) {
         throw new EVMReplayError(...(tracer.failInfo as [number, any]));

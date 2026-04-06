@@ -5,6 +5,7 @@ import { EventDesc } from "sol-dbg";
 import { assert } from "../../utils";
 import { EVMStep } from "../evm_trace";
 import { CallInfo, CreateInfo, ExceptionInfo, ReturnInfo } from "../evm_trace/transformers";
+import { isPrecompile } from "../utils";
 
 type EVMPayloadTypes = CallInfo | CreateInfo | ExceptionInfo | ReturnInfo | EventDesc;
 
@@ -73,7 +74,9 @@ export type EVMObservableEvent =
     | EVMEmitEvent;
 
 export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservableEvent | undefined {
-    for (let i = afterIdx + 1; i < trace.length; i++) {
+    let skipAReturn: boolean = false;
+
+    for (let i = afterIdx; i < trace.length; i++) {
         const step = trace[i];
 
         if (step.exceptionInfo) {
@@ -81,8 +84,18 @@ export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservable
         } else if (step.createInfo) {
             return new EVMCreateEvent(i, step);
         } else if (step.returnInfo) {
+            // Skip a return due to a precompile call
+            if (skipAReturn) {
+                skipAReturn = false;
+                continue;
+            }
             return new EVMReturnEvent(i, step);
         } else if (step.callInfo) {
+            if (isPrecompile(step.callInfo.address)) {
+                skipAReturn = true;
+                continue;
+            }
+
             return new EVMCallEvent(i, step);
         } else if (step.emittedEvent) {
             return new EVMEmitEvent(i, step);

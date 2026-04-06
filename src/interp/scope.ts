@@ -23,6 +23,7 @@ import { decodeView, gatherStateVars, getStateStorage, isValueType, panic } from
 import { typeIdToRuntimeType } from "./types";
 import { CodeView } from "./view";
 import { ArtifactManager } from "./artifactManager";
+import { assert, isBlock04Scope } from "../utils";
 
 /**
  * Identifier scopes.  Note that scopes themselves dont store values - only the
@@ -218,14 +219,13 @@ export class LocalsScope extends BaseLocalsScope {
             const ctx = node.requiredContext;
             if (lt(version, "0.5.0")) {
                 // In Solidity 0.4.x all state vars have block-wide scope
-                for (const stmt of node.vStatements) {
-                    if (stmt instanceof sol.VariableDeclarationStatement) {
-                        for (const decl of stmt.vDeclarations) {
-                            res.set(
-                                decl,
-                                typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
-                            );
-                        }
+                assert(isBlock04Scope(node), `In 0.4.x only function/modifier bodies are scopes`);
+                for (const stmt of node.getChildrenByType(sol.VariableDeclarationStatement)) {
+                    for (const decl of stmt.vDeclarations) {
+                        res.set(
+                            decl,
+                            typeIdToRuntimeType(sol.typeOf(decl), ctx, sol.DataLocation.Memory)
+                        );
                     }
                 }
             } else {
@@ -392,8 +392,15 @@ export class GlobalScope extends BaseScope {
 
     private static gatherConstVars(
         unit: sol.SourceUnit,
-        res = new Set<sol.VariableDeclaration>()
+        res = new Set<sol.VariableDeclaration>(),
+        visited = new Set<sol.SourceUnit>()
     ): Set<sol.VariableDeclaration> {
+        if (visited.has(unit)) {
+            return res;
+        }
+
+        visited.add(unit);
+
         for (const v of unit.vVariables) {
             res.add(v);
         }
@@ -412,7 +419,7 @@ export class GlobalScope extends BaseScope {
                 }
             } else {
                 // import "foo"
-                for (const varDecl of GlobalScope.gatherConstVars(imp.vSourceUnit, res)) {
+                for (const varDecl of GlobalScope.gatherConstVars(imp.vSourceUnit, res, visited)) {
                     res.add(varDecl);
                 }
             }

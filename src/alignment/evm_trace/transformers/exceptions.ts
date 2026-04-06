@@ -9,8 +9,8 @@ import { isOutOfGas, isReturn } from "../utils";
 export interface ExceptionInfo {
     // Exception bytes
     excData: Uint8Array;
-    // True if this is an exception not raised by REVERT/INVALID
-    isImplicit: boolean;
+    // True if this is an exception raised by REVERT/INVALID
+    isExplicit: boolean;
     // Index of the corresponding *CALL*/CREATE* instruction to whom's context we are reverting
     // -1 for top-level reverts
     correspCallIdx: number;
@@ -44,7 +44,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
             ...state,
             exceptionInfo: {
                 excData,
-                isImplicit: true,
+                isExplicit: true,
                 correspCallIdx
             }
         };
@@ -57,7 +57,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
             ...state,
             exceptionInfo: {
                 excData: new Uint8Array(),
-                isImplicit: true,
+                isExplicit: true,
                 correspCallIdx
             }
         };
@@ -70,7 +70,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
             ...state,
             exceptionInfo: {
                 excData: new Uint8Array(),
-                isImplicit: false,
+                isExplicit: false,
                 correspCallIdx
             }
         };
@@ -117,7 +117,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     lastStep.exceptionInfo = {
         excData: new Uint8Array(),
-        isImplicit: true,
+        isExplicit: false,
         correspCallIdx
     };
 

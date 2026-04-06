@@ -19,7 +19,8 @@ const libDependencies = new Map([
     ["PublicGetterSelectorAccess.config.sol", ["BytesLib"]],
     ["EncodingWithSelectorOrSignature.config.sol", ["BytesLib"]],
     ["SelectorTest062.config.sol", ["TestLibrary"]],
-    ["using_for_functions.config.sol", ["Lib"]]
+    ["using_for_functions.config.sol", ["Lib"]],
+    ["using_for.config.sol", ["Search"]]
 ]);
 
 function fillLinkRefs(bytecodeInfo) {

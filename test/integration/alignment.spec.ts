@@ -1,8 +1,14 @@
 import { loadSamples, txDescToBlockData, txDescToTxData } from "../unit/utils";
 import * as fse from "fs-extra";
 import { ContractInfo, ImmMap, PartialSolcOutput, Scenario } from "sol-dbg";
-import { AccountInfo, AccountMap, buildAlignedTraces } from "../../src";
-import { createAddressFromString, equalsBytes } from "@ethereumjs/util";
+import {
+    AccountInfo,
+    AccountMap,
+    createBlock,
+    FixedSetAsyncBlockManager,
+    FixedSetBlockManager
+} from "../../src";
+import { Address, createAddressFromString, equalsBytes } from "@ethereumjs/util";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
 import {
     AlignedTraceBuilder,
@@ -18,16 +24,21 @@ import {
     BlockReplayInfo,
     EVMReplay,
     EVMReplayDesc,
+    EVMStep,
     makeEVMReplayDesc,
+    replayEVM,
     StateDesc
 } from "../../src/alignment/evm_trace";
 import { assert } from "../../src";
 import { stateManagerToAccountInfo } from "../../src/alignment/evm_trace/transformers";
 import { Hardfork } from "@ethereumjs/common";
+import { BlockData } from "@ethereumjs/block";
+import { TypedTxData } from "@ethereumjs/tx";
+import { basename, dirname, join } from "path";
 
 const misalignmentSamples: Array<[string, any]> = [
     [
-        "out_of_gas.config.json",
+        "test/samples/sol2maruir/out_of_gas.config.json",
         [
             [1, 1, false, ["EVMCreateEvent", "SolCreateEvent"]],
             [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
@@ -55,9 +66,16 @@ export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMRepla
 
 const hasMisalignment: Set<string> = new Set(misalignmentSamples.map((t) => t[0]));
 
-const sol2maruirScenarios: string[] = fse
-    .readdirSync("test/samples/sol2maruir")
-    .filter((name) => name.endsWith("config.json"));
+const testScenarios: string[] = [];
+
+for (const dir of ["test/samples/sol2maruir", "test/samples/alignment"]) {
+    testScenarios.push(
+        ...fse
+            .readdirSync(dir)
+            .filter((name) => name.endsWith("config.json"))
+            .map((p) => join(dir, p))
+    );
+}
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -75,19 +93,59 @@ function addArtifactsToAccountMap(state: AccountMap, artifactManager: ArtifactMa
     }
 }
 
+/**
+ * Given an initial account state, tx and block data, and an artifactManager:
+ * 1. Replay the TX and generate an EVM debug trace
+ * 2. Interepter the TX at the Solidity level
+ * 3. Align the 2 traces and return an aligned traces tree
+ */
+async function buildAlignedTraces(
+    initialState: AccountMap,
+    txData: TypedTxData,
+    sender: Address,
+    blockData: BlockData,
+    prevBlocksData: BlockData[],
+    artifactManager: ArtifactManager,
+    maxNumSteps: number | undefined = undefined,
+    forceHardfork?: Hardfork
+): Promise<[AlignedTraces, AccountMap, EVMStep[]]> {
+    // 1. Get the low-level trace
+    const [trace, , , block, tx] = await replayEVM(
+        initialState,
+        txData,
+        blockData,
+        new FixedSetAsyncBlockManager(prevBlocksData.map((d) => createBlock(d, forceHardfork))),
+        sender,
+        forceHardfork
+    );
+
+    // 2. Interpret at the Solidity level
+    const builder = new AlignedTraceBuilder(
+        artifactManager,
+        initialState,
+        trace,
+        makeSolMessage(tx),
+        block,
+        tx,
+        new FixedSetBlockManager(prevBlocksData.map((d) => createBlock(d, forceHardfork))),
+        maxNumSteps
+    );
+    return [...builder.buildAlignedTraces(), trace];
+}
+
 describe("Trace Alignment Tests", () => {
-    for (const sample of sol2maruirScenarios) {
+    for (const sample of testScenarios) {
         if (hasMisalignment.has(sample)) {
             continue;
         }
 
         it(`${sample}`, async () => {
-            const scenario = fse.readJsonSync(`test/samples/sol2maruir/${sample}`) as Scenario;
-            const [artifactManager] = await loadSamples(
-                [sample.slice(0, -4) + "sol"],
-                "test/samples/sol2maruir"
-            );
+            const scenario = fse.readJsonSync(sample) as Scenario;
+            const fName = basename(sample);
+            const dirName = dirname(sample);
+            const [artifactManager] = await loadSamples([fName.slice(0, -4) + "sol"], dirName);
             let state = scenarioInitialStateToAccountMap(scenario.initialState);
+            const prevBlocks: BlockData[] = scenario.blocks ? scenario.blocks : [];
 
             for (let i = 0; i < scenario.steps.length; i++) {
                 const txDesc = scenario.steps[i];
@@ -97,6 +155,7 @@ describe("Trace Alignment Tests", () => {
                     txDescToTxData(txDesc),
                     sender,
                     txDescToBlockData(txDesc),
+                    prevBlocks,
                     artifactManager,
                     10000,
                     scenario.hardfork as Hardfork | undefined
@@ -133,12 +192,12 @@ function alignedTraceToDesc(t: AlignedTraces): any {
 describe("Trace Misalignment Tests", () => {
     for (const [sample, desc] of misalignmentSamples) {
         it(`${sample}`, async () => {
-            const scenario = fse.readJsonSync(`test/samples/sol2maruir/${sample}`) as Scenario;
-            const [artifactManager] = await loadSamples(
-                [sample.slice(0, -4) + "sol"],
-                "test/samples/sol2maruir"
-            );
+            const scenario = fse.readJsonSync(sample) as Scenario;
+            const fName = basename(sample);
+            const dirName = dirname(sample);
+            const [artifactManager] = await loadSamples([fName.slice(0, -4) + "sol"], dirName);
             let state = scenarioInitialStateToAccountMap(scenario.initialState);
+            const prevBlocks: BlockData[] = scenario.blocks ? scenario.blocks : [];
 
             for (let i = 0; i < scenario.steps.length; i++) {
                 const txDesc = scenario.steps[i];
@@ -148,6 +207,7 @@ describe("Trace Misalignment Tests", () => {
                     txDescToTxData(txDesc),
                     sender,
                     txDescToBlockData(txDesc),
+                    prevBlocks,
                     artifactManager,
                     10000,
                     scenario.hardfork as Hardfork | undefined
@@ -201,6 +261,8 @@ async function alignNthTx(
         tx.trace,
         makeSolMessage(tx.tx),
         replayInfo.block,
+        tx.tx,
+        new FixedSetBlockManager([replayInfo.block]),
         maxNumSteps
     );
 
@@ -265,7 +327,7 @@ it("Alignment with missing info", async () => {
     );
 
     const replayDesc = await scenarioToReplayDesc(scenario);
-    const evmR = await EVMReplay.replay([replayDesc]);
+    const evmR = await EVMReplay.replay([replayDesc], new FixedSetAsyncBlockManager([]));
 
     const hist = evmR.history;
     expect(hist.length).toEqual(1);
