@@ -2478,8 +2478,8 @@ export class Interpreter {
             );
 
             const bts = decodeView(fromV, state);
-            this.expect(bts instanceof Uint8Array && bts.length === toT.numBytes);
-            return bts;
+            this.expect(bts instanceof Uint8Array);
+            return setLengthRight(bts, toT.numBytes);
         }
 
         // int -> int
