@@ -19,7 +19,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { ExternalCallDescription, NewCall, none, Value } from "./value";
+import { ExternalCallDescription, NewCall, noneVal, Value } from "./value";
 import { State } from "./state";
 import {
     FixedBytesLocalView,
@@ -140,11 +140,11 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
         }
 
         // In all other pointer case initialize with poison
-        return none;
+        return noneVal;
     }
 
     if (t instanceof rtt.MappingType) {
-        return none;
+        return noneVal;
     }
 
     if (t instanceof rtt.FunctionType && t.solType.kind === "external") {

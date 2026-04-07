@@ -1,12 +1,5 @@
 {
     "hardfork": "cancun",
-    "blocks": [
-        {
-            "header": {
-                "number": "0x2a"
-            }
-        }
-    ],
     "initialState": {
         "accounts": {
             "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97": {
@@ -22,13 +15,13 @@
             "address": "0x0000000000000000000000000000000000000000",
             "gasLimit": "0xff0000",
             "gasPrice": "0x1",
-            "input": "0x6080604052348015600e575f5ffd5b5060c280601a5f395ff3fe608060405260043610601b575f3560e01c8063dffeadd014601f575b5f5ffd5b60256027565b005b5f602a4090507f64df4a6bbd73d88237617446ade20dd4ef463678657f54f65ba9db77b2d59ed95f1b8114605c57605b605f565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212208dd431bfedd120f6ff318859a5cb80775f61867fe2b8c1aed5d1c2731b1d5c5464736f6c634300081d0033",
+            "input": "0x6080604052348015600e575f5ffd5b5060c280601a5f395ff3fe608060405260043610601b575f3560e01c8063dffeadd014601f575b5f5ffd5b60256027565b005b5f602a4090507f64df4a6bbd73d88237617446ade20dd4ef463678657f54f65ba9db77b2d59ed95f1b8114605c57605b605f565b5b50565b7f4e487b71000000000000000000000000000000000000000000000000000000005f52600160045260245ffdfea26469706673582212203040c34af39fe817fd0b8cb9c429c0d6390d531d697d8ef9f909bf62db7ecc7a64736f6c634300081d0033",
             "origin": "0x4838b106fce9647bdf1e7877bf73ce8b0bad5f97",
             "value": "0x0",
             "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
             "blockDifficulty": "0x0",
             "blockGasLimit": "0xff0000",
-            "blockNumber": "0x100",
+            "blockNumber": "0x1",
             "blockTime": "0x1",
             "nonce": 0
         },
@@ -42,7 +35,7 @@
             "blockCoinbase": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
             "blockDifficulty": "0x0",
             "blockGasLimit": "0xff0000",
-            "blockNumber": "0x101",
+            "blockNumber": "0x1",
             "blockTime": "0x1",
             "nonce": 1
         }

@@ -383,12 +383,15 @@ export class AlignedTraceBuilder extends BaseEEI {
             const callerAccount = this.state.get(callerAddress.toString());
 
             const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
-            assert(llEvent !== undefined, ``);
+            assert(llEvent !== undefined, `Couldnt find next event at the start of execMsg`);
             const hlEvent: SolObservableEvent = msg.to.equals(ZERO_ADDRESS)
                 ? new SolCreateEvent(msg)
                 : new SolCallEvent(msg);
 
-            sol.assert(callerAccount !== undefined, ``);
+            sol.assert(
+                callerAccount !== undefined,
+                `Couldn't find caller account for address ${callerAddress.toString()}`
+            );
 
             this.tryMatchObservableEvents(
                 llEvent,
@@ -462,7 +465,7 @@ export class AlignedTraceBuilder extends BaseEEI {
 
         const hlEvent = new SolReturnEvent(res);
         const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
-        assert(llEvent !== undefined, ``);
+        assert(llEvent !== undefined, `Couldn't find matchin return event`);
 
         const calleeAccountAddr =
             msg.delegatingContract !== undefined

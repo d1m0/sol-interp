@@ -15,6 +15,7 @@ import { State } from "./state";
 import { Address } from "@ethereumjs/util";
 import { Interpreter } from "./interp";
 import { BaseInterpType } from "./types";
+import { SingletonValue } from "../utils";
 
 export abstract class BaseInterpValue implements sol.PPAble {
     abstract pp(): string;
@@ -199,7 +200,12 @@ export class SuperVal {
     constructor(public readonly bases: sol.ContractDefinition[]) {}
 }
 
-export const none = new NoneValue();
+// Helper value corresponding to the identity fun (x: T) => x.
+// Used to implement UDVT's wrap/unwarp functions.
+export class IdFunVal extends SingletonValue {}
+
+export const noneVal = new NoneValue();
+export const idFunVal = new IdFunVal();
 
 export type Value =
     | PrimitiveValue
@@ -211,6 +217,7 @@ export type Value =
     | NewCall
     | Value[]
     | CurriedVal
+    | IdFunVal
     | SuperVal;
 
 /**
@@ -227,6 +234,7 @@ type NonPoisonPrimitiveValue =
     | View<any, BaseValue, any, rtt.BaseRuntimeType> // Pointer Values
     | TypeValue // Type Values, TypeTuples, NewCall and ExternallCallDescription are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
     | NewCall
+    | IdFunVal
     | ExternalCallDescription;
 
 export type NonPoisonValue =

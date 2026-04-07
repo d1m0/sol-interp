@@ -27,3 +27,16 @@ export function createBlock(data: ejs.BlockData, forcedHardfork?: Hardfork): ejs
         return ejs.createBlock(data);
     }
 }
+
+const singletonSet = new Set<string>();
+
+export class SingletonValue {
+    constructor(public readonly name?: string) {
+        name = name === undefined ? this.constructor.name : name;
+        if (singletonSet.has(name)) {
+            throw new Error(`Trying to create multiple instances of ${name}`);
+        }
+
+        singletonSet.add(name);
+    }
+}

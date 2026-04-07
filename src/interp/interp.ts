@@ -57,14 +57,16 @@ import {
     LValue,
     match,
     NewCall,
-    none,
+    noneVal,
     NonPoisonValue,
     TypeConstructorToValueType,
     TypeValue,
     Value,
     ValueTypeConstructors,
     NoneValue,
-    SuperVal
+    SuperVal,
+    idFunVal,
+    IdFunVal
 } from "./value";
 import {
     Address,
@@ -1075,7 +1077,7 @@ export class Interpreter {
         if (gte(this.compilerVersion, "0.5.0")) {
             this.pushScope(
                 stmt,
-                stmt.vDeclarations.map((d) => [d, none]),
+                stmt.vDeclarations.map((d) => [d, noneVal]),
                 state
             );
         }
@@ -1397,7 +1399,7 @@ export class Interpreter {
         } else if (expr instanceof sol.UnaryOperation) {
             res = this.evalUnaryOperation(expr, state);
         } else if (expr instanceof sol.ElementaryTypeNameExpression) {
-            res = none;
+            res = noneVal;
         } else {
             nyi(`evalExpression(${expr.constructor.name})`);
         }
@@ -2129,7 +2131,11 @@ export class Interpreter {
     ): NonPoisonValue {
         // @todo - need to detect
         if (userFunction) {
-            nyi("User-defined operators");
+            const res = rtt.single(
+                this._execCall(userFunction, [left, right], [lType, rType], state)
+            );
+            this.expect(!(res instanceof Poison));
+            return res;
         }
 
         this.expect(
@@ -2732,7 +2738,7 @@ export class Interpreter {
         const results = this._execCall(callee, args, argTs, state);
 
         if (results.length === 0) {
-            return none;
+            return noneVal;
         }
 
         if (results.length === 1) {
@@ -2910,7 +2916,7 @@ export class Interpreter {
                     this.runtimeError(RuntimeError, state, `Transfer failed`, res.data);
                 }
 
-                return none;
+                return noneVal;
             }
 
             if (callee.callKind === "send") {
@@ -2938,7 +2944,7 @@ export class Interpreter {
             }
 
             const rets: Value[] = this.getValuesFromReturnedCalldata(res.data, astTarget, state);
-            return rets.length === 0 ? none : rets.length === 1 ? rets[0] : rets;
+            return rets.length === 0 ? noneVal : rets.length === 1 ? rets[0] : rets;
         }
     }
 
@@ -3087,7 +3093,7 @@ export class Interpreter {
         const results = this._execCall(callee, argVals, argTs, state);
 
         if (results.length === 0) {
-            return none;
+            return noneVal;
         }
 
         if (results.length === 1) {
@@ -3219,7 +3225,7 @@ export class Interpreter {
                 v.emit(this, state, lowLevelEvent);
             }
 
-            return none;
+            return noneVal;
         }
 
         if (
@@ -3229,6 +3235,12 @@ export class Interpreter {
             callee = this.evalTypeExpr(expr.vExpression);
         } else {
             callee = this.evalNP(expr.vExpression, state);
+        }
+
+        // UDVT's wrap/unwrap. Just return the singular argument
+        if (callee === idFunVal) {
+            this.expect(expr.vArguments.length === 1, `Wrap/unwrap only gets a single argument`);
+            return this.evalNP(expr.vArguments[0], state);
         }
 
         if (expr.kind === sol.FunctionCallKind.TypeConversion) {
@@ -3702,6 +3714,14 @@ export class Interpreter {
 
                 return res;
             }
+
+            if (baseVal.def instanceof sol.UserDefinedValueTypeDefinition) {
+                this.expect(
+                    expr.memberName === "wrap" || expr.memberName === "unwrap",
+                    `Unknown user defined value type`
+                );
+                return idFunVal;
+            }
         }
 
         if (
@@ -3736,7 +3756,7 @@ export class Interpreter {
     evalTupleExpression(expr: sol.TupleExpression, state: State): Value {
         // A copmonent here may be an empty tuple, so we use allow poison in non-null components
         const compVals: Value[] = expr.vOriginalComponents.map((comp) =>
-            comp === null ? none : this.eval(comp, state)
+            comp === null ? noneVal : this.eval(comp, state)
         );
 
         // Array literals get allocated in memory
@@ -3766,7 +3786,7 @@ export class Interpreter {
         }
 
         if (compVals.length === 0) {
-            return none;
+            return noneVal;
         }
 
         if (compVals.length === 1) {
@@ -3817,7 +3837,7 @@ export class Interpreter {
         } else if (lv instanceof Array) {
             return lv.map((x) => this.lvToValue(x, state));
         } else if (lv === null) {
-            return none;
+            return noneVal;
         }
 
         nyi(`LValue: ${lv}`);
@@ -3833,14 +3853,17 @@ export class Interpreter {
         }
 
         if (expr.vUserFunction) {
-            nyi(`Unary user functions`);
+            const subVal = this.evalNP(expr.vSubExpression, state);
+            const res = rtt.single(this._execCall(expr.vUserFunction, [subVal], [typ], state));
+            this.expect(!(res instanceof Poison));
+            return res;
         }
 
         if (expr.operator === "delete") {
             const subT = this.typeOf(expr.vSubExpression);
             const zeroV = makeZeroValue(changeLocTo(subT, sol.DataLocation.Memory), state);
             this.assign(this.evalLV(expr.vSubExpression, state), zeroV, state);
-            return none;
+            return noneVal;
         }
 
         if (expr.operator === "!") {
@@ -4022,6 +4045,10 @@ export class Interpreter {
                 continue;
             }
 
+            if (v instanceof IdFunVal) {
+                continue;
+            }
+
             if (isPoison(v)) {
                 this.runtimeError(NoPayloadError, state);
             }
@@ -4098,7 +4125,7 @@ export class Interpreter {
             }
 
             // This guard is to prevent assignment of poison in the case of an array of maps
-            if (value !== none) {
+            if (value !== noneVal) {
                 this.assign(elView, value, state);
             }
         } else {
