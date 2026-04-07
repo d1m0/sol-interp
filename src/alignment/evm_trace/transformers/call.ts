@@ -1,4 +1,4 @@
-import { Address } from "@ethereumjs/util";
+import { Address, bytesToBigInt } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
 import {
     BasicStepInfo,
@@ -11,6 +11,7 @@ import {
 } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import * as sol from "solc-typed-ast";
+import { PrecomiledAddresses } from "../../utils";
 
 /**
  * Interface with additional data regarding a *CALL* op
@@ -23,6 +24,7 @@ export interface CallInfo {
     msgData: Uint8Array; // msg data
     nonce: bigint; // caller nonce
     callToNoCodeAccount: boolean; // call to an account with no code
+    isPrecompile: boolean; // call is to a precompiled contract
 }
 
 export interface WithCallInfo {
@@ -79,6 +81,7 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     const size = bigEndianBufToNumber(state.evmStack[stackTop - argSizeStackOff]);
     const msgData = size === 0 ? new Uint8Array() : mustReadMem(start, size, state.memory);
 
+    const isPrecompile = bytesToBigInt(receiverArg.bytes) < PrecomiledAddresses.NUM;
     const callerAccount = await vm.stateManager.getAccount(step.address);
     sol.assert(callerAccount !== undefined, ``);
 
@@ -89,7 +92,8 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
         gas,
         msgData,
         nonce: callerAccount.nonce,
-        callToNoCodeAccount: receiverCode.length === 0
+        callToNoCodeAccount: receiverCode.length === 0,
+        isPrecompile
     };
 
     return {

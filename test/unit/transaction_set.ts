@@ -25,7 +25,7 @@ import {
     abiValueToBaseValue,
     toABIEncodedType
 } from "../../src/interp/abi";
-import { CallResult, BaseEEI, SolMessage, Trace, FixedSetBlockManager } from "../../src";
+import { CallResult, SolMessage, Trace, FixedSetBlockManager, InterpEEI } from "../../src";
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
 import { TraceVisitor } from "../../src/interp/visitors";
 import { createBlock } from "@ethereumjs/block";
@@ -79,7 +79,7 @@ export class TransactionSet {
     contractMap = new Map<string, Address>();
     libMap = new Map<string, Address>();
     traceVisitor: TraceVisitor;
-    chain: BaseEEI;
+    chain: InterpEEI;
     msgs: SolMessage[] = [];
 
     constructor(
@@ -87,7 +87,7 @@ export class TransactionSet {
         private readonly steps: TransactionDesc[]
     ) {
         this.traceVisitor = new TraceVisitor();
-        this.chain = new BaseEEI(
+        this.chain = new InterpEEI(
             this._artifactManager,
             ImmMap.fromEntries([]),
             createBlock(),

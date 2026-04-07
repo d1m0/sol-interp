@@ -38,4 +38,5 @@ export interface EthereumEnvInterface {
     setAccount(address: string | Address, account: AccountInfo): void;
     updateAccount(account: AccountInfo): void;
     getBlock(number: bigint): Block | undefined;
+    gasleft(): bigint;
 }

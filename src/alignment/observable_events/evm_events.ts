@@ -2,68 +2,47 @@
  * EVM-level events
  */
 import { EventDesc } from "sol-dbg";
-import { assert } from "../../utils";
 import { EVMStep } from "../evm_trace";
 import { CallInfo, CreateInfo, ExceptionInfo, ReturnInfo } from "../evm_trace/transformers";
-import { isPrecompile } from "../utils";
 
-type EVMPayloadTypes = CallInfo | CreateInfo | ExceptionInfo | ReturnInfo | EventDesc;
+type EVMPayloadTypes = CallInfo | CreateInfo | ExceptionInfo | ReturnInfo | EventDesc | bigint;
 
 abstract class EVMEvent<T extends EVMPayloadTypes> {
-    public readonly data: T;
+    constructor(
+        public readonly idx: number,
+        public readonly step: EVMStep,
+        public readonly data: T
+    ) {}
+}
 
-    protected abstract _getPayload(): T | undefined;
+// EVM trace events
+export class EVMCallEvent extends EVMEvent<CallInfo> {}
 
+export class EVMCreateEvent extends EVMEvent<CreateInfo> {}
+
+export class EVMReturnEvent extends EVMEvent<ReturnInfo> {}
+
+export class EVMReturnNoContractEvent extends EVMEvent<ReturnInfo> {
     constructor(
         public readonly idx: number,
         public readonly step: EVMStep
     ) {
-        const res = this._getPayload();
-        assert(res !== undefined, ``);
-        this.data = res;
-    }
-}
-
-// EVM trace events
-export class EVMCallEvent extends EVMEvent<CallInfo> {
-    protected _getPayload(): CallInfo | undefined {
-        return this.step.callInfo;
-    }
-}
-
-export class EVMCreateEvent extends EVMEvent<CreateInfo> {
-    protected _getPayload(): CreateInfo | undefined {
-        return this.step.createInfo;
-    }
-}
-
-export class EVMReturnEvent extends EVMEvent<ReturnInfo> {
-    protected _getPayload(): ReturnInfo | undefined {
-        assert(this.step.returnInfo !== undefined, ``);
-        return this.step.returnInfo;
-    }
-}
-
-export class EVMReturnNoContractEvent extends EVMEvent<ReturnInfo> {
-    protected _getPayload(): ReturnInfo | undefined {
-        return {
+        super(idx, step, {
             retData: new Uint8Array(),
             correspCallIdx: -1
-        };
+        });
     }
 }
 
-export class EVMExceptionEvent extends EVMEvent<ExceptionInfo> {
-    protected _getPayload(): ExceptionInfo | undefined {
-        return this.step.exceptionInfo;
-    }
-}
+export class EVMExceptionEvent extends EVMEvent<ExceptionInfo> {}
 
-export class EVMEmitEvent extends EVMEvent<EventDesc> {
-    protected _getPayload(): EventDesc | undefined {
-        return this.step.emittedEvent;
-    }
-}
+export class EVMEmitEvent extends EVMEvent<EventDesc> {}
+
+/**
+ * This event is not returned by findNextEvent() below, since we have implicit GAS instructions before calls.
+ * Instead we explicitly search for GAS calls in AlignedTraceBuilder
+ */
+export class EVMGasLeft extends EVMEvent<bigint> {}
 
 export type EVMObservableEvent =
     | EVMCallEvent
@@ -71,34 +50,23 @@ export type EVMObservableEvent =
     | EVMReturnEvent
     | EVMReturnNoContractEvent
     | EVMExceptionEvent
-    | EVMEmitEvent;
+    | EVMEmitEvent
+    | EVMGasLeft;
 
 export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservableEvent | undefined {
-    let skipAReturn: boolean = false;
-
     for (let i = afterIdx; i < trace.length; i++) {
         const step = trace[i];
 
         if (step.exceptionInfo) {
-            return new EVMExceptionEvent(i, step);
+            return new EVMExceptionEvent(i, step, step.exceptionInfo);
         } else if (step.createInfo) {
-            return new EVMCreateEvent(i, step);
+            return new EVMCreateEvent(i, step, step.createInfo);
         } else if (step.returnInfo) {
-            // Skip a return due to a precompile call
-            if (skipAReturn) {
-                skipAReturn = false;
-                continue;
-            }
-            return new EVMReturnEvent(i, step);
+            return new EVMReturnEvent(i, step, step.returnInfo);
         } else if (step.callInfo) {
-            if (isPrecompile(step.callInfo.address)) {
-                skipAReturn = true;
-                continue;
-            }
-
-            return new EVMCallEvent(i, step);
+            return new EVMCallEvent(i, step, step.callInfo);
         } else if (step.emittedEvent) {
-            return new EVMEmitEvent(i, step);
+            return new EVMEmitEvent(i, step, step.emittedEvent);
         }
     }
 

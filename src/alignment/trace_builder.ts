@@ -10,7 +10,7 @@ import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { Block } from "@ethereumjs/block";
-import { ContractInfo, EventDesc, ImmMap, ZERO_ADDRESS } from "sol-dbg";
+import { ContractInfo, EventDesc, ImmMap, OPCODES, stackTop, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
@@ -24,6 +24,7 @@ import {
     EVMCreateEvent,
     EVMEmitEvent,
     EVMExceptionEvent,
+    EVMGasLeft,
     EVMObservableEvent,
     EVMReturnEvent,
     EVMReturnNoContractEvent,
@@ -32,6 +33,7 @@ import {
     SolCreateEvent,
     SolEmitEvent,
     SolExceptionEvent,
+    SolGasLeftEvent,
     SolObservableEvent,
     SolReturnEvent
 } from "./observable_events";
@@ -42,6 +44,7 @@ import {
     makeSolMessageFromStep
 } from "./utils";
 import { AlignedTraces } from "./trace_pairs";
+import { bytesToBigInt } from "@ethereumjs/util";
 
 /**
  * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
@@ -209,8 +212,8 @@ export class AlignedTraceBuilder extends BaseEEI {
     private reSyncAtDepth(expDepth: number): [EVMObservableEvent, SolObservableEvent] {
         let resyncLLIdx: number;
 
-        if (this.currentLLIdx === 0 && expDepth === 1) {
-            // Couldnt synchronize at the first call
+        // Couldnt synchronize at the root
+        if (expDepth === 0) {
             resyncLLIdx = this.lowLevelTrace.length;
         } else {
             resyncLLIdx = findFirstIdxAtDepthAfter(this.lowLevelTrace, expDepth, this.currentLLIdx);
@@ -218,7 +221,7 @@ export class AlignedTraceBuilder extends BaseEEI {
 
         assert(
             resyncLLIdx > 0,
-            `Couldn't find an indx at depth ${expDepth} after idx ${this.currentLLIdx}`
+            `Couldn't find an index at depth ${expDepth} after idx ${this.currentLLIdx}`
         );
         const lastStep = this.lowLevelTrace[resyncLLIdx - 1];
 
@@ -465,7 +468,7 @@ export class AlignedTraceBuilder extends BaseEEI {
 
         const hlEvent = new SolReturnEvent(res);
         const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
-        assert(llEvent !== undefined, `Couldn't find matchin return event`);
+        assert(llEvent !== undefined, `Couldn't find a return event`);
 
         const calleeAccountAddr =
             msg.delegatingContract !== undefined
@@ -496,6 +499,40 @@ export class AlignedTraceBuilder extends BaseEEI {
         }
 
         return res;
+    }
+
+    /**
+     * On a gasleft opportunistically seek the next gasleft (not preceded by another event)
+     * and take its return
+     * @returns
+     */
+    gasleft(): bigint {
+        const nextEvt = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+        const endIdx = nextEvt === undefined ? this.lowLevelTrace.length : nextEvt.idx;
+
+        for (let i = this.currentLLIdx; i < endIdx; i++) {
+            if (i === 0) {
+                continue;
+            }
+            const lastStep = this.lowLevelTrace[i - 1];
+            if (lastStep.op.opcode !== OPCODES.GAS) {
+                continue;
+            }
+
+            const top = stackTop(this.lowLevelTrace[i].evmStack);
+            const res = bytesToBigInt(top);
+
+            // This updates currentLLIdx
+            this.addAlignedSegment(new EVMGasLeft(i - 1, lastStep, res), new SolGasLeftEvent(res));
+
+            return res;
+        }
+
+        assert(
+            nextEvt !== undefined,
+            `Not neccessarily true, if we run out of trace. @todo handle later`
+        );
+        this.misalignment(nextEvt, new SolGasLeftEvent(-1n));
     }
 
     buildAlignedTraces(): [AlignedTraces, AccountMap] {

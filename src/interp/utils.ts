@@ -711,6 +711,9 @@ export const envFailMock: EthereumEnvInterface = {
     },
     getBlock: function (): Block | undefined {
         throw new Error("Function not implemented.");
+    },
+    gasleft: function (): bigint {
+        throw new Error("Function not implemented.");
     }
 };
 
