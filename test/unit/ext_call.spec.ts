@@ -1,11 +1,10 @@
 import { Value, ImmMap, typeIdToRuntimeType, EventDesc } from "sol-dbg";
-import { BaseEEI, EmitStep, FixedSetBlockManager } from "../../src";
+import { EmitStep, FixedSetBlockManager, InterpEEI } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
-import { loadSamples, SampleInfo, SampleMap } from "./utils";
+import { loadSamples, SampleInfo } from "./utils";
 import { AssertError } from "../../src/interp/exceptions";
 import { bytesToHex, concatBytes, createAddressFromString, hexToBytes } from "@ethereumjs/util";
-import { ArtifactManager } from "../../src/interp/artifactManager";
 import {
     abiTypeToCanonicalName,
     abiValueToBaseValue,
@@ -166,17 +165,9 @@ const SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f
 const RECEIVER = createAddressFromString("0x5B38Da6a701c568545dCfcB03FcB875f56beddC4");
 
 describe("Simple function call tests", () => {
-    let artifactManager: ArtifactManager;
-    let sampleMap: SampleMap;
-
-    const fileNames = [...new Set<string>(samples.map(([name]) => name))];
-
-    beforeAll(async () => {
-        [artifactManager, sampleMap] = await loadSamples(fileNames);
-    }, 10000);
-
     for (const [fileName, contract, funName, argVals, expectedReturns, expectedEvents] of samples) {
-        it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, () => {
+        it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, async () => {
+            const [artifactManager, sampleMap] = await loadSamples([fileName]);
             const info = sampleMap.get(fileName) as SampleInfo;
             let fun: sol.FunctionDefinition | undefined = undefined;
 
@@ -193,7 +184,7 @@ describe("Simple function call tests", () => {
             sol.assert(fun !== undefined, `Couldn't find ${contract}.${funName} in ${fileName}`);
 
             const traceVis = new TraceVisitor();
-            const chain = new BaseEEI(
+            const chain = new InterpEEI(
                 artifactManager,
                 undefined,
                 createBlock({}),

@@ -151,6 +151,10 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
         return new rtt.ExternalFunRef(ZERO_ADDRESS, new Uint8Array(4));
     }
 
+    if (t instanceof rtt.FunctionType && t.solType.kind === "internal") {
+        return new rtt.InternalFunRef(undefined);
+    }
+
     nyi(`makeZeroValue(${t.pp()})`);
 }
 
@@ -962,7 +966,16 @@ export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
     return setLengthLeft(bs, paddedLength);
 }
 
-export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition {
+/**
+ * Get the FunctionDefinition from a internal fun ref. Can be undefined when de-referencing an uninitialized local var.
+ * @param ref
+ * @returns
+ */
+export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition | undefined {
+    if (ref.opaque === undefined) {
+        return ref.opaque;
+    }
+
     sol.assert(ref.opaque instanceof sol.FunctionDefinition, ``);
     return ref.opaque;
 }

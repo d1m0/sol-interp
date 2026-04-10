@@ -163,6 +163,7 @@ import { bshl, bshr } from "./bitwise";
 import { buildEvent } from "./events";
 import { CallResult, EthereumEnvInterface, SolMessage } from "./env";
 import { isBlock04Scope } from "../utils";
+import { resolve } from "./resolve";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -556,7 +557,7 @@ export class Interpreter {
         // Execute actual call
         try {
             if (entryPoint instanceof sol.FunctionDefinition) {
-                res = this.callInternal(entryPoint, calldataArgs, argTs, state);
+                res = this._execCall(entryPoint, calldataArgs, argTs, state);
                 resTs = entryPoint.vReturnParameters.vParameters.map((retT) =>
                     this.varDeclToRuntimeType(retT)
                 );
@@ -842,7 +843,7 @@ export class Interpreter {
 
     /**
      * Make an internal call to `callee` with arguments `args` in state `state`.
-     * @todo - delete. No longer neccessary
+     * Note: Keeping around as an entry-point for unit tests. Not used internally to the class.
      * @param callee
      * @param args
      * @param state
@@ -2957,7 +2958,7 @@ export class Interpreter {
         }
 
         const contract = getCodeContract(state);
-        const res = sol.resolve(contract, target);
+        const res = resolve(target, contract);
         this.expect(
             res !== undefined,
             `Couldn't resolve ${target.name} in contract ${contract.name}`
@@ -2998,6 +2999,9 @@ export class Interpreter {
             actualCallee = callee;
         } else if (callee instanceof rtt.InternalFunRef) {
             const fun = getFunDef(callee);
+            if (fun === undefined) {
+                this.runtimeError(PanicError, state, 0x51n);
+            }
             callTarget = fun;
             actualCallee = fun;
         } else {
@@ -3337,7 +3341,7 @@ export class Interpreter {
 
             def =
                 isMethod(def) && def.visibility !== sol.FunctionVisibility.External
-                    ? sol.resolve(contract, def)
+                    ? resolve(def, contract)
                     : def;
             this.expect(
                 def instanceof sol.FunctionDefinition,
@@ -3663,15 +3667,16 @@ export class Interpreter {
 
         if (baseVal instanceof SuperVal) {
             const def = expr.vReferencedDeclaration;
+
+            if (def instanceof sol.EventDefinition) {
+                return new DefValue(def);
+            }
+
             this.expect(
-                def instanceof sol.FunctionDefinition ||
-                    def instanceof sol.VariableDeclaration ||
-                    def instanceof sol.ModifierDefinition ||
-                    def instanceof sol.EventDefinition
+                def instanceof sol.FunctionDefinition || def instanceof sol.ModifierDefinition
             );
             for (const base of baseVal.bases) {
-                const t = sol.resolve(base, def);
-                this.expect(!(t instanceof sol.VariableDeclaration));
+                const t = resolve(def, base);
                 if (t && (!(t instanceof sol.FunctionDefinition) || t.vBody !== undefined)) {
                     return new DefValue(t);
                 }
@@ -3980,10 +3985,17 @@ export class Interpreter {
         let nd;
 
         if (target instanceof CurriedVal) {
-            nd =
-                target.target instanceof rtt.InternalFunRef
-                    ? getFunDef(target.target)
-                    : target.target;
+            if (target.target instanceof rtt.InternalFunRef) {
+                const def = getFunDef(target.target);
+
+                if (def === undefined) {
+                    this.runtimeError(PanicError, state, 0x51n);
+                }
+
+                nd = def;
+            } else {
+                nd = target.target;
+            }
             this.expect(!(nd instanceof BuiltinFunction));
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];

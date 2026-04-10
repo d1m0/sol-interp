@@ -115,6 +115,7 @@ export class DefValue extends BaseInterpValue {
             | sol.StructDefinition
             | sol.EnumDefinition
             | sol.UserDefinedValueTypeDefinition
+            | sol.VariableDeclaration
     ) {
         super();
     }
