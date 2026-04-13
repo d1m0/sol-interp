@@ -63,7 +63,7 @@ export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservable
             return new EVMCreateEvent(i, step, step.createInfo);
         } else if (step.returnInfo) {
             return new EVMReturnEvent(i, step, step.returnInfo);
-        } else if (step.callInfo) {
+        } else if (step.callInfo && !step.callInfo.isPrecompile) {
             return new EVMCallEvent(i, step, step.callInfo);
         } else if (step.emittedEvent) {
             return new EVMEmitEvent(i, step, step.emittedEvent);
