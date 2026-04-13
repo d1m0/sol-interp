@@ -1,7 +1,7 @@
 import { VM } from "@ethereumjs/vm";
 import { BasicStepInfo, bigEndianBufToNumber, mustReadMem, OPCODES, OpInfo } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
-import { isOutOfGas, isReturn } from "../utils";
+import { isOutOfGas, isNonExceptionTermination } from "../utils";
 
 /**
  * Interface with additional data regarding a RETURN/STOP op
@@ -106,7 +106,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     if (
         lastStep.depth <= state.depth ||
-        isReturn(lastStep) ||
+        isNonExceptionTermination(lastStep) ||
         lastStep.exceptionInfo !== undefined
     ) {
         return {

@@ -96,6 +96,11 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
         isPrecompile
     };
 
+    // For calls to no-code accounts and precompiles there is no corresponding return. So don't push a call idx on the stack
+    if (callInfo.callToNoCodeAccount || callInfo.isPrecompile) {
+        callStack.pop();
+    }
+
     return {
         ...state,
         callInfo

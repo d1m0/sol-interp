@@ -21,8 +21,12 @@ export function isOutOfGas(step: BasicStepInfo): boolean {
 }
 
 // @todo move to sol-dbg
-export function isReturn(step: OpInfo): boolean {
-    return step.op.opcode === OPCODES.RETURN || step.op.opcode === OPCODES.STOP;
+export function isNonExceptionTermination(step: OpInfo): boolean {
+    return (
+        step.op.opcode === OPCODES.RETURN ||
+        step.op.opcode === OPCODES.STOP ||
+        step.op.opcode === OPCODES.SELFDESTRUCT
+    );
 }
 
 // @todo move to sol-dbg

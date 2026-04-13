@@ -53,7 +53,7 @@ export function toABIEncodedType(type: BaseInterpType): BaseInterpType {
     }
 
     if (type instanceof rtt.StructType) {
-        return new rtt.TupleType(type.fields.map(([, type]) => type));
+        return new rtt.TupleType(type.fields.map(([, type]) => toABIEncodedType(type)));
     }
 
     if (type instanceof rtt.PointerType) {
