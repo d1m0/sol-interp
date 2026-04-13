@@ -21,7 +21,7 @@ import {
 } from "./view/local";
 import { decodeView, gatherStateVars, getStateStorage, isValueType, panic } from "./utils";
 import { typeIdToRuntimeType } from "./types";
-import { CodeView } from "./view";
+import { CodeView, OptimizedImmutable } from "./view";
 import { ArtifactManager } from "./artifactManager";
 import { assert, isBlock04Scope } from "../utils";
 
@@ -278,7 +278,7 @@ export class LocalsScope extends BaseLocalsScope {
 }
 
 export class ContractScope extends BaseScope {
-    private declToView: Map<sol.VariableDeclaration, View<any, rtt.BaseRuntimeType>>;
+    private declToView: Map<sol.VariableDeclaration, View<any, rtt.Value, rtt.BaseRuntimeType>>;
 
     constructor(
         protected readonly contract: sol.ContractDefinition,
@@ -292,7 +292,10 @@ export class ContractScope extends BaseScope {
         const layout = makeStorageView(layoutType, [0n, 32]) as StructStorageView;
 
         const defTypes = new Map<sol.VariableDeclaration, rtt.BaseRuntimeType>();
-        const declToView = new Map<sol.VariableDeclaration, View<any, rtt.BaseRuntimeType>>();
+        const declToView = new Map<
+            sol.VariableDeclaration,
+            View<any, rtt.Value, rtt.BaseRuntimeType>
+        >();
 
         for (const [decl, [name, typ], [, view]] of rtt.zip3(
             normalVars,
@@ -323,13 +326,21 @@ export class ContractScope extends BaseScope {
         if (contractInfo.deployedBytecode !== undefined) {
             for (const v of immVars) {
                 const ref = contractInfo.deployedBytecode.immutableReferences.get(v.id);
-                sol.assert(
-                    ref !== undefined && ref.length >= 1,
-                    `Missing immutable ref info in bytecode for ${(v.vScope as sol.ContractDefinition).name}.${v.name}`
-                );
-
                 const type = typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory);
-                declToView.set(v, new CodeView(type, BigInt(ref[0].start)));
+
+                let view: rtt.View;
+
+                if (ref === undefined) {
+                    view = new OptimizedImmutable(type);
+                } else {
+                    sol.assert(
+                        ref.length >= 1,
+                        `Missing immutable ref info in bytecode for ${(v.vScope as sol.ContractDefinition).name}.${v.name}`
+                    );
+                    view = new CodeView(type, BigInt(ref[0].start));
+                }
+
+                declToView.set(v, view);
                 defTypes.set(v, type);
             }
         }
@@ -338,7 +349,7 @@ export class ContractScope extends BaseScope {
         this.declToView = declToView;
     }
 
-    private stateVarViewToValue(view: View<any, rtt.BaseRuntimeType>): Value {
+    private stateVarViewToValue(view: View<any, rtt.Value, rtt.BaseRuntimeType>): Value {
         if (view instanceof BaseMemoryView || view instanceof CodeView) {
             // Constant/immutable var
             if (isValueType(view.type)) {
@@ -361,7 +372,7 @@ export class ContractScope extends BaseScope {
             return view.toView();
         }
 
-        return view.decode(getStateStorage(this.state));
+        return view.decode(getStateStorage(this.state)) as Value;
     }
 
     _lookup(decl: sol.VariableDeclaration): Value | undefined {
