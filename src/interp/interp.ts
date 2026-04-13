@@ -920,22 +920,29 @@ export class Interpreter {
         return res;
     }
 
-    private execRevertStatement(stmt: sol.RevertStatement, state: State): ControlFlow {
-        const errorDef = stmt.errorCall.vReferencedDeclaration;
-        this.expect(errorDef instanceof sol.ErrorDefinition);
-
+    private evalCustomError(
+        error: sol.ErrorDefinition,
+        args: sol.Expression[],
+        state: State
+    ): [Uint8Array, string] {
         const self = this;
-        const selector = sol.signatureHash(errorDef);
-        const argTs = errorDef.vParameters.vParameters.map((d) =>
+        const selector = sol.signatureHash(error);
+        const argTs = error.vParameters.vParameters.map((d) =>
             changeLocTo(self.varDeclToRuntimeType(d), sol.DataLocation.Memory)
         );
-        const argVs = stmt.errorCall.vArguments.map((arg) => this.eval(arg, state));
+        const argVs = args.map((arg) => this.eval(arg, state));
         const memArgTs = argTs.map((t) => changeLocTo(t, sol.DataLocation.Memory));
         const castArgVs = this.castNTo(argVs, memArgTs, state);
         const argData = encode(castArgVs, argTs, state);
         this.expect(argData instanceof Uint8Array);
-        const data = concatBytes(selector, argData);
-        const msg = `${errorDef.name}(${argVs.map(ppValue).join(", ")})`;
+        const msg = `${error.name}(${argVs.map(ppValue).join(", ")})`;
+        return [concatBytes(selector, argData), msg];
+    }
+
+    private execRevertStatement(stmt: sol.RevertStatement, state: State): ControlFlow {
+        const errorDef = stmt.errorCall.vReferencedDeclaration;
+        this.expect(errorDef instanceof sol.ErrorDefinition);
+        const [data, msg] = this.evalCustomError(errorDef, stmt.errorCall.vArguments, state);
         this.runtimeError(CustomError, state, msg, data);
     }
 
@@ -3285,6 +3292,13 @@ export class Interpreter {
         // Builtin call
         if (realCallee instanceof BuiltinFunction) {
             return this.evalBuiltinCall(expr, callee as BuiltinFunction | CurriedVal, state);
+        }
+
+        if (callee instanceof DefValue && callee.def instanceof sol.ErrorDefinition) {
+            const [errorBytes] = this.evalCustomError(callee.def, expr.vArguments, state);
+            const view = PointerMemView.allocMemFor(errorBytes, bytesT, state.memAllocator);
+            view.encode(errorBytes, state.memory, state.memAllocator);
+            return view;
         }
 
         // Internal calls
