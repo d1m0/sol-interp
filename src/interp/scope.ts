@@ -299,7 +299,7 @@ export class ContractScope extends BaseScope {
             layoutType.fields,
             layout.fieldViews
         )) {
-            sol.assert(decl.name === name, ``);
+            sol.assert(decl.name === name, `Mismatch expected decl ${decl.name} got decl ${name}`);
             declToView.set(decl, view as View<any, rtt.BaseRuntimeType>);
             defTypes.set(decl, typ);
         }
@@ -315,7 +315,7 @@ export class ContractScope extends BaseScope {
         }
 
         const contractInfo = artifactManager.getContractInfo(contract);
-        sol.assert(contractInfo !== undefined, ``);
+        sol.assert(contractInfo !== undefined, `Missing contract info for ${contract.name}`);
 
         // Note: Its possible to get here with no deployedBytecode during gatherConstants
         // when called on an abstract base contract. In those cases we don't expect the
@@ -323,7 +323,10 @@ export class ContractScope extends BaseScope {
         if (contractInfo.deployedBytecode !== undefined) {
             for (const v of immVars) {
                 const ref = contractInfo.deployedBytecode.immutableReferences.get(v.id);
-                sol.assert(ref !== undefined && ref.length >= 1, ``);
+                sol.assert(
+                    ref !== undefined && ref.length >= 1,
+                    `Missing immutable ref info in bytecode for ${(v.vScope as sol.ContractDefinition).name}.${v.name}`
+                );
 
                 const type = typeIdToRuntimeType(sol.typeOf(v), ctx, sol.DataLocation.Memory);
                 declToView.set(v, new CodeView(type, BigInt(ref[0].start)));
