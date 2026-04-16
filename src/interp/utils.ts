@@ -981,5 +981,5 @@ export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition | und
 }
 
 export function sha256(input: Uint8Array): Uint8Array {
-    return new shajs.sha256().end(input).read();
+    return new shajs.sha256().update(input).digest();
 }
