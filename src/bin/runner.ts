@@ -6,7 +6,7 @@ import {
     createAddressFromString,
     hexToBytes
 } from "@ethereumjs/util";
-import { CallResult, BaseEEI, SolMessage, FixedSetBlockManager } from "../interp";
+import { CallResult, SolMessage, FixedSetBlockManager, InterpEEI } from "../interp";
 import { ArtifactManager } from "../interp/artifactManager";
 import { TraceVisitor } from "../interp/visitors";
 import { ParsedStep } from "./ast/parser";
@@ -37,7 +37,7 @@ import { TypedTransaction } from "@ethereumjs/tx";
  * Helper class to run a set of steps
  */
 export class Runner {
-    chain: BaseEEI;
+    chain: InterpEEI;
     visitor: TraceVisitor;
     varToAddr = new Map<string, Address>();
     libMap = new Map<string, Address>();
@@ -49,7 +49,7 @@ export class Runner {
         block: Block,
         tx: TypedTransaction
     ) {
-        this.chain = new BaseEEI(
+        this.chain = new InterpEEI(
             this.artifactManager,
             ImmMap.fromEntries([]),
             block,

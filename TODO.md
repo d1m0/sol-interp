@@ -265,15 +265,15 @@
 249 - cli for playing
 250 - implement computing the correct final deployed bytecode in the face of immutables
 251 Trace alignment refactor:
-    - custom tracer
-        - basic info, event desc tracers
-        - decode calls/returns
-            - nonces on create
-            - msg.data/return data
-        - detect and decode exceptions
-        - get storage copies on calls, returns
-        - new contract address at both creation and return step
-    - adapt seek code to new tracer
+252    - custom tracer
+252       - basic info, event desc tracers
+252       - decode calls/returns
+252           - nonces on create
+252           - msg.data/return data
+252       - detect and decode exceptions
+252       - get storage copies on calls, returns
+252       - new contract address at both creation and return step
+252   - adapt seek code to new tracer
 
 - test multi-level exception
 - test alignment on contract creation with no constructor and no implicit initializers
@@ -285,7 +285,6 @@
 - on Balance.config.sol I don't have contents. Is this a compiler version issue? Where should I fix it?
 - is "foo".length byte length or uncode code points?
 - address.callcode
-- do a pass over contract scopes
 
 Issue: ContractScope seems wrong
     - defs not included from base contracts
@@ -311,21 +310,12 @@ Constructors:
 
 - add test with struct constructor and out-of-order field names, and mutation to capture order of execution
 
-- Idea: remove reliance on solc-typed-ast's resolve:
-    - add remaining named defs to global and struct scopes
-    - update member access to handle Enum.Option
-
-- add BaseWorld class that has an ArtifactManager
-- make an exhaustive test for coercions from old code
-
 // ---------------
 - test virtual function resolves to public getter
 - add a test with array of maps in a struct and push
 
 - make a pass to remove nyi and todos
-- add side-by-side execution test :)
 - refactor this.expect to use template strings like sol.assert as an optimization
-- test behavior of zero-ing out (delete, assign zero, pop) of complex storage datastructures. Are they recursively zeroed-out? For sized arrays? For structs? for unsized arrays?
 
 Eventually:
     - cleanup nyi()s to 0
@@ -350,8 +340,6 @@ Tests requiring inline assembly:
 
 Leftovers:
 Easy:
-    - tx.gasprice
-    - tx.origin
     - addmod
     - mulmod
 Medium:
@@ -359,11 +347,9 @@ Medium:
     - block.prevrandao
     - ripemd160
     - address.callcode
-    - blockhash(uint blockNumber)/block.blockhash (<0.5.0)
     - blobhash(uint index)
     - block.blobbasefee
 
 Difficult:
     - gasleft/msg.gas <0.5.0
     - selfdestruct
-    - user-defined operators

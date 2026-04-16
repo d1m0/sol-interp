@@ -89,20 +89,20 @@ export function makeCallResultFromStep(s: WithReturnInfo & WithExceptionInfo): C
 
 export function makeEVMEventFromStep(step: EVMStep, i: number): EVMObservableEvent {
     if (step.exceptionInfo) {
-        return new EVMExceptionEvent(i, step);
+        return new EVMExceptionEvent(i, step, step.exceptionInfo);
     } else if (step.createInfo) {
-        return new EVMCreateEvent(i, step);
+        return new EVMCreateEvent(i, step, step.createInfo);
     } else if (step.returnInfo) {
-        return new EVMReturnEvent(i, step);
+        return new EVMReturnEvent(i, step, step.returnInfo);
     } else if (step.callInfo) {
-        return new EVMCallEvent(i, step);
+        return new EVMCallEvent(i, step, step.callInfo);
     } else {
         assert(
             step.emittedEvent !== undefined,
             `Step {0} is not an externally observable EVM step`,
             i
         );
-        return new EVMEmitEvent(i, step);
+        return new EVMEmitEvent(i, step, step.emittedEvent);
     }
 }
 
@@ -123,16 +123,18 @@ export function makeSolEventFromStep(s: EVMStep): SolObservableEvent {
 export enum PrecomiledAddresses {
     EC_RECOVER = 1,
     SHA256,
-    RIPEMD160
-    // Not yet supported:
-    //    IDENTITY,
-    //    MODEXP
+    RIPEMD160,
+    IDENTITY,
+    MODEXP,
+    NUM
 }
 
 const precompiles: Address[] = [
     createAddressFromBigInt(BigInt(PrecomiledAddresses.EC_RECOVER)),
     createAddressFromBigInt(BigInt(PrecomiledAddresses.SHA256)),
-    createAddressFromBigInt(BigInt(PrecomiledAddresses.RIPEMD160))
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.RIPEMD160)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.IDENTITY)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.MODEXP))
 ];
 
 export function isPrecompile(addr: Address): boolean {

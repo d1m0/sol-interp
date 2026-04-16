@@ -58,7 +58,8 @@ export function ppValue(v: Value): string {
     } else if (v instanceof ExternalFunRef) {
         return `<external fun ref to ${v.selector}@${v.address}>`;
     } else if (v instanceof InternalFunRef) {
-        return `<internal fun ref to ${getFunDef(v).name}>`;
+        const def = getFunDef(v);
+        return `<internal fun ref to ${def === undefined ? `<uninitialized>` : def.name}>`;
     } else if (v instanceof Slice) {
         return `<slice [${v.start}:${v.end}]>`;
     } else if (v instanceof DefValue || v instanceof TypeValue) {

@@ -57,14 +57,16 @@ import {
     LValue,
     match,
     NewCall,
-    none,
+    noneVal,
     NonPoisonValue,
     TypeConstructorToValueType,
     TypeValue,
     Value,
     ValueTypeConstructors,
     NoneValue,
-    SuperVal
+    SuperVal,
+    idFunVal,
+    IdFunVal
 } from "./value";
 import {
     Address,
@@ -161,6 +163,7 @@ import { bshl, bshr } from "./bitwise";
 import { buildEvent } from "./events";
 import { CallResult, EthereumEnvInterface, SolMessage } from "./env";
 import { isBlock04Scope } from "../utils";
+import { resolve } from "./resolve";
 
 enum ControlFlow {
     Fallthrough = 0,
@@ -554,7 +557,7 @@ export class Interpreter {
         // Execute actual call
         try {
             if (entryPoint instanceof sol.FunctionDefinition) {
-                res = this.callInternal(entryPoint, calldataArgs, argTs, state);
+                res = this._execCall(entryPoint, calldataArgs, argTs, state);
                 resTs = entryPoint.vReturnParameters.vParameters.map((retT) =>
                     this.varDeclToRuntimeType(retT)
                 );
@@ -840,7 +843,7 @@ export class Interpreter {
 
     /**
      * Make an internal call to `callee` with arguments `args` in state `state`.
-     * @todo - delete. No longer neccessary
+     * Note: Keeping around as an entry-point for unit tests. Not used internally to the class.
      * @param callee
      * @param args
      * @param state
@@ -917,22 +920,29 @@ export class Interpreter {
         return res;
     }
 
-    private execRevertStatement(stmt: sol.RevertStatement, state: State): ControlFlow {
-        const errorDef = stmt.errorCall.vReferencedDeclaration;
-        this.expect(errorDef instanceof sol.ErrorDefinition);
-
+    private evalCustomError(
+        error: sol.ErrorDefinition,
+        args: sol.Expression[],
+        state: State
+    ): [Uint8Array, string] {
         const self = this;
-        const selector = sol.signatureHash(errorDef);
-        const argTs = errorDef.vParameters.vParameters.map((d) =>
+        const selector = sol.signatureHash(error);
+        const argTs = error.vParameters.vParameters.map((d) =>
             changeLocTo(self.varDeclToRuntimeType(d), sol.DataLocation.Memory)
         );
-        const argVs = stmt.errorCall.vArguments.map((arg) => this.eval(arg, state));
+        const argVs = args.map((arg) => this.eval(arg, state));
         const memArgTs = argTs.map((t) => changeLocTo(t, sol.DataLocation.Memory));
         const castArgVs = this.castNTo(argVs, memArgTs, state);
         const argData = encode(castArgVs, argTs, state);
         this.expect(argData instanceof Uint8Array);
-        const data = concatBytes(selector, argData);
-        const msg = `${errorDef.name}(${argVs.map(ppValue).join(", ")})`;
+        const msg = `${error.name}(${argVs.map(ppValue).join(", ")})`;
+        return [concatBytes(selector, argData), msg];
+    }
+
+    private execRevertStatement(stmt: sol.RevertStatement, state: State): ControlFlow {
+        const errorDef = stmt.errorCall.vReferencedDeclaration;
+        this.expect(errorDef instanceof sol.ErrorDefinition);
+        const [data, msg] = this.evalCustomError(errorDef, stmt.errorCall.vArguments, state);
         this.runtimeError(CustomError, state, msg, data);
     }
 
@@ -1075,7 +1085,7 @@ export class Interpreter {
         if (gte(this.compilerVersion, "0.5.0")) {
             this.pushScope(
                 stmt,
-                stmt.vDeclarations.map((d) => [d, none]),
+                stmt.vDeclarations.map((d) => [d, noneVal]),
                 state
             );
         }
@@ -1397,7 +1407,7 @@ export class Interpreter {
         } else if (expr instanceof sol.UnaryOperation) {
             res = this.evalUnaryOperation(expr, state);
         } else if (expr instanceof sol.ElementaryTypeNameExpression) {
-            res = none;
+            res = noneVal;
         } else {
             nyi(`evalExpression(${expr.constructor.name})`);
         }
@@ -2129,7 +2139,11 @@ export class Interpreter {
     ): NonPoisonValue {
         // @todo - need to detect
         if (userFunction) {
-            nyi("User-defined operators");
+            const res = rtt.single(
+                this._execCall(userFunction, [left, right], [lType, rType], state)
+            );
+            this.expect(!(res instanceof Poison));
+            return res;
         }
 
         this.expect(
@@ -2478,8 +2492,8 @@ export class Interpreter {
             );
 
             const bts = decodeView(fromV, state);
-            this.expect(bts instanceof Uint8Array && bts.length === toT.numBytes);
-            return bts;
+            this.expect(bts instanceof Uint8Array);
+            return setLengthRight(bts, toT.numBytes);
         }
 
         // int -> int
@@ -2732,7 +2746,7 @@ export class Interpreter {
         const results = this._execCall(callee, args, argTs, state);
 
         if (results.length === 0) {
-            return none;
+            return noneVal;
         }
 
         if (results.length === 1) {
@@ -2910,7 +2924,7 @@ export class Interpreter {
                     this.runtimeError(RuntimeError, state, `Transfer failed`, res.data);
                 }
 
-                return none;
+                return noneVal;
             }
 
             if (callee.callKind === "send") {
@@ -2938,7 +2952,7 @@ export class Interpreter {
             }
 
             const rets: Value[] = this.getValuesFromReturnedCalldata(res.data, astTarget, state);
-            return rets.length === 0 ? none : rets.length === 1 ? rets[0] : rets;
+            return rets.length === 0 ? noneVal : rets.length === 1 ? rets[0] : rets;
         }
     }
 
@@ -2951,7 +2965,7 @@ export class Interpreter {
         }
 
         const contract = getCodeContract(state);
-        const res = sol.resolve(contract, target);
+        const res = resolve(target, contract);
         this.expect(
             res !== undefined,
             `Couldn't resolve ${target.name} in contract ${contract.name}`
@@ -2992,6 +3006,9 @@ export class Interpreter {
             actualCallee = callee;
         } else if (callee instanceof rtt.InternalFunRef) {
             const fun = getFunDef(callee);
+            if (fun === undefined) {
+                this.runtimeError(PanicError, state, 0x51n);
+            }
             callTarget = fun;
             actualCallee = fun;
         } else {
@@ -3087,7 +3104,7 @@ export class Interpreter {
         const results = this._execCall(callee, argVals, argTs, state);
 
         if (results.length === 0) {
-            return none;
+            return noneVal;
         }
 
         if (results.length === 1) {
@@ -3219,7 +3236,7 @@ export class Interpreter {
                 v.emit(this, state, lowLevelEvent);
             }
 
-            return none;
+            return noneVal;
         }
 
         if (
@@ -3229,6 +3246,12 @@ export class Interpreter {
             callee = this.evalTypeExpr(expr.vExpression);
         } else {
             callee = this.evalNP(expr.vExpression, state);
+        }
+
+        // UDVT's wrap/unwrap. Just return the singular argument
+        if (callee === idFunVal) {
+            this.expect(expr.vArguments.length === 1, `Wrap/unwrap only gets a single argument`);
+            return this.evalNP(expr.vArguments[0], state);
         }
 
         if (expr.kind === sol.FunctionCallKind.TypeConversion) {
@@ -3269,6 +3292,13 @@ export class Interpreter {
         // Builtin call
         if (realCallee instanceof BuiltinFunction) {
             return this.evalBuiltinCall(expr, callee as BuiltinFunction | CurriedVal, state);
+        }
+
+        if (callee instanceof DefValue && callee.def instanceof sol.ErrorDefinition) {
+            const [errorBytes] = this.evalCustomError(callee.def, expr.vArguments, state);
+            const view = PointerMemView.allocMemFor(errorBytes, bytesT, state.memAllocator);
+            view.encode(errorBytes, state.memory, state.memAllocator);
+            return view;
         }
 
         // Internal calls
@@ -3325,7 +3355,7 @@ export class Interpreter {
 
             def =
                 isMethod(def) && def.visibility !== sol.FunctionVisibility.External
-                    ? sol.resolve(contract, def)
+                    ? resolve(def, contract)
                     : def;
             this.expect(
                 def instanceof sol.FunctionDefinition,
@@ -3651,15 +3681,16 @@ export class Interpreter {
 
         if (baseVal instanceof SuperVal) {
             const def = expr.vReferencedDeclaration;
+
+            if (def instanceof sol.EventDefinition) {
+                return new DefValue(def);
+            }
+
             this.expect(
-                def instanceof sol.FunctionDefinition ||
-                    def instanceof sol.VariableDeclaration ||
-                    def instanceof sol.ModifierDefinition ||
-                    def instanceof sol.EventDefinition
+                def instanceof sol.FunctionDefinition || def instanceof sol.ModifierDefinition
             );
             for (const base of baseVal.bases) {
-                const t = sol.resolve(base, def);
-                this.expect(!(t instanceof sol.VariableDeclaration));
+                const t = resolve(def, base);
                 if (t && (!(t instanceof sol.FunctionDefinition) || t.vBody !== undefined)) {
                     return new DefValue(t);
                 }
@@ -3702,6 +3733,14 @@ export class Interpreter {
 
                 return res;
             }
+
+            if (baseVal.def instanceof sol.UserDefinedValueTypeDefinition) {
+                this.expect(
+                    expr.memberName === "wrap" || expr.memberName === "unwrap",
+                    `Unknown user defined value type`
+                );
+                return idFunVal;
+            }
         }
 
         if (
@@ -3736,7 +3775,7 @@ export class Interpreter {
     evalTupleExpression(expr: sol.TupleExpression, state: State): Value {
         // A copmonent here may be an empty tuple, so we use allow poison in non-null components
         const compVals: Value[] = expr.vOriginalComponents.map((comp) =>
-            comp === null ? none : this.eval(comp, state)
+            comp === null ? noneVal : this.eval(comp, state)
         );
 
         // Array literals get allocated in memory
@@ -3766,7 +3805,7 @@ export class Interpreter {
         }
 
         if (compVals.length === 0) {
-            return none;
+            return noneVal;
         }
 
         if (compVals.length === 1) {
@@ -3817,7 +3856,7 @@ export class Interpreter {
         } else if (lv instanceof Array) {
             return lv.map((x) => this.lvToValue(x, state));
         } else if (lv === null) {
-            return none;
+            return noneVal;
         }
 
         nyi(`LValue: ${lv}`);
@@ -3833,14 +3872,17 @@ export class Interpreter {
         }
 
         if (expr.vUserFunction) {
-            nyi(`Unary user functions`);
+            const subVal = this.evalNP(expr.vSubExpression, state);
+            const res = rtt.single(this._execCall(expr.vUserFunction, [subVal], [typ], state));
+            this.expect(!(res instanceof Poison));
+            return res;
         }
 
         if (expr.operator === "delete") {
             const subT = this.typeOf(expr.vSubExpression);
             const zeroV = makeZeroValue(changeLocTo(subT, sol.DataLocation.Memory), state);
             this.assign(this.evalLV(expr.vSubExpression, state), zeroV, state);
-            return none;
+            return noneVal;
         }
 
         if (expr.operator === "!") {
@@ -3957,10 +3999,17 @@ export class Interpreter {
         let nd;
 
         if (target instanceof CurriedVal) {
-            nd =
-                target.target instanceof rtt.InternalFunRef
-                    ? getFunDef(target.target)
-                    : target.target;
+            if (target.target instanceof rtt.InternalFunRef) {
+                const def = getFunDef(target.target);
+
+                if (def === undefined) {
+                    this.runtimeError(PanicError, state, 0x51n);
+                }
+
+                nd = def;
+            } else {
+                nd = target.target;
+            }
             this.expect(!(nd instanceof BuiltinFunction));
             args = [...target.args, ...args];
             argTs = [...target.argTs, ...argTs];
@@ -4019,6 +4068,10 @@ export class Interpreter {
             }
 
             if (v instanceof SuperVal) {
+                continue;
+            }
+
+            if (v instanceof IdFunVal) {
                 continue;
             }
 
@@ -4098,7 +4151,7 @@ export class Interpreter {
             }
 
             // This guard is to prevent assignment of poison in the case of an array of maps
-            if (value !== none) {
+            if (value !== noneVal) {
                 this.assign(elView, value, state);
             }
         } else {

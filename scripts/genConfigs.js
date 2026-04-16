@@ -3,8 +3,8 @@ const sol = require("solc-typed-ast")
 const util = require("@ethereumjs/util");
 const { assert } = require("console");
 
-const BASE_DIR = "test/samples/sol2maruir"
-//const BASE_DIR = "test/samples/misalignment"
+//const BASE_DIR = "test/samples/sol2maruir"
+const BASE_DIR = "test/samples/alignment"
 
 let samples = fse
     .readdirSync(BASE_DIR)

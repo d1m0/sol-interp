@@ -1,11 +1,10 @@
 import { View, Value, zip, typeIdToRuntimeType } from "sol-dbg";
 import { Interpreter } from "../../src";
 import * as sol from "solc-typed-ast";
-import { encodeMemArgs, loadSamples, makeState, SampleInfo, SampleMap } from "./utils";
+import { encodeMemArgs, loadSamples, makeState, SampleInfo } from "./utils";
 import { AssertError, InterpError, RuntimeError } from "../../src/interp/exceptions";
 import { hexToBytes } from "@ethereumjs/util";
 import { decodeView, envFailMock } from "../../src/interp/utils";
-import { ArtifactManager } from "../../src/interp/artifactManager";
 
 type ExceptionConstructors = typeof AssertError;
 const samples: Array<
@@ -103,17 +102,9 @@ const samples: Array<
 ];
 
 describe("Simple function call tests", () => {
-    let artifactManager: ArtifactManager;
-    let sampleMap: SampleMap;
-
-    const fileNames = [...new Set<string>(samples.map(([name]) => name))];
-
-    beforeAll(async () => {
-        [artifactManager, sampleMap] = await loadSamples(fileNames);
-    }, 10000);
-
     for (const [fileName, contract, funName, stateVals, argVals, expectedReturns] of samples) {
-        it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, () => {
+        it(`${fileName}:${contract}.${funName}(${argVals.map((arg) => String(arg)).join(", ")})`, async () => {
+            const [artifactManager, sampleMap] = await loadSamples([fileName]);
             const info = sampleMap.get(fileName) as SampleInfo;
 
             let fun: sol.FunctionDefinition | undefined = undefined;

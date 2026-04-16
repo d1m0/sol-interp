@@ -905,6 +905,22 @@ const typeBuiltin = new BuiltinFunction(
             return [new BuiltinStruct(name, structT, vals)];
         }
 
+        if (solT instanceof sol.EnumTypeId) {
+            const def = ctx.locate(solT.id);
+            interp.expect(def instanceof sol.EnumDefinition, `Expected an enum def`);
+            const structT = new rtt.StructType(name, [
+                ["min", rtt.uint8],
+                ["max", rtt.uint8]
+            ]);
+
+            return [
+                new BuiltinStruct(name, structT, [
+                    ["min", 0n],
+                    ["max", BigInt(def.vMembers.length)]
+                ])
+            ];
+        }
+
         rtt.nyi(`type(${solT.pp()})`);
     },
     false,
@@ -1089,6 +1105,18 @@ const ecrecoverBuiltin = new BuiltinFunction(
 const now = blockTimestampBuiltin.alias("now");
 const globalBlockashBuiltin = blockhashBuiltinOldField.alias("blockhash");
 
+export const gasleftBuiltin = new BuiltinFunction(
+    "gasleft",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(args.length === 0);
+        return [interp.world.gasleft()];
+    },
+    false,
+    false,
+    false
+);
+
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
     [
@@ -1113,7 +1141,8 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         txBuiltinStructDesc,
         [[now, "<0.7.0"]],
         globalBlockashBuiltin,
-        ecrecoverBuiltin
+        ecrecoverBuiltin,
+        gasleftBuiltin
     ]
 ];
 

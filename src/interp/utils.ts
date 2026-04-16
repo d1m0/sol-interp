@@ -19,7 +19,7 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { ExternalCallDescription, NewCall, none, Value } from "./value";
+import { ExternalCallDescription, NewCall, noneVal, Value } from "./value";
 import { State } from "./state";
 import {
     FixedBytesLocalView,
@@ -140,15 +140,19 @@ export function makeZeroValue(t: rtt.BaseRuntimeType, state: State): PrimitiveVa
         }
 
         // In all other pointer case initialize with poison
-        return none;
+        return noneVal;
     }
 
     if (t instanceof rtt.MappingType) {
-        return none;
+        return noneVal;
     }
 
     if (t instanceof rtt.FunctionType && t.solType.kind === "external") {
         return new rtt.ExternalFunRef(ZERO_ADDRESS, new Uint8Array(4));
+    }
+
+    if (t instanceof rtt.FunctionType && t.solType.kind === "internal") {
+        return new rtt.InternalFunRef(undefined);
     }
 
     nyi(`makeZeroValue(${t.pp()})`);
@@ -711,6 +715,9 @@ export const envFailMock: EthereumEnvInterface = {
     },
     getBlock: function (): Block | undefined {
         throw new Error("Function not implemented.");
+    },
+    gasleft: function (): bigint {
+        throw new Error("Function not implemented.");
     }
 };
 
@@ -959,7 +966,16 @@ export function padToMulipleOf32(bs: Uint8Array): Uint8Array {
     return setLengthLeft(bs, paddedLength);
 }
 
-export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition {
+/**
+ * Get the FunctionDefinition from a internal fun ref. Can be undefined when de-referencing an uninitialized local var.
+ * @param ref
+ * @returns
+ */
+export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition | undefined {
+    if (ref.opaque === undefined) {
+        return ref.opaque;
+    }
+
     sol.assert(ref.opaque instanceof sol.FunctionDefinition, ``);
     return ref.opaque;
 }
