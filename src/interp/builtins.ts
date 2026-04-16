@@ -44,6 +44,7 @@ import {
 } from "./utils";
 import {
     Address,
+    bytesToBigInt,
     bytesToUtf8,
     concatBytes,
     createAddressFromPublicKey,
@@ -57,6 +58,7 @@ import { lt, satisfies } from "semver";
 import { BaseInterpType, typeIdToRuntimeType, WrappedType } from "./types";
 import { xor } from "./bitwise";
 import { isLegacyTx } from "@ethereumjs/tx";
+import { Hardfork } from "@ethereumjs/common";
 
 /**
  * A version-dependent buitlin description. This is a recursive datatype with several cases:
@@ -1009,6 +1011,40 @@ const blockhashBuiltinOldField = new BuiltinFunction(
     false
 );
 
+const blockDifficultyBuiltin = new BuiltinFunction(
+    "difficulty",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        const block = state.block;
+        const common = block.common;
+        const fork = common.getHardforkBy({
+            blockNumber: block.header.number,
+            timestamp: block.header.timestamp
+        });
+
+        if (common.hardforkGteHardfork(fork, Hardfork.Paris)) {
+            return [bytesToBigInt(state.block.header.prevRandao)];
+        }
+
+        return [state.block.header.difficulty];
+    },
+    false,
+    true,
+    false
+);
+
+// >=0.8.18
+const blockPrevrandaoBuiltin = new BuiltinFunction(
+    "prevrandao",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [bytesToBigInt(state.block.header.prevRandao)];
+    },
+    false,
+    true,
+    false
+);
+
 const txGasPriceBuiltin = new BuiltinFunction(
     "gasprice",
     dummyFunT,
@@ -1048,6 +1084,8 @@ const blockBuiltinStructDesc: BuiltinDescriptor = [
         blockGasLimitBuiltin,
         blockNumberBuiltin,
         blockTimestampBuiltin,
+        blockDifficultyBuiltin,
+        [[blockPrevrandaoBuiltin, ">=0.8.18"]],
         [[blockhashBuiltinOldField, "<0.5.0"]]
     ]
 ];
