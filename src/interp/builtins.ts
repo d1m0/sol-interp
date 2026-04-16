@@ -26,7 +26,6 @@ import {
     BytesStorageView,
     DecodingFailure,
     PointerMemView,
-    uint256,
     View
 } from "sol-dbg";
 import {
@@ -36,7 +35,6 @@ import {
     getMsgSender,
     getSig,
     getStateStorage,
-    int256,
     isValueType,
     liftExtCalRef,
     memBytesT,
@@ -51,12 +49,12 @@ import {
     createAddressFromPublicKey,
     ecrecover
 } from "@ethereumjs/util";
-import { decode, encode, encodePacked, signatureToSelector } from "./abi";
+import { decode, encode, encodePacked, getEncodeTypes, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
 import { lt, satisfies } from "semver";
-import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
+import { BaseInterpType, typeIdToRuntimeType, WrappedType } from "./types";
 import { xor } from "./bitwise";
 import { isLegacyTx } from "@ethereumjs/tx";
 
@@ -244,29 +242,6 @@ function encodePackedImpl(paramTs: rtt.BaseRuntimeType[], args: Value[], state: 
     res.encode(encBytes, state.memory);
 
     return res;
-}
-
-function getEncodeTypes(
-    argTs: BaseInterpType[],
-    ctx: sol.ASTContext,
-    isPacked: boolean
-): BaseInterpType[] {
-    const paramTs = argTs.map((paramT) => {
-        if (paramT instanceof RationalNumberType) {
-            sol.assert(paramT.isInt(), ``);
-            if (isPacked) {
-                const intT = sol.smallestFittingType(paramT.numerator);
-                sol.assert(intT !== undefined, ``);
-                return rtt.typeIdToRuntimeType(new sol.IntTypeId(intT.nBits, intT.signed), ctx);
-            } else {
-                return paramT.numerator < 0n ? int256 : uint256;
-            }
-        }
-
-        return changeLocTo(paramT, sol.DataLocation.Memory);
-    });
-
-    return paramTs;
 }
 
 export const abiEncodeBuiltin = new BuiltinFunction(

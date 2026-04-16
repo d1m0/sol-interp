@@ -331,12 +331,6 @@ export class ContractScope extends BaseScope {
                 let view: rtt.View;
 
                 if (ref === undefined) {
-                    assert(
-                        v.visibility === sol.StateVariableVisibility.Private,
-                        `Unexpected optimized non-private var {0}.{1}`,
-                        (v.vScope as sol.ContractDefinition).name,
-                        v.name
-                    );
                     view = new OptimizedImmutable(type);
                 } else {
                     sol.assert(
