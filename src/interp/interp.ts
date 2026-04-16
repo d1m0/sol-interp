@@ -3297,9 +3297,11 @@ export class Interpreter {
         }
 
         // External calls
-        const extCallee = this.coerceToExternallyCallable(callee, state);
-        if (extCallee !== undefined) {
-            return this.evalExternalCall(expr, liftExtCalRef(extCallee), state);
+        if (!state.isConstantsEval) {
+            const extCallee = this.coerceToExternallyCallable(callee, state);
+            if (extCallee !== undefined) {
+                return this.evalExternalCall(expr, liftExtCalRef(extCallee), state);
+            }
         }
 
         const realCallee = callee instanceof CurriedVal ? callee.target : callee;

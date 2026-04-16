@@ -1,12 +1,12 @@
 import { txDescToBlockData, txDescToTxData } from "../unit/utils";
 import * as fse from "fs-extra";
 import { Scenario } from "sol-dbg";
-import {} from "@ethereumjs/tx";
-import {} from "@ethereumjs/common";
+import { } from "@ethereumjs/tx";
+import { } from "@ethereumjs/common";
 import { createAddressFromString } from "@ethereumjs/util";
-import {} from "@ethereumjs/block";
+import { } from "@ethereumjs/block";
 import { scenarioInitialStateToAccountMap } from "../unit/utils";
-import { isReturn, replayEVM } from "../../src/alignment/evm_trace";
+import { isNonExceptionTermination, replayEVM } from "../../src/alignment/evm_trace";
 import { CallInfo, CreateInfo, ReturnInfo } from "../../src/alignment/evm_trace/transformers";
 import { FixedSetAsyncBlockManager } from "../../src";
 
@@ -59,12 +59,12 @@ describe("EVM Tracer tests", () => {
                         }
                     }
 
-                    if (isReturn(evmTrace[i])) {
+                    if (isNonExceptionTermination(evmTrace[i])) {
                         const retInfo = evmTrace[i].returnInfo as ReturnInfo;
                         expect(retInfo).toBeDefined();
                         expect(
                             i === evmTrace.length - 1 ||
-                                evmTrace[i + 1].depth === evmTrace[i].depth - 1
+                            evmTrace[i + 1].depth === evmTrace[i].depth - 1
                         ).toBeTruthy();
                         expect(stack.length > 0);
                         stack.pop();
@@ -73,7 +73,7 @@ describe("EVM Tracer tests", () => {
                     if (
                         i > 0 &&
                         evmTrace[i - 1].depth > evmTrace[i].depth &&
-                        !isReturn(evmTrace[i - 1])
+                        !isNonExceptionTermination(evmTrace[i - 1])
                     ) {
                         expect(evmTrace[i - 1].exceptionInfo).toBeDefined();
                         expect(stack.length > 0);
