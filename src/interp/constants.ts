@@ -45,6 +45,10 @@ function getFunConstantsUses(
 
     visited.add(nd);
 
+    if (nd.kind !== sol.FunctionCallKind.FunctionCall) {
+        return new Set();
+    }
+
     if (nd.vReferencedDeclaration === undefined) {
         return new Set();
     }

@@ -178,8 +178,8 @@ class QuicknodePreState extends JSONCache<QuicknodeStateDesc> {
         super(join(basePath, "txs_pre_state"), 5);
     }
 
-    makeKey(endpoint: string, blockNum: number): string {
-        return `${blockNum}`;
+    makeKey(endpoint: string, txHash: string): string {
+        return `${txHash}`;
     }
     async make(endpoint: string, txHash: string): Promise<QuicknodeTransaction> {
         return await jsonCall(endpoint, "debug_traceTransaction", [
@@ -189,10 +189,25 @@ class QuicknodePreState extends JSONCache<QuicknodeStateDesc> {
     }
 }
 
+class QuicknodeCode extends JSONCache<string> {
+    constructor(basePath: string) {
+        super(join(basePath, "code"), 5);
+    }
+
+    makeKey(endpoint: string, address: string, blockNum: number): string {
+        return `${address}@${blockNum}`;
+    }
+
+    async make(endpoint: string, address: string, blockNum: number): Promise<string> {
+        return await jsonCall(endpoint, "eth_getCode", [address, blockNum]);
+    }
+}
+
 const QUICKNODE_CACHE_DIR = ".quicknode_cache/";
 const qBlocksWithTx = new QuicknodeBlockWithTxs(QUICKNODE_CACHE_DIR);
 const qTxs = new QuicknodeTxs(QUICKNODE_CACHE_DIR);
 const qPreState = new QuicknodePreState(QUICKNODE_CACHE_DIR);
+const qCode = new QuicknodeCode(QUICKNODE_CACHE_DIR);
 
 export interface ReplayInfo {
     block: BlockData;
@@ -201,6 +216,14 @@ export interface ReplayInfo {
     sender: Address;
     blockHash: string;
     txHash: string;
+}
+
+export async function getCode(
+    endpoint: string,
+    address: string,
+    blockNum: number
+): Promise<Uint8Array> {
+    return hexToBytes((await qCode.get(endpoint, address, blockNum)).trim() as `0x{string}`);
 }
 
 /**

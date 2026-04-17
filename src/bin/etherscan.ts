@@ -1,4 +1,4 @@
-import { Address } from "@ethereumjs/util";
+import { Address, hexToBytes } from "@ethereumjs/util";
 import { assert } from "../utils";
 import axios from "axios";
 import * as sol from "solc-typed-ast";
@@ -6,6 +6,10 @@ import { JSONCache } from "./json";
 import { PartialSolcOutput } from "sol-dbg";
 import { addSourcesToResult } from "./utils";
 import { record } from "./stats";
+import {
+    BytecodeTemplate,
+    matchesTemplate
+} from "sol-dbg/dist/debug/artifact_manager/bytecode_templates";
 
 export interface EtherscanSourceResponse {
     ABI: string;
@@ -147,6 +151,27 @@ class ArtifactCache extends JSONCache<CompiledArtifact> {
             contractName: t[2]
         };
     }
+}
+
+const ERC1167Template: BytecodeTemplate = {
+    object: hexToBytes(
+        "0x363d3d373d3d3d363d73bebebebebebebebebebebebebebebebebebebebe5af43d82803e903d91602b57fd5bf3"
+    ),
+    skipRanges: [[10, 30]], // bytes 10-29 inclusive
+    contractInfo: undefined as unknown as any
+};
+
+/**
+ * Given a contract deployed bytecode try and match it as an ERC1167 proxy. If successful return
+ * the proxy target address. Otherwise return undefined.
+ * @param bytecode
+ */
+export function tryMatchERC1167(bytecode: Uint8Array): Address | undefined {
+    if (matchesTemplate(bytecode, ERC1167Template, false)) {
+        return new Address(bytecode.slice(10, 30));
+    }
+
+    return undefined;
 }
 
 export async function getArtifact(
