@@ -3485,6 +3485,7 @@ export class Interpreter {
         this.expect(typeof start === "bigint" && typeof end === "bigint");
         this.expect(
             base instanceof rtt.BytesCalldataView ||
+                base instanceof rtt.BytesSliceCalldataView ||
                 base instanceof rtt.ArrayCalldataView ||
                 base instanceof MsgDataView
         );
@@ -3508,6 +3509,8 @@ export class Interpreter {
 
         if (base instanceof rtt.BytesCalldataView || base instanceof MsgDataView) {
             return new rtt.BytesSliceCalldataView(base.type, startOffset, len);
+        } else if (base instanceof rtt.BytesSliceCalldataView) {
+            return new rtt.BytesSliceCalldataView(base.type, base.offset + startOffset, len);
         } else {
             return new rtt.ArraySliceCalldataView(base.type, startOffset, len);
         }
