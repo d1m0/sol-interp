@@ -3,6 +3,7 @@ import * as rtt from "sol-dbg";
 import {
     BuiltinFunction,
     BuiltinStruct,
+    DefValue,
     ExternalCallDescription,
     ExternalCallTargetValue,
     isExternalCallTarget,
@@ -26,7 +27,6 @@ import {
     BytesStorageView,
     DecodingFailure,
     PointerMemView,
-    uint256,
     View
 } from "sol-dbg";
 import {
@@ -36,7 +36,6 @@ import {
     getMsgSender,
     getSig,
     getStateStorage,
-    int256,
     isValueType,
     liftExtCalRef,
     memBytesT,
@@ -46,19 +45,21 @@ import {
 } from "./utils";
 import {
     Address,
+    bytesToBigInt,
     bytesToUtf8,
     concatBytes,
     createAddressFromPublicKey,
     ecrecover
 } from "@ethereumjs/util";
-import { decode, encode, encodePacked, signatureToSelector } from "./abi";
+import { decode, encode, encodePacked, getEncodeTypes, signatureToSelector } from "./abi";
 import { MsgDataView } from "./view";
 import { keccak256 } from "ethereum-cryptography/keccak.js";
 import { ppValue } from "./pp";
 import { lt, satisfies } from "semver";
-import { BaseInterpType, RationalNumberType, typeIdToRuntimeType, WrappedType } from "./types";
+import { BaseInterpType, typeIdToRuntimeType, WrappedType } from "./types";
 import { xor } from "./bitwise";
 import { isLegacyTx } from "@ethereumjs/tx";
+import { Hardfork } from "@ethereumjs/common";
 
 /**
  * A version-dependent buitlin description. This is a recursive datatype with several cases:
@@ -246,29 +247,6 @@ function encodePackedImpl(paramTs: rtt.BaseRuntimeType[], args: Value[], state: 
     return res;
 }
 
-function getEncodeTypes(
-    argTs: BaseInterpType[],
-    ctx: sol.ASTContext,
-    isPacked: boolean
-): BaseInterpType[] {
-    const paramTs = argTs.map((paramT) => {
-        if (paramT instanceof RationalNumberType) {
-            sol.assert(paramT.isInt(), ``);
-            if (isPacked) {
-                const intT = sol.smallestFittingType(paramT.numerator);
-                sol.assert(intT !== undefined, ``);
-                return rtt.typeIdToRuntimeType(new sol.IntTypeId(intT.nBits, intT.signed), ctx);
-            } else {
-                return paramT.numerator < 0n ? int256 : uint256;
-            }
-        }
-
-        return changeLocTo(paramT, sol.DataLocation.Memory);
-    });
-
-    return paramTs;
-}
-
 export const abiEncodeBuiltin = new BuiltinFunction(
     "encode",
     dummyFunT,
@@ -325,8 +303,23 @@ export const abiEncodeCallBuiltin = new BuiltinFunction(
     (interp: Interpreter, state: State, args: Value[], argTs: BaseInterpType[]): Value[] => {
         const paramTs = getEncodeTypes(argTs, interp.ctx, false);
 
-        interp.expect(args.length >= 1 && args[0] instanceof rtt.ExternalFunRef);
-        return [encodeImpl(paramTs.slice(1), args.slice(1), state, args[0].selector)];
+        interp.expect(args.length >= 1);
+        let selector: Uint8Array | undefined;
+
+        if (args[0] instanceof rtt.ExternalFunRef) {
+            selector = args[0].selector;
+        } else if (args[0] instanceof DefValue) {
+            const def = args[0].def;
+            interp.expect(
+                def instanceof sol.FunctionDefinition || def instanceof sol.VariableDeclaration,
+                `Unexpected argument to encodeCall`
+            );
+            selector = sol.signatureHash(def);
+        } else {
+            rtt.nyi(`encodeCall ${args[0]}`);
+        }
+
+        return [encodeImpl(paramTs.slice(1), args.slice(1), state, selector)];
     }
 );
 
@@ -1034,6 +1027,40 @@ const blockhashBuiltinOldField = new BuiltinFunction(
     false
 );
 
+const blockDifficultyBuiltin = new BuiltinFunction(
+    "difficulty",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        const block = state.block;
+        const common = block.common;
+        const fork = common.getHardforkBy({
+            blockNumber: block.header.number,
+            timestamp: block.header.timestamp
+        });
+
+        if (common.hardforkGteHardfork(fork, Hardfork.Paris)) {
+            return [bytesToBigInt(state.block.header.prevRandao)];
+        }
+
+        return [state.block.header.difficulty];
+    },
+    false,
+    true,
+    false
+);
+
+// >=0.8.18
+const blockPrevrandaoBuiltin = new BuiltinFunction(
+    "prevrandao",
+    dummyFunT,
+    (interp: Interpreter, state: State): Value[] => {
+        return [bytesToBigInt(state.block.header.prevRandao)];
+    },
+    false,
+    true,
+    false
+);
+
 const txGasPriceBuiltin = new BuiltinFunction(
     "gasprice",
     dummyFunT,
@@ -1073,6 +1100,8 @@ const blockBuiltinStructDesc: BuiltinDescriptor = [
         blockGasLimitBuiltin,
         blockNumberBuiltin,
         blockTimestampBuiltin,
+        blockDifficultyBuiltin,
+        [[blockPrevrandaoBuiltin, ">=0.8.18"]],
         [[blockhashBuiltinOldField, "<0.5.0"]]
     ]
 ];

@@ -13,8 +13,18 @@ import {
     equalsBytes,
     hexToBytes
 } from "@ethereumjs/util";
-import { bytes24, decodeView, deref, indexView, isStructView, isValueType, length } from "./utils";
-import { BaseInterpType } from "./types";
+import {
+    bytes24,
+    changeLocTo,
+    decodeView,
+    deref,
+    indexView,
+    int256,
+    isStructView,
+    isValueType,
+    length
+} from "./utils";
+import { BaseInterpType, RationalNumberType } from "./types";
 import { isArrayLikeView } from "./view";
 import * as sol from "solc-typed-ast";
 
@@ -308,6 +318,29 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
     }
 
     nyi(`encodePackedSingle(${ppValue(val)}, ${type.pp()})`);
+}
+
+export function getEncodeTypes(
+    argTs: BaseInterpType[],
+    ctx: sol.ASTContext,
+    isPacked: boolean
+): BaseInterpType[] {
+    const paramTs = argTs.map((paramT) => {
+        if (paramT instanceof RationalNumberType) {
+            sol.assert(paramT.isInt(), ``);
+            if (isPacked) {
+                const intT = sol.smallestFittingType(paramT.numerator);
+                sol.assert(intT !== undefined, ``);
+                return rtt.typeIdToRuntimeType(new sol.IntTypeId(intT.nBits, intT.signed), ctx);
+            } else {
+                return paramT.numerator < 0n ? int256 : rtt.uint256;
+            }
+        }
+
+        return changeLocTo(paramT, sol.DataLocation.Memory);
+    });
+
+    return paramTs;
 }
 
 /**

@@ -149,7 +149,14 @@ import {
     stringConcatBuiltin
 } from "./builtins";
 import { ArtifactManager } from "./artifactManager";
-import { decode, decodesWithSelector, encode, skipFieldDueToMap } from "./abi";
+import {
+    decode,
+    decodesWithSelector,
+    encode,
+    encodePacked,
+    getEncodeTypes,
+    skipFieldDueToMap
+} from "./abi";
 import {
     ArraySliceType,
     BaseInterpType,
@@ -2860,15 +2867,23 @@ export class Interpreter {
                 value = args[0];
                 gas = 2300n;
             } else {
-                this.expect(args.length <= 1, `Unexpected arguments to *call builtin`);
-
-                if (args.length === 1) {
+                if (args.length === 0) {
+                    data = new Uint8Array();
+                } else if (lt(this.compilerVersion, "0.5.0")) {
+                    // In 0.4.x *call builtins are vararg and implicitly encodePacked their argunments
+                    const argTs = getEncodeTypes(
+                        expr.vArguments.map((arg) => this.typeOf(arg)),
+                        expr.requiredContext,
+                        true
+                    );
+                    data = encodePacked(args, argTs, state);
+                } else {
+                    // In >=0.5.0 *call builtins are vararg and implicitly encodePacked their argunments
+                    this.expect(args.length == 1, `Unexpected arguments to *call builtin`);
                     this.expect(args[0] instanceof View, `Unexpected arguments to *call builtin`);
                     const dataView = this.implicitCoercion(args[0], memBytesT, state);
                     this.expect(dataView instanceof View && dataView.type instanceof rtt.BytesType);
                     data = decodeView(dataView, state) as Uint8Array;
-                } else {
-                    data = new Uint8Array();
                 }
 
                 isLibCall = callee.callKind === "delegatecall";
@@ -3282,9 +3297,11 @@ export class Interpreter {
         }
 
         // External calls
-        const extCallee = this.coerceToExternallyCallable(callee, state);
-        if (extCallee !== undefined) {
-            return this.evalExternalCall(expr, liftExtCalRef(extCallee), state);
+        if (!state.isConstantsEval) {
+            const extCallee = this.coerceToExternallyCallable(callee, state);
+            if (extCallee !== undefined) {
+                return this.evalExternalCall(expr, liftExtCalRef(extCallee), state);
+            }
         }
 
         const realCallee = callee instanceof CurriedVal ? callee.target : callee;

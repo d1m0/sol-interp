@@ -38,12 +38,13 @@ export interface State {
     storageReadOnly: boolean;
     block: Block;
     tx: TypedTransaction;
+    isConstantsEval: boolean;
 }
 
 /**
  * Built interpreter state without a contract present. Used for evaluating compile time constants only
  */
-export function makeNoContractState(): State {
+export function makeConstantsEvalState(): State {
     const memAllocator = new DefaultAllocator();
     return {
         account: {
@@ -74,7 +75,8 @@ export function makeNoContractState(): State {
         constantsMap: new Map(),
         storageReadOnly: true,
         block: createBlock(),
-        tx: createTx({})
+        tx: createTx({}),
+        isConstantsEval: true
     };
 }
 
@@ -119,7 +121,8 @@ export function makeStateForAccount(
         constantsMap: constantsMap,
         storageReadOnly,
         block: createBlock(),
-        tx: createTx({})
+        tx: createTx({}),
+        isConstantsEval: false
     };
 }
 

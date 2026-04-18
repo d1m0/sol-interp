@@ -1,11 +1,12 @@
 import { Command } from "commander";
 import {
     getBlockReplayInfo,
+    getCode,
     getTXReplayInfo,
     QuicknodeBlockManager,
     ReplayInfo
 } from "./quicknode";
-import { getArtifacts } from "./etherscan";
+import { getArtifacts, tryMatchERC1167 } from "./etherscan";
 import { ArtifactInfo, ContractInfo, PartialSolcOutput, zip3 } from "sol-dbg";
 import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, alignedTraceWellFormed, makeSolMessage } from "../alignment";
@@ -65,8 +66,20 @@ async function replayTX(txReplayInfo: ReplayInfo, opts: any): Promise<void> {
         if (trace.length === 0) {
             record(`zero_length`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
         }
+
         const addrsTouched = getExecutedAddresses(trace);
-        const addrToContract = await getArtifacts(addrsTouched, opts.etherscanKey);
+        const nonProxyAddrsTouched: string[] = [];
+
+        for (const addr of addrsTouched) {
+            const code = await getCode(opts.quicknodeEndpoint, addr, Number(block.header.number));
+            if (tryMatchERC1167(code) !== undefined) {
+                continue;
+            }
+
+            nonProxyAddrsTouched.push(addr);
+        }
+
+        const addrToContract = await getArtifacts(nonProxyAddrsTouched, opts.etherscanKey);
 
         if (opts.dumpSources) {
             const srcBase = opts.dumpSources;

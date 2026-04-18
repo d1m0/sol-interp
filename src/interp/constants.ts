@@ -14,13 +14,80 @@ import * as rtt from "sol-dbg";
 import { bytesT, stringT, topoSort, envFailMock } from "./utils";
 import { Interpreter } from "./interp";
 import { ContractScope, GlobalScope } from "./scope";
-import { makeNoContractState } from "./state";
+import { makeConstantsEvalState } from "./state";
 import { isPrimitiveValue, NoneValue } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { ppValue } from "./pp";
 import { typeIdToRuntimeType } from "./types";
 
 type DepGraph = Map<sol.VariableDeclaration, Set<sol.VariableDeclaration>>;
+
+// Add the dependency `a depends on b` in `depGraph`
+function addDep(a: sol.VariableDeclaration, b: sol.VariableDeclaration, depGraph: DepGraph): void {
+    let deps = depGraph.get(a);
+    deps = deps === undefined ? new Set() : deps;
+    deps.add(b);
+    depGraph.set(a, deps);
+}
+
+/**
+ * Return all constants variables referenced in a function (and any functions it calls).
+ * @param nd
+ * @returns
+ */
+function getFunConstantsUses(
+    nd: sol.FunctionCall,
+    visited = new Set<sol.ASTNode>()
+): Set<sol.VariableDeclaration> {
+    if (visited.has(nd)) {
+        return new Set();
+    }
+
+    visited.add(nd);
+
+    if (nd.kind !== sol.FunctionCallKind.FunctionCall) {
+        return new Set();
+    }
+
+    if (nd.vReferencedDeclaration === undefined) {
+        return new Set();
+    }
+
+    if (nd.vReferencedDeclaration instanceof sol.VariableDeclaration) {
+        const decl = nd.vReferencedDeclaration;
+
+        sol.assert(
+            decl.mutability === sol.Mutability.Constant,
+            `Unexpected non-constant variable ${decl.name}`
+        );
+
+        return new Set([decl]);
+    }
+
+    sol.assert(nd.vReferencedDeclaration instanceof sol.FunctionDefinition, ``);
+    const body = nd.vReferencedDeclaration.vBody;
+    sol.assert(body !== undefined, `Unexpected call to abstract function ${nd.vFunctionName}`);
+
+    const res = new Set<sol.VariableDeclaration>();
+    body.walkChildren((child) => {
+        if (child instanceof sol.Identifier || child instanceof sol.MemberAccess) {
+            const decl = child.vReferencedDeclaration;
+
+            if (
+                decl instanceof sol.VariableDeclaration &&
+                decl.mutability === sol.Mutability.Constant
+            ) {
+                res.add(decl);
+            }
+        } else if (child instanceof sol.FunctionCall) {
+            for (const subNd of getFunConstantsUses(child)) {
+                res.add(subNd);
+            }
+        }
+    });
+
+    return res;
+}
 
 /**
  * Given a set of `SourceUnit`s compute the dependency graph between constant
@@ -49,35 +116,38 @@ function buildConstantDepGraph(
                 return;
             }
 
-            constNodes.push(nd);
-            if (!res.has(nd)) {
-                res.set(nd, new Set());
-            }
-
             sol.assert(
                 nd.vValue !== undefined,
                 `Unexpected constant variable ${nd.name} with no initial value.`
             );
 
+            constNodes.push(nd);
+            if (!res.has(nd)) {
+                res.set(nd, new Set());
+            }
+
             nd.vValue.walk((initNd) => {
-                if (!(initNd instanceof sol.Identifier || initNd instanceof sol.MemberAccess)) {
+                if (initNd instanceof sol.Identifier || initNd instanceof sol.MemberAccess) {
+                    const decl = initNd.vReferencedDeclaration;
+
+                    if (!(decl instanceof sol.VariableDeclaration)) {
+                        return;
+                    }
+
+                    sol.assert(
+                        decl.mutability === sol.Mutability.Constant,
+                        `Unexpected non-constant variable ${decl.name} in init expression of constant var ${nd.name}`
+                    );
+
+                    addDep(decl, nd, res);
                     return;
                 }
 
-                const decl = initNd.vReferencedDeclaration;
-
-                if (!(decl instanceof sol.VariableDeclaration)) {
-                    return;
+                if (initNd instanceof sol.FunctionCall) {
+                    for (const dependee of getFunConstantsUses(initNd)) {
+                        addDep(dependee, nd, res);
+                    }
                 }
-
-                sol.assert(
-                    decl.mutability === sol.Mutability.Constant,
-                    `Unexpected non-constant variable ${decl.name} in init expression of constant var ${nd.name}`
-                );
-                let deps = res.get(decl);
-                deps = deps === undefined ? new Set() : deps;
-                deps.add(nd);
-                res.set(decl, deps);
             });
         });
     }
@@ -118,7 +188,7 @@ export function gatherConstants(
     artifactManager: ArtifactManager,
     artifact: ArtifactInfo
 ): [Map<number, BaseMemoryView<Value, rtt.BaseRuntimeType>>, Memory] {
-    const state = makeNoContractState();
+    const state = makeConstantsEvalState();
 
     // First gather and encode the string constants
     for (const unit of artifact.units) {
