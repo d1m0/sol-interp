@@ -18,7 +18,8 @@ import {
     EmptyArrayPopError,
     ErrorError,
     InternalError,
-    NoPayloadError
+    NoPayloadError,
+    PanicError
 } from "./exceptions";
 import { Interpreter } from "./interp";
 import {
@@ -1146,6 +1147,62 @@ export const gasleftBuiltin = new BuiltinFunction(
     false
 );
 
+export const addModBuiltin = new BuiltinFunction(
+    "addmod",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(args.length === 3, `Invalid args for addmod`);
+        const [a, b, c] = args;
+
+        interp.expect(
+            typeof a === "bigint" && typeof b === "bigint" && typeof c === "bigint",
+            `Invalid args for addmod`
+        );
+
+        if (c === 0n) {
+            // In 0.4.21 the compiler started asserting c !== 0
+            if (lt(interp.compilerVersion, "0.4.21")) {
+                return [0n];
+            }
+
+            interp.runtimeError(PanicError, state, 0x1);
+        }
+
+        return [(a + b) % c];
+    },
+    false,
+    false,
+    false
+);
+
+export const mulModBuiltin = new BuiltinFunction(
+    "mulmod",
+    dummyFunT,
+    (interp: Interpreter, state: State, args: Value[]): Value[] => {
+        interp.expect(args.length === 3, `Invalid args for mulmod`);
+        const [a, b, c] = args;
+
+        interp.expect(
+            typeof a === "bigint" && typeof b === "bigint" && typeof c === "bigint",
+            `Invalid args for mulmod`
+        );
+
+        if (c === 0n) {
+            // In 0.4.21 the compiler started asserting c !== 0
+            if (lt(interp.compilerVersion, "0.4.21")) {
+                return [0n];
+            }
+
+            interp.runtimeError(PanicError, state, 0x1);
+        }
+
+        return [(a * b) % c];
+    },
+    false,
+    false,
+    false
+);
+
 export const globalBuiltinStructDesc: BuiltinDescriptor = [
     "<global builtins>",
     [
@@ -1171,7 +1228,9 @@ export const globalBuiltinStructDesc: BuiltinDescriptor = [
         [[now, "<0.7.0"]],
         globalBlockashBuiltin,
         ecrecoverBuiltin,
-        gasleftBuiltin
+        gasleftBuiltin,
+        addModBuiltin,
+        mulModBuiltin
     ]
 ];
 
