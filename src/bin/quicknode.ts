@@ -191,7 +191,7 @@ class QuicknodePreState extends JSONCache<QuicknodeStateDesc> {
 
 class QuicknodeCode extends JSONCache<string> {
     constructor(basePath: string) {
-        super(join(basePath, "code"), 5);
+        super(join(basePath, "code"), 8);
     }
 
     makeKey(endpoint: string, address: string, blockNum: number): string {
