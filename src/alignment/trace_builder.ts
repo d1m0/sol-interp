@@ -52,7 +52,7 @@ import { bytesToBigInt } from "@ethereumjs/util";
  */
 function findFirstIdxAtDepthAfter(llTrace: EVMStep[], depth: number, afterIdx: number): number {
     assert(
-        afterIdx >= llTrace.length - 1 || llTrace[afterIdx + 1].depth > depth,
+        afterIdx >= llTrace.length - 1 || llTrace[afterIdx + 1].depth >= depth,
         `After idx must be at a higher depth`
     );
     for (let i = afterIdx + 1; i < llTrace.length; i++) {
