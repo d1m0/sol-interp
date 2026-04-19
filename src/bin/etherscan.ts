@@ -32,7 +32,7 @@ export interface EtherscanSourceResponse {
 
 class EtherscanCache extends JSONCache<EtherscanSourceResponse> {
     constructor(cacheDir: string) {
-        super(cacheDir, 2);
+        super(cacheDir, 5);
     }
 
     makeKey(apiKey: string, address: string): string {
@@ -174,13 +174,33 @@ export function tryMatchERC1167(bytecode: Uint8Array): Address | undefined {
     return undefined;
 }
 
+/**
+ * In some contracts (e.g. 0xab45c5a4b0c941a2f231c04c3f49182e1a254052) etherscan's fileName is empty, even though we have input JSON and a
+ * a contractName that is visible in that JSON. Fix up those cases here.
+ * @param artifact
+ * @param contractName
+ */
+function detectFileName(artifact: any, contractName: string): string | undefined {
+    const res: string[] = [];
+
+    for (const fileName in artifact.contracts) {
+        for (const cName in artifact.contracts[fileName]) {
+            if (cName === contractName) {
+                res.push(fileName);
+            }
+        }
+    }
+
+    return res.length === 1 ? res[0] : undefined;
+}
+
 export async function getArtifact(
     address: Address | string,
     apiKey: string
 ): Promise<[PartialSolcOutput, string, string] | undefined> {
     const strAddr = address instanceof Address ? address.toString() : address;
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
-    const fileName = eInfo.ContractFileName === "" ? "dummy.sol" : eInfo.ContractFileName;
+    let fileName = eInfo.ContractFileName === "" ? "dummy.sol" : eInfo.ContractFileName;
     const settings = {
         optimizer: {
             enabled: eInfo.OptimizationUsed === "1",
@@ -237,6 +257,14 @@ export async function getArtifact(
                     if (fileName in inJson.sources) {
                         data.sources[fileName].contents = inJson.sources[fileName].content;
                     }
+                }
+            }
+
+            if (fileName === "dummy.sol") {
+                const detectedName = detectFileName(data, eInfo.ContractName);
+                if (detectedName !== undefined) {
+                    record(`Artifact:MissingFileName`, strAddr);
+                    fileName = detectedName;
                 }
             }
 

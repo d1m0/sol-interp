@@ -3027,7 +3027,10 @@ export class Interpreter {
             callTarget = fun;
             actualCallee = fun;
         } else {
-            callTarget = callee.vModifier as sol.ModifierDefinition;
+            callTarget = this.resolveCallee(
+                callee.vModifier as sol.ModifierDefinition,
+                state
+            ) as sol.ModifierDefinition;
             actualCallee = callee;
         }
 
