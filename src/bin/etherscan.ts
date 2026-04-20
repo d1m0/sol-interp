@@ -58,13 +58,13 @@ class EtherscanCache extends JSONCache<EtherscanSourceResponse> {
 
         if (Number(jsonRes.status) !== 1 || jsonRes.message !== "OK") {
             throw new Error(
-                `Invalid status or message in response from Etherscan: ${JSON.stringify(jsonRes)}`
+                `Invalid status or message in response from Etherscan for addr ${address}: ${JSON.stringify(jsonRes)}`
             );
         }
 
         if (!(jsonRes.result instanceof Array && jsonRes.result.length === 1)) {
             throw new Error(
-                `Invalid result field in response from Etherscan: ${JSON.stringify(jsonRes)}`
+                `Invalid result field in response from Etherscan for addr ${address}: ${JSON.stringify(jsonRes)}`
             );
         }
 
