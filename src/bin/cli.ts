@@ -8,9 +8,10 @@ import { parseStep, SyntaxError } from "./ast";
 import { Address } from "@ethereumjs/util";
 import { ppTrace } from "../interp/pp";
 import { CallResult } from "../interp";
-import { addSourcesToResult, error } from "./utils";
+import { error } from "./utils";
 import { createBlock } from "../utils";
 import { createTx } from "@ethereumjs/tx";
+import { addSourcesToResult } from "../services";
 
 function ppBaseValue(v: BaseValue): string {
     if (v instanceof Address) {

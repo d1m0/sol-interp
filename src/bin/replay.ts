@@ -4,9 +4,9 @@ import {
     getCode,
     getTXReplayInfo,
     QuicknodeBlockManager,
-    ReplayInfo
-} from "./quicknode";
-import { getArtifacts, tryMatchERC1167 } from "./etherscan";
+    ReplayInfo,
+    getArtifacts, tryMatchERC1167, dump, record
+} from "../services";
 import { ArtifactInfo, ContractInfo, PartialSolcOutput, zip3 } from "sol-dbg";
 import { replayEVM } from "../alignment/evm_trace";
 import { AlignedTraceBuilder, alignedTraceWellFormed, makeSolMessage } from "../alignment";
@@ -16,7 +16,6 @@ import { getExecutedAddresses, tracerStorageToStorageDump } from "./utils";
 import { AccountMap, FixedSetBlockManager } from "../interp";
 import * as fse from "fs-extra";
 import { basename, dirname, join, normalize } from "path";
-import { dump, record } from "./stats";
 import { assert } from "../utils";
 
 /**

@@ -357,7 +357,7 @@ export async function getArtifacts(
         ) {
             assert(
                 art.fileName in art.artifact.contracts &&
-                    art.contractName in art.artifact.contracts[art.fileName],
+                art.contractName in art.artifact.contracts[art.fileName],
                 `Missing info for main contract {0}:{1}`,
                 art.fileName,
                 art.contractName

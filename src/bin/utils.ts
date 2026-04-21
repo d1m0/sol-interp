@@ -1,7 +1,5 @@
-import { bytesToUtf8 } from "@ethereumjs/util";
 import { keccak256 } from "ethereum-cryptography/keccak";
-import { bigEndianBufToBigint, bigIntToBuf, ImmMap, PartialSolcOutput, Storage } from "sol-dbg";
-import * as sol from "solc-typed-ast";
+import { bigEndianBufToBigint, bigIntToBuf, ImmMap, Storage } from "sol-dbg";
 import { EVMStep } from "../alignment/evm_trace";
 import { AccountMap } from "../interp";
 
@@ -19,20 +17,6 @@ function terminate(message?: string, exitCode = 0): never {
 
 export function error(message: string): never {
     terminate(message, 1);
-}
-
-export function addSourcesToResult(artifact: PartialSolcOutput, files: sol.FileMap): void {
-    for (const name in artifact.sources) {
-        if (artifact.sources[name].contents !== undefined) {
-            continue;
-        }
-
-        const file = files.get(name);
-
-        if (file) {
-            artifact.sources[name].contents = bytesToUtf8(file);
-        }
-    }
 }
 
 /**
