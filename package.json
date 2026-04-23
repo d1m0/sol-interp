@@ -1,6 +1,6 @@
 {
     "name": "sol-interp",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "description": "Solidity interpreter",
     "keywords": [],
     "files": [
