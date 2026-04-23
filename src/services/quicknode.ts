@@ -181,7 +181,7 @@ class QuicknodePreState extends JSONCache<QuicknodeStateDesc> {
     makeKey(endpoint: string, txHash: string): string {
         return `${txHash}`;
     }
-    async make(endpoint: string, txHash: string): Promise<QuicknodeTransaction> {
+    async make(endpoint: string, txHash: string): Promise<QuicknodeStateDesc> {
         return await jsonCall(endpoint, "debug_traceTransaction", [
             txHash,
             { tracer: "prestateTracer" }

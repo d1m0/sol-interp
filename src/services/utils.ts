@@ -1,6 +1,6 @@
 import { bytesToUtf8 } from "@ethereumjs/util";
 import { PartialSolcOutput } from "sol-dbg";
-import * as sol from "solc-typed-ast"
+import * as sol from "solc-typed-ast";
 
 export function addSourcesToResult(artifact: PartialSolcOutput, files: sol.FileMap): void {
     for (const name in artifact.sources) {
