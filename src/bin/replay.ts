@@ -1,9 +1,5 @@
 import { Command } from "commander";
-import {
-    getBlockReplayInfo,
-    getTXReplayInfo,
-    dump,
-} from "../services";
+import { getBlockReplayInfo, getTXReplayInfo, dump, record } from "../services";
 import { replayMainnetTX } from "../services/replay";
 
 (async () => {
@@ -32,8 +28,14 @@ import { replayMainnetTX } from "../services/replay";
 
     if (opts.txHashes) {
         for (const hash of opts.txHashes) {
-            const info = await getTXReplayInfo(opts.quicknodeEndpoint, hash)
-            await replayMainnetTX(info, opts.quicknodeEndpoint, opts.etherscanKey, opts.maxNumSteps, opts.dumpSources);
+            const info = await getTXReplayInfo(opts.quicknodeEndpoint, hash);
+            await replayMainnetTX(
+                info,
+                opts.quicknodeEndpoint,
+                opts.etherscanKey,
+                opts.maxNumSteps,
+                opts.dumpSources
+            );
         }
     }
 
@@ -43,7 +45,21 @@ import { replayMainnetTX } from "../services/replay";
                 opts.quicknodeEndpoint,
                 Number(blockNum)
             )) {
-                await replayMainnetTX(txReplayInfo, opts.quicknodeEndpoint, opts.etherscanKey, opts.maxNumSteps, opts.dumpSources);
+                try {
+                    await replayMainnetTX(
+                        txReplayInfo,
+                        opts.quicknodeEndpoint,
+                        opts.etherscanKey,
+                        opts.maxNumSteps,
+                        opts.dumpSources
+                    );
+                } catch (e) {
+                    record(`${(e as any).constructor.name}:${(e as any).message}`, [
+                        txReplayInfo.blockHash,
+                        txReplayInfo.txHash
+                    ]);
+                    return;
+                }
             }
         }
     }

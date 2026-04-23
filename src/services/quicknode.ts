@@ -85,9 +85,9 @@ function makeAccountMap(qState: QuicknodeStateDesc): AccountMap {
                     accDesc.storage === undefined
                         ? []
                         : Object.entries(accDesc.storage).map(([k, v]) => [
-                            hexToBigInt(k as `0x${string}`),
-                            hexToBytes(v)
-                        ])
+                              hexToBigInt(k as `0x${string}`),
+                              hexToBytes(v)
+                          ])
                 ),
                 balance: hexToBigInt(accDesc.balance),
                 nonce: BigInt(accDesc.nonce === undefined ? 0n : accDesc.nonce)
@@ -280,7 +280,7 @@ export async function getBlockReplayInfo(
 // @todo Uncomment and use in bin/replay.ts after fixing #55
 export class QuicknodeBlockManager implements AsyncBlockManagerI {
     blockCache = new Map<bigint, Block>();
-    constructor(private readonly endpoint: string) { }
+    constructor(private readonly endpoint: string) {}
 
     getCachedBlocks(): Block[] {
         return [...this.blockCache.values()];
