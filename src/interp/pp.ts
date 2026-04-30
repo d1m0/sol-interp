@@ -75,7 +75,7 @@ export function ppValue(v: Value): string {
     }
 }
 
-function ppLVorRV(v: LValue | Value): string {
+export function ppLVorRV(v: LValue | Value): string {
     if (v instanceof View || v === null || v instanceof LengthView) {
         return ppLValue(v);
     }

@@ -23,10 +23,7 @@ export class EVMCreateEvent extends EVMEvent<CreateInfo> {}
 export class EVMReturnEvent extends EVMEvent<ReturnInfo> {}
 
 export class EVMReturnNoContractEvent extends EVMEvent<ReturnInfo> {
-    constructor(
-        public readonly idx: number,
-        public readonly step: EVMStep
-    ) {
+    constructor(idx: number, step: EVMStep) {
         super(idx, step, {
             retData: new Uint8Array(),
             correspCallIdx: -1

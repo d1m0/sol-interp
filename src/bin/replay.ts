@@ -58,7 +58,6 @@ import { replayMainnetTX } from "../services/replay";
                         txReplayInfo.blockHash,
                         txReplayInfo.txHash
                     ]);
-                    return;
                 }
             }
         }

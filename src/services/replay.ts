@@ -200,6 +200,9 @@ export async function replayMainnetTX(
         record(`misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
         console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
     } else {
+        if (trace.length > 0) {
+            record(`aligned_non_zero`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+        }
         record(`aligned`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
     }
 
