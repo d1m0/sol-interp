@@ -10,7 +10,7 @@ import { BaseScope, LocalsScope } from "./scope";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
-import { BuiltinFunction } from "./value";
+import { BuiltinFunction, Value } from "./value";
 import { ArtifactManager } from "./artifactManager";
 import { AccountInfo, SolMessage } from "./env";
 import { Block, createBlock } from "@ethereumjs/block";
@@ -143,4 +143,78 @@ export function makeStateWithConstants(
         undefined,
         false
     );
+}
+
+/**
+ * Snapshot of the current state that can be attached to a trace step.
+ * @todo: This is very unoptimized, and wastes a lot of memory due to unnecessary repetion
+ * of storage, memory and scopes. We need a better data structure here.
+ */
+export interface StateSnapshot {
+    account: AccountInfo;
+    codeAccount: AccountInfo | undefined;
+    partialDeployedBytecode: Uint8Array | undefined;
+    memory: Memory;
+    scopes: ImmMap<string, Value>;
+    constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
+    storageReadOnly: boolean;
+    block: Block;
+    tx: TypedTransaction;
+}
+
+function takeScopeSnapshot(scope: BaseScope): ImmMap<string, Value> {
+    const localEntries: Array<[string, Value]> = [];
+    for (const [decl, val] of scope.knownIdentifiers) {
+        let name: string;
+        if (decl.name === "") {
+            // Unnamed return
+            const parent = decl.parent;
+            sol.assert(parent instanceof sol.ParameterList, `Only a return decl can be unnamed`);
+            const retIdx = parent.vParameters.indexOf(decl);
+            sol.assert(retIdx >= 0, `Only a return decl can be unnamed`);
+            name = `RET_${retIdx}`;
+        } else {
+            name = decl.name;
+        }
+
+        localEntries.push([name, val]);
+    }
+
+    if (scope._next === undefined) {
+        return ImmMap.fromEntries(localEntries);
+    }
+
+    const nextScopeSnapshot = takeScopeSnapshot(scope._next);
+    return nextScopeSnapshot.setMany(localEntries);
+}
+
+export function takeStateSnapshot(state: State): StateSnapshot {
+    sol.assert(state.scope !== undefined, `Unexpected snapshot of state with no scope`);
+    sol.assert(!state.isConstantsEval, `Unexpected snapshot of constants evaluation.`);
+    return {
+        // account and code account hold an immutable snapshot of the current storage
+        account: {
+            ...state.account
+        },
+        codeAccount:
+            state.codeAccount === undefined
+                ? undefined
+                : {
+                      ...state.codeAccount
+                  },
+        // Note that we need a copy here to show the gradual filling in of immutables during constructor execution
+        partialDeployedBytecode:
+            state.partialDeployedBytecode === undefined
+                ? undefined
+                : new Uint8Array(state.partialDeployedBytecode),
+        memory: new Uint8Array(state.memory),
+        scopes: takeScopeSnapshot(state.scope),
+        // This doesn't change during a normal trace (we don't take snapshot during constant evaluation)
+        constantsMap: state.constantsMap,
+        // This doesn't change during a normal trace
+        block: state.block,
+        // This doesn't change during a normal trace
+        tx: state.tx,
+        storageReadOnly: state.storageReadOnly
+    };
 }

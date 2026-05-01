@@ -128,6 +128,7 @@ async function buildAlignedTraces(
         block,
         tx,
         new FixedSetBlockManager(prevBlocksData.map((d) => createBlock(d, forceHardfork))),
+        false,
         maxNumSteps
     );
     return [...builder.buildAlignedTraces(), trace];
@@ -263,6 +264,7 @@ async function alignNthTx(
         replayInfo.block,
         tx.tx,
         new FixedSetBlockManager([replayInfo.block]),
+        false,
         maxNumSteps
     );
 

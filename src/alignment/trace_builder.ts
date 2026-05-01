@@ -14,7 +14,7 @@ import { ContractInfo, EventDesc, ImmMap, OPCODES, stackTop, ZERO_ADDRESS } from
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError } from "../interp/exceptions";
-import { State } from "../interp/state";
+import { State, takeStateSnapshot } from "../interp/state";
 import { Value, LValue } from "../interp/value";
 import { EVMStep, isCall, rebuildStateFromTrace } from "./evm_trace";
 import { assert } from "../utils";
@@ -110,6 +110,7 @@ export class AlignedTraceBuilder extends BaseEEI {
         block: Block,
         tx: TypedTransaction,
         blockManager: BlockManagerI,
+        private readonly addState: boolean,
         maxNumSteps: number | undefined = undefined
     ) {
         super(artifactManager, initialState, block, tx, blockManager, maxNumSteps);
@@ -557,7 +558,9 @@ export class AlignedTraceBuilder extends BaseEEI {
                 );
             },
             exec: function (interp: Interpreter, state: State, stmt: sol.Statement): void {
-                env.highLevelTrace.push(new ExecStep(stmt));
+                env.highLevelTrace.push(
+                    new ExecStep(stmt, env.addState ? takeStateSnapshot(state) : undefined)
+                );
             },
             eval: function (
                 interp: Interpreter,
@@ -565,7 +568,9 @@ export class AlignedTraceBuilder extends BaseEEI {
                 expr: sol.Expression,
                 val: Value | LValue
             ): void {
-                env.highLevelTrace.push(new EvalStep(expr, val));
+                env.highLevelTrace.push(
+                    new EvalStep(expr, val, env.addState ? takeStateSnapshot(state) : undefined)
+                );
             },
             emit: function (interp: Interpreter, state: State, evt: EventDesc): void {
                 interp.expect(

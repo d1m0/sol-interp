@@ -100,6 +100,7 @@ export async function replayMainnetTX(
     txReplayInfo: ReplayInfo,
     quicknodeEndpoint: string,
     etherscanKey: string,
+    addState: boolean,
     maxNumSteps: number,
     srcDumpDir?: string
 ): Promise<[ArtifactManager, AlignedTraces, Map<string, [ArtifactInfo, string]>]> {
@@ -179,6 +180,7 @@ export async function replayMainnetTX(
         block,
         evmTx,
         new FixedSetBlockManager([...prevBlocks, block]),
+        addState,
         Number(maxNumSteps)
     );
 

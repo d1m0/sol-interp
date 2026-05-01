@@ -58,6 +58,10 @@ export abstract class BaseScope {
     abstract _lookupLocation(decl: sol.VariableDeclaration): View | undefined;
     abstract _set(decl: sol.VariableDeclaration, val: Value): void;
 
+    get knownIdentifiers(): Iterable<[sol.VariableDeclaration, rtt.BaseRuntimeType]> {
+        return this.knownIds.entries();
+    }
+
     lookup(decl: sol.VariableDeclaration): Value | undefined {
         let v;
 

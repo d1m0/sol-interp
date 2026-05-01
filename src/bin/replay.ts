@@ -21,6 +21,7 @@ import { replayMainnetTX } from "../services/replay";
         "Dump the sources for any contracts in the given directory."
     );
     program.option("--max-num-steps <max-num-steps>", "Maximum Number of steps", "1000000000");
+    program.option("--add-state", "Wether to add the state or not", false);
     program.option("--stats <stats-file>", "Path to a file in which to dump stats");
 
     program.parse(process.argv);
@@ -34,6 +35,7 @@ import { replayMainnetTX } from "../services/replay";
                 opts.quicknodeEndpoint,
                 opts.etherscanKey,
                 opts.maxNumSteps,
+                opts.addState,
                 opts.dumpSources
             );
         }
@@ -51,6 +53,7 @@ import { replayMainnetTX } from "../services/replay";
                         opts.quicknodeEndpoint,
                         opts.etherscanKey,
                         opts.maxNumSteps,
+                        opts.addState,
                         opts.dumpSources
                     );
                 } catch (e) {
