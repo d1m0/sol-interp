@@ -16,9 +16,6 @@ import {
     EVMExceptionEvent,
     EVMObservableEvent,
     EVMReturnEvent,
-    SolCallEvent,
-    SolCreateEvent,
-    SolEmitEvent,
     SolExceptionEvent,
     SolObservableEvent,
     SolReturnEvent
@@ -107,16 +104,12 @@ export function makeEVMEventFromStep(step: EVMStep, i: number): EVMObservableEve
 }
 
 export function makeSolEventFromStep(s: EVMStep): SolObservableEvent {
-    if (s.callInfo !== undefined || s.createInfo !== undefined) {
-        const msg = makeSolMessageFromStep(s);
-        return s.callInfo !== undefined ? new SolCallEvent(msg) : new SolCreateEvent(msg);
-    } else if (s.returnInfo) {
+    if (s.returnInfo) {
         return new SolReturnEvent(makeCallResultFromStep(s));
     } else if (s.exceptionInfo) {
         return new SolExceptionEvent(s.exceptionInfo.excData);
     } else {
-        assert(s.emittedEvent !== undefined, `Step ${s} is not an externally observable EVM step`);
-        return new SolEmitEvent(s.emittedEvent);
+        assert(false, `Not expected resync event step ${s}`);
     }
 }
 

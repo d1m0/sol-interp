@@ -44,7 +44,7 @@ import {
     makeSolMessageFromStep
 } from "./utils";
 import { AlignedTraces } from "./trace_pairs";
-import { bytesToBigInt } from "@ethereumjs/util";
+import { bytesToBigInt, bytesToHex } from "@ethereumjs/util";
 
 /**
  * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
@@ -568,7 +568,26 @@ export class AlignedTraceBuilder extends BaseEEI {
                 env.highLevelTrace.push(new EvalStep(expr, val));
             },
             emit: function (interp: Interpreter, state: State, evt: EventDesc): void {
-                const hlEvent = new SolEmitEvent(evt);
+                interp.expect(
+                    interp.curNode instanceof sol.EmitStatement ||
+                        interp.curNode instanceof sol.FunctionCall,
+                    `Unexpected event emit node ${interp.curNode.constructor.name}`
+                );
+                const call =
+                    interp.curNode instanceof sol.EmitStatement
+                        ? interp.curNode.vEventCall
+                        : interp.curNode;
+                const def = call.vReferencedDeclaration;
+                interp.expect(def instanceof sol.EventDefinition);
+
+                const signature = sol.signature(def);
+                const hash = bytesToHex(sol.signatureHash(def));
+                const hlEvent = new SolEmitEvent({
+                    evmEvent: evt,
+                    signature,
+                    hash
+                });
+
                 const llEvent = findNextEvent(env.lowLevelTrace, env.currentLLIdx);
                 assert(llEvent !== undefined, ``);
                 env.tryMatchObservableEvents(

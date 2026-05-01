@@ -32,7 +32,7 @@ export interface EtherscanSourceResponse {
 
 class EtherscanCache extends JSONCache<EtherscanSourceResponse> {
     constructor(cacheDir: string) {
-        super(cacheDir, 5);
+        super(cacheDir, 2);
     }
 
     makeKey(apiKey: string, address: string): string {

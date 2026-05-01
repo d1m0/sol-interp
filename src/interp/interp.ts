@@ -1485,7 +1485,7 @@ export class Interpreter {
                 this.fail(NotDefined, ``);
             }
 
-            return scopeView;
+            res = scopeView;
         } else if (expr instanceof sol.TupleExpression) {
             const lvs: LValue[] = [];
             for (const comp of expr.vOriginalComponents) {

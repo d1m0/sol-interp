@@ -202,7 +202,7 @@ export function eventsMatch(
     }
 
     if (llEvent instanceof EVMEmitEvent && hlEvent instanceof SolEmitEvent) {
-        return eventsEq(llEvent.data, hlEvent.data);
+        return eventsEq(llEvent.data, hlEvent.data.evmEvent);
     }
 
     return false;

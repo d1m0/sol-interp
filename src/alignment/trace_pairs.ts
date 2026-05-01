@@ -51,6 +51,16 @@ export function hasMisaligned(ps: AlignedTraces): boolean {
     return false;
 }
 
+export function hasAligned(ps: AlignedTraces): boolean {
+    for (const p of ps) {
+        if (isAligned(p)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 export function hasNoSource(ps: AlignedTraces): boolean {
     for (const p of ps) {
         if (isNoSource(p)) {

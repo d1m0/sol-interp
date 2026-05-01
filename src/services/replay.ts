@@ -19,6 +19,7 @@ import {
     AlignedTraceBuilder,
     AlignedTraces,
     alignedTraceWellFormed,
+    hasAligned,
     makeSolMessage
 } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
@@ -202,6 +203,12 @@ export async function replayMainnetTX(
     } else {
         if (trace.length > 0) {
             record(`aligned_non_zero`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+            if (hasAligned(alignedTraces)) {
+                record(`aligned_non_zero_has_some_srcs`, [
+                    txReplayInfo.blockHash,
+                    txReplayInfo.txHash
+                ]);
+            }
         }
         record(`aligned`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
     }
