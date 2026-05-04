@@ -155,29 +155,20 @@ export interface StateSnapshot {
     codeAccount: AccountInfo | undefined;
     partialDeployedBytecode: Uint8Array | undefined;
     memory: Memory;
-    scopes: ImmMap<string, Value>;
+    scopes: ImmMap<number, Value>;
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
     storageReadOnly: boolean;
     block: Block;
     tx: TypedTransaction;
 }
 
-function takeScopeSnapshot(scope: BaseScope): ImmMap<string, Value> {
-    const localEntries: Array<[string, Value]> = [];
-    for (const [decl, val] of scope.knownIdentifiers) {
-        let name: string;
-        if (decl.name === "") {
-            // Unnamed return
-            const parent = decl.parent;
-            sol.assert(parent instanceof sol.ParameterList, `Only a return decl can be unnamed`);
-            const retIdx = parent.vParameters.indexOf(decl);
-            sol.assert(retIdx >= 0, `Only a return decl can be unnamed`);
-            name = `RET_${retIdx}`;
-        } else {
-            name = decl.name;
-        }
+function takeScopeSnapshot(scope: BaseScope): ImmMap<number, Value> {
+    const localEntries: Array<[number, Value]> = [];
+    for (const [decl,] of scope.knownIdentifiers) {
+        let val = scope.lookup(decl);
+        sol.assert(val !== undefined, ``)
 
-        localEntries.push([name, val]);
+        localEntries.push([decl.id, val]);
     }
 
     if (scope._next === undefined) {
@@ -200,8 +191,8 @@ export function takeStateSnapshot(state: State): StateSnapshot {
             state.codeAccount === undefined
                 ? undefined
                 : {
-                      ...state.codeAccount
-                  },
+                    ...state.codeAccount
+                },
         // Note that we need a copy here to show the gradual filling in of immutables during constructor execution
         partialDeployedBytecode:
             state.partialDeployedBytecode === undefined
