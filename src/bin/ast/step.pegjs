@@ -14,7 +14,7 @@ Call = "call:" __ Method: MethodId __ Args: CallArgs { return { kind: "Call", co
 MethodId = Contract: ContractId "." Method: Identifier { return { kind: "MethodId", contract: Contract, method: Method.name, loc: location() }; }
 ContractId = HexDigit / Var
 
-ExpressionList = head: Expression __ tail: ( __ "," __ Expression )* {
+ExpressionList = head: Expression __ tail: ( __ "," __ e: Expression { return e; } )* {
     return tail.reduce((acc, el) => { acc.push(el); return acc; }, [head]);
 }
 

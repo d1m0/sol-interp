@@ -164,9 +164,9 @@ export interface StateSnapshot {
 
 function takeScopeSnapshot(scope: BaseScope): ImmMap<number, Value> {
     const localEntries: Array<[number, Value]> = [];
-    for (const [decl,] of scope.knownIdentifiers) {
-        let val = scope.lookup(decl);
-        sol.assert(val !== undefined, ``)
+    for (const [decl] of scope.knownIdentifiers) {
+        const val = scope.lookup(decl);
+        sol.assert(val !== undefined, ``);
 
         localEntries.push([decl.id, val]);
     }
@@ -191,8 +191,8 @@ export function takeStateSnapshot(state: State): StateSnapshot {
             state.codeAccount === undefined
                 ? undefined
                 : {
-                    ...state.codeAccount
-                },
+                      ...state.codeAccount
+                  },
         // Note that we need a copy here to show the gradual filling in of immutables during constructor execution
         partialDeployedBytecode:
             state.partialDeployedBytecode === undefined

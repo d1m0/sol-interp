@@ -189,7 +189,7 @@ export class Runner {
         );
 
         const args = step.args.map((exprNode, i) => this.evalExpr(exprNode, argRTTs[i]));
-        const abiTypeNames = argSolTs.map(abiTypeToCanonicalName);
+        const abiTypeNames = argRTTs.map(abiTypeToCanonicalName);
 
         const argData =
             args.length > 0
