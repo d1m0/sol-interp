@@ -43,6 +43,15 @@ export class AlreadyDefined extends InternalError {
     }
 }
 
+export class Unsupported extends InternalError {
+    constructor(
+        node: FailLoc,
+        msg: string = `Unsupported construct ${node instanceof sol.ASTNode ? node.print(0) : node.name}`
+    ) {
+        super(node, msg);
+    }
+}
+
 // Runtime Errors
 
 /**

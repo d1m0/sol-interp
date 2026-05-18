@@ -20,6 +20,7 @@ import {
     CallInfo,
     CreateInfo,
     ExceptionInfo,
+    ExceptionType,
     ReturnInfo
 } from "./transformers";
 import { TypedTransaction } from "@ethereumjs/tx";
@@ -28,6 +29,7 @@ import { ArtifactManager } from "../../interp/artifactManager";
 import { addCodeInfo, CodeInfo } from "./transformers/code";
 import { StateManagerInterface } from "@ethereumjs/common";
 import { assert } from "../../utils";
+import { isOutOfGas } from "./utils";
 
 /**
  * Annotated evm step struct used for aligning traces.
@@ -74,7 +76,7 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
                 );
                 lastStep.exceptionInfo = {
                     excData: new Uint8Array(),
-                    isExplicit: false,
+                    type: isOutOfGas(lastStep) ? ExceptionType.OutOfGas : ExceptionType.Other,
                     correspCallIdx: -1
                 };
             }

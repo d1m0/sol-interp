@@ -3,14 +3,20 @@ import { BasicStepInfo, bigEndianBufToNumber, mustReadMem, OPCODES, OpInfo } fro
 import { InterpreterStep } from "@ethereumjs/evm";
 import { isOutOfGas, isNonExceptionTermination } from "../utils";
 
+export enum ExceptionType {
+    Revert = 0,
+    Assert = 1,
+    OutOfGas = 2,
+    Other = 3
+}
 /**
  * Interface with additional data regarding a RETURN/STOP op
  */
 export interface ExceptionInfo {
     // Exception bytes
     excData: Uint8Array;
-    // True if this is an exception raised by REVERT/INVALID
-    isExplicit: boolean;
+    // The type of exception. See ExceptionTypes for details
+    type: ExceptionType;
     // Index of the corresponding *CALL*/CREATE* instruction to whom's context we are reverting
     // -1 for top-level reverts
     correspCallIdx: number;
@@ -44,7 +50,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
             ...state,
             exceptionInfo: {
                 excData,
-                isExplicit: true,
+                type: ExceptionType.Revert,
                 correspCallIdx
             }
         };
@@ -57,7 +63,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
             ...state,
             exceptionInfo: {
                 excData: new Uint8Array(),
-                isExplicit: true,
+                type: ExceptionType.Assert,
                 correspCallIdx
             }
         };
@@ -70,7 +76,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
             ...state,
             exceptionInfo: {
                 excData: new Uint8Array(),
-                isExplicit: false,
+                type: ExceptionType.OutOfGas,
                 correspCallIdx
             }
         };
@@ -117,7 +123,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     lastStep.exceptionInfo = {
         excData: new Uint8Array(),
-        isExplicit: false,
+        type: ExceptionType.Other,
         correspCallIdx
     };
 

@@ -13,7 +13,7 @@ import { Block } from "@ethereumjs/block";
 import { ContractInfo, EventDesc, ImmMap, OPCODES, stackTop, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
-import { RuntimeError } from "../interp/exceptions";
+import { RuntimeError, Unsupported } from "../interp/exceptions";
 import { State, takeStateSnapshot } from "../interp/state";
 import { Value, LValue } from "../interp/value";
 import { EVMStep, isCall, rebuildStateFromTrace } from "./evm_trace";
@@ -43,8 +43,9 @@ import {
     makeSolEventFromStep,
     makeSolMessageFromStep
 } from "./utils";
-import { AlignedTraces } from "./trace_pairs";
+import { AlignedTraces, MisalignedPairTypes } from "./trace_pairs";
 import { bytesToBigInt, bytesToHex } from "@ethereumjs/util";
+import { ExceptionType } from "./evm_trace/transformers";
 
 /**
  * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
@@ -146,9 +147,23 @@ export class AlignedTraceBuilder extends BaseEEI {
         this.highLevelTrace = [];
     }
 
-    private addMisalignedSegment(llEvent: EVMObservableEvent, hlEvent: SolObservableEvent): void {
+    private addMisalignedSegment(
+        llEvent: EVMObservableEvent,
+        hlEvent: SolObservableEvent,
+        isDueToInlineAsm: boolean
+    ): void {
+        let type: MisalignedPairTypes;
+
+        if (llEvent instanceof EVMExceptionEvent && llEvent.data.type === ExceptionType.OutOfGas) {
+            type = "misaligned:out-of-gas";
+        } else if (isDueToInlineAsm) {
+            type = "misaligned:inline_asm";
+        } else {
+            type = "misaligned:error";
+        }
+
         this.alignedTraces.push({
-            type: "misaligned",
+            type,
             llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
             llEndEvent: llEvent,
             hlTrace: this.highLevelTrace,
@@ -210,7 +225,10 @@ export class AlignedTraceBuilder extends BaseEEI {
         this.updateStateFromLLStep(this.currentLLIdx - 1);
     }
 
-    private reSyncAtDepth(expDepth: number): [EVMObservableEvent, SolObservableEvent] {
+    private reSyncAtDepth(
+        expDepth: number,
+        isDueToInlineAsm: boolean
+    ): [EVMObservableEvent, SolObservableEvent] {
         let resyncLLIdx: number;
 
         // Couldnt synchronize at the root
@@ -230,7 +248,7 @@ export class AlignedTraceBuilder extends BaseEEI {
         const solEvent: SolObservableEvent = makeSolEventFromStep(lastStep);
 
         // This sets this.currentLLIdx to resyncLLIdx
-        this.addMisalignedSegment(evmEvent, solEvent);
+        this.addMisalignedSegment(evmEvent, solEvent, isDueToInlineAsm);
         this.updateStateFromPrevLLStep();
 
         return [evmEvent, solEvent];
@@ -421,12 +439,20 @@ export class AlignedTraceBuilder extends BaseEEI {
         try {
             res = super.execMsg(msg);
         } catch (e) {
-            if (!(e instanceof MisalignmentError || e instanceof MatchedInfiniteLoop)) {
+            if (
+                !(
+                    e instanceof MisalignmentError ||
+                    e instanceof MatchedInfiniteLoop ||
+                    (e instanceof Unsupported && e.node instanceof sol.InlineAssembly)
+                )
+            ) {
                 throw e;
             }
 
-            if (e instanceof MisalignmentError) {
-                const [, solEvent] = this.reSyncAtDepth(callerDepth);
+            if (e instanceof MisalignmentError || e instanceof Unsupported) {
+                const isInlineAsm =
+                    e instanceof Unsupported && e.node instanceof sol.InlineAssembly;
+                const [, solEvent] = this.reSyncAtDepth(callerDepth, isInlineAsm);
                 return solEvent instanceof SolReturnEvent
                     ? solEvent.data
                     : { reverted: true, data: solEvent.data as Uint8Array };
@@ -489,11 +515,12 @@ export class AlignedTraceBuilder extends BaseEEI {
                 hlAccount
             );
         } catch (e) {
+            // Note that Unsuported is not an option for e here as `tryMatchObservableEvents` does not invoke the interpreter
             if (!(e instanceof MisalignmentError)) {
                 throw e;
             }
 
-            const [, solEvent] = this.reSyncAtDepth(callerDepth);
+            const [, solEvent] = this.reSyncAtDepth(callerDepth, false);
             return solEvent instanceof SolReturnEvent
                 ? solEvent.data
                 : { reverted: true, data: solEvent.data as Uint8Array };

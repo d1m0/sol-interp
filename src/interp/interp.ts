@@ -41,7 +41,8 @@ import {
     PanicError,
     CustomError,
     NoPayloadError,
-    NoMatchingMethod
+    NoMatchingMethod,
+    Unsupported
 } from "./exceptions";
 import { gte, lt } from "semver";
 import {
@@ -902,10 +903,8 @@ export class Interpreter {
         } else if (stmt instanceof sol.EmitStatement) {
             this.evalFunctionCall(stmt.vEventCall, state);
             res = ControlFlow.Fallthrough;
-            /*
         } else if (stmt instanceof sol.InlineAssembly) {
-            res = this.execInlineAssembly(stmt, state);
-            */
+            throw new Unsupported(stmt);
         } else {
             nyi(`Stmt ${stmt.constructor.name}`);
         }

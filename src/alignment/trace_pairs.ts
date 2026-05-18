@@ -4,8 +4,13 @@ import { ArtifactManager } from "../interp/artifactManager";
 import { EVMStep } from "./evm_trace";
 import { EVMObservableEvent, SolObservableEvent } from "./observable_events";
 
+export type MisalignedPairTypes =
+    | "misaligned:out-of-gas"
+    | "misaligned:inline_asm"
+    | "misaligned:error";
+export type PairTypes = "aligned" | MisalignedPairTypes | "no-source";
 export interface BasePair {
-    type: "aligned" | "misaligned" | "no-source";
+    type: PairTypes;
     llTrace: EVMStep[];
     llEndEvent: EVMObservableEvent;
 }
@@ -17,7 +22,7 @@ export interface AlignedPair extends BasePair {
 }
 
 export interface MisalignedPair extends BasePair {
-    type: "misaligned";
+    type: MisalignedPairTypes;
     hlTrace: BaseStep[];
     hlEndEvent: SolObservableEvent;
 }
@@ -34,17 +39,23 @@ export function isAligned(p: TracePair): p is MisalignedPair {
 }
 
 export function isMisaligned(p: TracePair): p is MisalignedPair {
-    return p.type === "misaligned";
+    return p.type.startsWith("misaligned");
 }
 
 export function isNoSource(p: TracePair): p is NoSourcePair {
     return p.type === "no-source";
 }
 
-export function hasMisaligned(ps: AlignedTraces): boolean {
+export function hasMisaligned(ps: AlignedTraces, type?: MisalignedPairTypes): boolean {
     for (const p of ps) {
-        if (isMisaligned(p)) {
-            return true;
+        if (type === undefined) {
+            if (isMisaligned(p)) {
+                return true;
+            }
+        } else {
+            if (p.type === type) {
+                return true;
+            }
         }
     }
 
@@ -69,6 +80,16 @@ export function hasNoSource(ps: AlignedTraces): boolean {
     }
 
     return false;
+}
+
+export function isAllNoSource(ps: AlignedTraces): boolean {
+    for (const p of ps) {
+        if (!isNoSource(p)) {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 /**

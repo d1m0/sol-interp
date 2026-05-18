@@ -13,3 +13,9 @@ function terminate(message?: string, exitCode = 0): never {
 export function error(message: string): never {
     terminate(message, 1);
 }
+
+export function sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, ms);
+    });
+}

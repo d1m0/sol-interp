@@ -16,6 +16,7 @@ import {
     alignedTraceWellFormed,
     hasMisaligned,
     hasNoSource,
+    isMisaligned,
     isNoSource,
     makeSolMessage
 } from "../../src/alignment";
@@ -176,9 +177,7 @@ function alignedTraceToDesc(t: AlignedTraces): any {
 
     for (const p of t) {
         const hlEvtDesc =
-            p.type === "aligned" || p.type === "misaligned"
-                ? p.hlEndEvent.constructor.name
-                : "<undefined>";
+            p.type === "aligned" || isMisaligned(p) ? p.hlEndEvent.constructor.name : "<undefined>";
         res.push([
             p.llTrace[0].depth,
             p.llTrace[p.llTrace.length - 1].depth,

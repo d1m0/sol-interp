@@ -1,6 +1,7 @@
 import { Command } from "commander";
 import { getBlockReplayInfo, getTXReplayInfo, dump, record } from "../services";
 import { replayMainnetTX } from "../services/replay";
+import { sleep } from "./utils";
 
 (async () => {
     const program = new Command();
@@ -34,8 +35,8 @@ import { replayMainnetTX } from "../services/replay";
                 info,
                 opts.quicknodeEndpoint,
                 opts.etherscanKey,
-                opts.maxNumSteps,
                 opts.addState,
+                Number(opts.maxNumSteps),
                 opts.dumpSources
             );
         }
@@ -43,25 +44,34 @@ import { replayMainnetTX } from "../services/replay";
 
     if (opts.blockNums) {
         for (const blockNum of opts.blockNums) {
-            for (const txReplayInfo of await getBlockReplayInfo(
-                opts.quicknodeEndpoint,
-                Number(blockNum)
-            )) {
-                try {
-                    await replayMainnetTX(
-                        txReplayInfo,
-                        opts.quicknodeEndpoint,
-                        opts.etherscanKey,
-                        opts.maxNumSteps,
-                        opts.addState,
-                        opts.dumpSources
-                    );
-                } catch (e) {
-                    record(`${(e as any).constructor.name}:${(e as any).message}`, [
-                        txReplayInfo.blockHash,
-                        txReplayInfo.txHash
-                    ]);
+            try {
+                for (const txReplayInfo of await getBlockReplayInfo(
+                    opts.quicknodeEndpoint,
+                    Number(blockNum)
+                )) {
+                    try {
+                        const [, alignedTrace] = await replayMainnetTX(
+                            txReplayInfo,
+                            opts.quicknodeEndpoint,
+                            opts.etherscanKey,
+                            opts.addState,
+                            Number(opts.maxNumSteps),
+                            opts.dumpSources
+                        );
+                        for (const p of alignedTrace) {
+                            record(`segment`, null, false);
+                            record(`segment:${p.type}`, null, false);
+                        }
+                    } catch (e) {
+                        record(`${(e as any).constructor.name}:${(e as any).message}`, [
+                            txReplayInfo.blockHash,
+                            txReplayInfo.txHash
+                        ]);
+                    }
                 }
+            } catch (e) {
+                console.error(`Error getting block ${blockNum}: ${e}`);
+                await sleep(10000);
             }
         }
     }

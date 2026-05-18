@@ -4,7 +4,8 @@ import {
     ReplayInfo,
     getArtifacts,
     tryMatchERC1167,
-    record
+    record,
+    recordDistr
 } from "../services";
 import {
     ArtifactInfo,
@@ -19,7 +20,7 @@ import {
     AlignedTraceBuilder,
     AlignedTraces,
     alignedTraceWellFormed,
-    hasAligned,
+    isAllNoSource,
     makeSolMessage
 } from "../alignment";
 import { ArtifactManager } from "../interp/artifactManager";
@@ -117,8 +118,10 @@ export async function replayMainnetTX(
         txReplayInfo.sender
     );
 
-    if (trace.length === 0) {
-        record(`zero_length`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
+    recordDistr("trace_len", trace.length, txReplayInfo.txHash);
+    if (trace.length > 0) {
+        record(`trace_non_zero`, txReplayInfo.txHash);
+        recordDistr("trace_non_zero_len", trace.length, txReplayInfo.txHash);
     }
 
     const addrsTouched = getExecutedAddresses(trace);
@@ -194,25 +197,79 @@ export async function replayMainnetTX(
                 .filter((ci) => contractId === `${ci.fileName}:${ci.contractName}`)[0]
         ])
     );
+
     const wellFormed = alignedTraceWellFormed(alignedTraces, trace, artifactManager, addrToInfoMap);
 
+    recordDistr("num_segments", alignedTraces.length, txReplayInfo.txHash);
+    let numNoSrc = 0,
+        numAligned = 0,
+        numMisalignedOoG = 0,
+        numMisalignedAsm = 0,
+        numMisalignedErr = 0;
+
+    for (let i = 0; i < alignedTraces.length; i++) {
+        const p = alignedTraces[i];
+        if (p.type === "no-source") {
+            numNoSrc++;
+        } else if (p.type === "aligned") {
+            numAligned++;
+        } else if (p.type === "misaligned:error") {
+            numMisalignedErr++;
+        } else if (p.type === "misaligned:inline_asm") {
+            numMisalignedAsm++;
+        } else if (p.type === "misaligned:out-of-gas") {
+            numMisalignedOoG++;
+        }
+    }
+
+    if (alignedTraces.length > 0) {
+        recordDistr("segment_percent:noSrc", numNoSrc / alignedTraces.length, txReplayInfo.txHash);
+        recordDistr(
+            "segment_percent:aligned",
+            numAligned / alignedTraces.length,
+            txReplayInfo.txHash
+        );
+        recordDistr(
+            "segment_percent:error",
+            numMisalignedErr / alignedTraces.length,
+            txReplayInfo.txHash
+        );
+        recordDistr(
+            "segment_percent:out-of-gas",
+            numMisalignedOoG / alignedTraces.length,
+            txReplayInfo.txHash
+        );
+        recordDistr(
+            "segment_percent:inline_asm",
+            numMisalignedAsm / alignedTraces.length,
+            txReplayInfo.txHash
+        );
+    }
+
     if (!wellFormed) {
-        record(`mallformed`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-        console.error(`Trace MALFORMED!`);
-    } else if (hasMisaligned(alignedTraces)) {
-        record(`misalignment`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-        console.error(`Has misalignment: `, hasMisaligned(alignedTraces));
+        record(`mallformed`, txReplayInfo.txHash);
     } else {
         if (trace.length > 0) {
-            record(`aligned_non_zero`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
-            if (hasAligned(alignedTraces)) {
-                record(`aligned_non_zero_has_some_srcs`, [
-                    txReplayInfo.blockHash,
-                    txReplayInfo.txHash
-                ]);
+            if (isAllNoSource(alignedTraces)) {
+                record(`non_zero_no_source`, txReplayInfo.txHash);
+            } else {
+                if (!hasMisaligned(alignedTraces)) {
+                    record(`non_zero_w_source_aligned`, txReplayInfo.txHash);
+                } else {
+                    if (hasMisaligned(alignedTraces, "misaligned:out-of-gas")) {
+                        record(`non_zero_w_source_out_of_gas`, txReplayInfo.txHash);
+                    }
+
+                    if (hasMisaligned(alignedTraces, "misaligned:inline_asm")) {
+                        record(`non_zero_w_source_inline_asm`, txReplayInfo.txHash);
+                    }
+
+                    if (hasMisaligned(alignedTraces, "misaligned:error")) {
+                        record(`non_zero_w_source_error`, txReplayInfo.txHash);
+                    }
+                }
             }
         }
-        record(`aligned`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
     }
 
     return [artifactManager, alignedTraces, addrToArtifactAndContractId];
