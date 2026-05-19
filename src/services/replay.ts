@@ -105,11 +105,12 @@ export async function replayMainnetTX(
     maxNumSteps: number,
     srcDumpDir?: string
 ): Promise<[ArtifactManager, AlignedTraces, Map<string, [ArtifactInfo, string]>]> {
-    console.error(`Replay TX ${txReplayInfo.txHash} in block ${txReplayInfo.blockHash}.`);
+    console.error(`Replay TX ${txReplayInfo.txHash} in block ${(txReplayInfo.block.header as any).number}.`);
     record(`trace`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
 
     const blockManager = new QuicknodeBlockManager(quicknodeEndpoint);
 
+    const startReplay = Date.now()
     const [trace, , , block, evmTx] = await replayEVM(
         txReplayInfo.preState,
         txReplayInfo.tx,
@@ -118,10 +119,13 @@ export async function replayMainnetTX(
         txReplayInfo.sender
     );
 
+    const replayDone = Date.now()
+
     recordDistr("trace_len", trace.length, txReplayInfo.txHash);
     if (trace.length > 0) {
         record(`trace_non_zero`, txReplayInfo.txHash);
         recordDistr("trace_non_zero_len", trace.length, txReplayInfo.txHash);
+        recordDistr(`duration_evm_replay_done`, replayDone - startReplay, txReplayInfo.txHash)
     }
 
     const addrsTouched = getExecutedAddresses(trace);
@@ -175,6 +179,8 @@ export async function replayMainnetTX(
 
     const prevBlocks = blockManager.getCachedBlocks();
 
+    const prepAlignmentData = Date.now()
+    recordDistr(`duration_fetch_data`, prepAlignmentData - replayDone, txReplayInfo.txHash)
     const builder = new AlignedTraceBuilder(
         artifactManager,
         interpPreState,
@@ -188,6 +194,10 @@ export async function replayMainnetTX(
     );
 
     const [alignedTraces] = builder.buildAlignedTraces();
+
+    const alignedDone = Date.now()
+    recordDistr(`duration_alignment`, alignedDone - prepAlignmentData, txReplayInfo.txHash)
+    recordDistr(`duration_replay`, alignedDone - startReplay, txReplayInfo.txHash)
 
     const addrToInfoMap = new Map<string, ContractInfo>(
         [...addrToContract.entries()].map(([strAddr, [, contractId]]) => [
@@ -205,20 +215,38 @@ export async function replayMainnetTX(
         numAligned = 0,
         numMisalignedOoG = 0,
         numMisalignedAsm = 0,
-        numMisalignedErr = 0;
+        numMisalignedErr = 0,
+        numMisalignedEarlier = 0;
+
+    let reason!: string;
 
     for (let i = 0; i < alignedTraces.length; i++) {
         const p = alignedTraces[i];
         if (p.type === "no-source") {
             numNoSrc++;
+            reason = "<no!>"
         } else if (p.type === "aligned") {
             numAligned++;
+            reason = "<no!>"
         } else if (p.type === "misaligned:error") {
             numMisalignedErr++;
+            reason = p.type
         } else if (p.type === "misaligned:inline_asm") {
             numMisalignedAsm++;
+            reason = p.type
         } else if (p.type === "misaligned:out-of-gas") {
             numMisalignedOoG++;
+            reason = p.type
+        } else if (p.type === "misaligned:earlier") {
+            if (reason === "misaligned:error") {
+                numMisalignedErr++;
+            } else if (reason === "misaligned:out-of-gas") {
+                numMisalignedOoG++;
+            } else if (reason === "misaligned:inline_asm") {
+                numMisalignedAsm++;
+            } else {
+                numMisalignedEarlier++;
+            }
         }
     }
 
@@ -242,6 +270,12 @@ export async function replayMainnetTX(
         recordDistr(
             "segment_percent:inline_asm",
             numMisalignedAsm / alignedTraces.length,
+            txReplayInfo.txHash
+        );
+        // This should be 0!
+        recordDistr(
+            "segment_percent:earlier",
+            numMisalignedEarlier / alignedTraces.length,
             txReplayInfo.txHash
         );
     }

@@ -16,6 +16,7 @@ import {
     alignedTraceWellFormed,
     hasMisaligned,
     hasNoSource,
+    isAligned,
     isMisaligned,
     isNoSource,
     makeSolMessage
@@ -41,15 +42,101 @@ const misalignmentSamples: Array<[string, any]> = [
     [
         "test/samples/sol2maruir/out_of_gas.config.json",
         [
-            [1, 1, false, ["EVMCreateEvent", "SolCreateEvent"]],
-            [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
-            [1, 1, false, ["EVMCallEvent", "SolCallEvent"]],
-            [2, 2, false, ["EVMCreateEvent", "SolCreateEvent"]],
-            [3, 3, false, ["EVMReturnEvent", "SolReturnEvent"]],
-            [2, 2, false, ["EVMCallEvent", "SolCallEvent"]],
-            [3, 3, true, ["EVMExceptionEvent", "SolExceptionEvent"]],
-            [2, 2, false, ["EVMReturnEvent", "SolReturnEvent"]],
-            [1, 1, false, ["EVMReturnEvent", "SolReturnEvent"]]
+            [1, 1, "aligned", ["EVMCreateEvent", "SolCreateEvent"]],
+            [2, 2, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
+            [1, 1, "aligned", ["EVMCallEvent", "SolCallEvent"]],
+            [2, 2, "aligned", ["EVMCreateEvent", "SolCreateEvent"]],
+            [3, 3, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
+            [2, 2, "aligned", ["EVMCallEvent", "SolCallEvent"]],
+            [3, 3, "misaligned:out-of-gas", ["EVMExceptionEvent", "<undefined>"]],
+            [2, 2, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
+            [1, 1, "aligned", ["EVMReturnEvent", "SolReturnEvent"]]
+        ]
+    ],
+    [
+        "test/samples/misalignment/inline_asm1.config.json",
+        [
+            [
+                1,
+                1,
+                "aligned",
+                [
+                    "EVMCreateEvent",
+                    "SolCreateEvent",
+                ],
+            ],
+            [
+                2,
+                2,
+                "aligned",
+                [
+                    "EVMCreateEvent",
+                    "SolCreateEvent",
+                ],
+            ],
+            [
+                3,
+                3,
+                "aligned",
+                [
+                    "EVMReturnEvent",
+                    "SolReturnEvent",
+                ],
+            ],
+            [
+                2,
+                2,
+                "aligned",
+                [
+                    "EVMReturnEvent",
+                    "SolReturnEvent",
+                ],
+            ],
+            [
+                1,
+                1,
+                "aligned",
+                [
+                    "EVMCallEvent",
+                    "SolCallEvent",
+                ],
+            ],
+            [
+                2,
+                2,
+                "misaligned:inline_asm",
+                [
+                    "EVMCallEvent",
+                    "<undefined>",
+                ],
+            ],
+            [
+                3,
+                3,
+                "aligned",
+                [
+                    "EVMReturnEvent",
+                    "SolReturnEvent",
+                ],
+            ],
+            [
+                2,
+                2,
+                "misaligned:earlier",
+                [
+                    "EVMReturnEvent",
+                    "<undefined>",
+                ],
+            ],
+            [
+                1,
+                1,
+                "aligned",
+                [
+                    "EVMReturnEvent",
+                    "SolReturnEvent",
+                ],
+            ],
         ]
     ]
 ];
@@ -177,11 +264,11 @@ function alignedTraceToDesc(t: AlignedTraces): any {
 
     for (const p of t) {
         const hlEvtDesc =
-            p.type === "aligned" || isMisaligned(p) ? p.hlEndEvent.constructor.name : "<undefined>";
+            ((isAligned(p) || isMisaligned(p)) && p.hlEndEvent !== undefined) ? p.hlEndEvent.constructor.name : "<undefined>";
         res.push([
             p.llTrace[0].depth,
             p.llTrace[p.llTrace.length - 1].depth,
-            p.type !== "aligned",
+            p.type,
             [p.llEndEvent.constructor.name, hlEvtDesc]
         ]);
     }

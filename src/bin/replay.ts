@@ -42,15 +42,21 @@ import { sleep } from "./utils";
         }
     }
 
+    const allTouchedAddrs = new Set<string>();
     if (opts.blockNums) {
+
         for (const blockNum of opts.blockNums) {
             try {
                 for (const txReplayInfo of await getBlockReplayInfo(
                     opts.quicknodeEndpoint,
                     Number(blockNum)
                 )) {
+                    if (txReplayInfo.txHash === "0x3bc7756d3ae0367c774a9eec7e65c388cecf691c066e763c4d88f5f64a47bcb9") {
+                        console.error(`Skipping ${txReplayInfo.txHash}`)
+                        continue;
+                    }
                     try {
-                        const [, alignedTrace] = await replayMainnetTX(
+                        const [, alignedTrace, addrToInfoM] = await replayMainnetTX(
                             txReplayInfo,
                             opts.quicknodeEndpoint,
                             opts.etherscanKey,
@@ -58,6 +64,11 @@ import { sleep } from "./utils";
                             Number(opts.maxNumSteps),
                             opts.dumpSources
                         );
+
+                        for (const addr in addrToInfoM) {
+                            allTouchedAddrs.add(addr);
+                        }
+
                         for (const p of alignedTrace) {
                             record(`segment`, null, false);
                             record(`segment:${p.type}`, null, false);
@@ -76,5 +87,6 @@ import { sleep } from "./utils";
         }
     }
 
+    console.error(`${allTouchedAddrs.size} addrs touched total.`)
     dump(opts.stats ? opts.stats : "-");
 })();
