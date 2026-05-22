@@ -9,12 +9,17 @@ export type MisalignedPairTypes =
     | "misaligned:out-of-gas"
     | "misaligned:inline_asm"
     | "misaligned:error"
-    | "misaligned:earlier" // Misaligned due to an earlier misalignment
+    | "misaligned:earlier"; // Misaligned due to an earlier misalignment
 
 export type PairTypes = "aligned" | MisalignedPairTypes | "no-source";
 
 export function isMisalignmentPairType(t: string): t is MisalignedPairTypes {
-    return t === "misaligned:out-of-gas" || t === "misaligned:inline_asm" || t === "misaligned:error" || t === 'misaligned:earlier'
+    return (
+        t === "misaligned:out-of-gas" ||
+        t === "misaligned:inline_asm" ||
+        t === "misaligned:error" ||
+        t === "misaligned:earlier"
+    );
 }
 
 export interface BasePair {
@@ -47,7 +52,7 @@ export function isAligned(p: TracePair): p is AlignedPair {
 }
 
 export function isMisaligned(p: TracePair): p is MisalignedPair {
-    return isMisalignmentPairType(p.type)
+    return isMisalignmentPairType(p.type);
 }
 
 export function isNoSource(p: TracePair): p is NoSourcePair {

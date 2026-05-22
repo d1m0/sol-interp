@@ -37,10 +37,7 @@ import {
     SolObservableEvent,
     SolReturnEvent
 } from "./observable_events";
-import {
-    makeCallResultFromStep,
-    makeSolMessageFromStep
-} from "./utils";
+import { makeCallResultFromStep, makeSolMessageFromStep } from "./utils";
 import { AlignedTraces, isMisalignmentPairType, PairTypes } from "./trace_pairs";
 import { bytesToBigInt, bytesToHex } from "@ethereumjs/util";
 import { ExceptionType } from "./evm_trace/transformers";
@@ -71,7 +68,7 @@ class MisalignmentError extends Error {
     }
 }
 
-class MatchedInfiniteLoop extends Error { }
+class MatchedInfiniteLoop extends Error {}
 
 export class AlignedTraceBuilder extends BaseEEI {
     highLevelTrace: BaseStep[] = [];
@@ -222,9 +219,17 @@ export class AlignedTraceBuilder extends BaseEEI {
 
     curMode!: PairTypes;
 
-    addSegment(type: PairTypes, llEvent: EVMObservableEvent, hlEvent?: SolObservableEvent, hlAccountInfo?: AccountInfo): void {
-        if (type === 'aligned') {
-            this.expect(hlEvent !== undefined && hlAccountInfo !== undefined, `Cannot add an aligned segment without a hlEvent and hlAccount`)
+    addSegment(
+        type: PairTypes,
+        llEvent: EVMObservableEvent,
+        hlEvent?: SolObservableEvent,
+        hlAccountInfo?: AccountInfo
+    ): void {
+        if (type === "aligned") {
+            this.expect(
+                hlEvent !== undefined && hlAccountInfo !== undefined,
+                `Cannot add an aligned segment without a hlEvent and hlAccount`
+            );
 
             this.tryMatchObservableEvents(
                 llEvent,
@@ -232,15 +237,15 @@ export class AlignedTraceBuilder extends BaseEEI {
                 hlEvent,
                 hlAccountInfo
             );
-        } else if (type === 'no-source') {
-            this.addNoSourceSegment(llEvent)
+        } else if (type === "no-source") {
+            this.addNoSourceSegment(llEvent);
         } else if (isMisalignmentPairType(type)) {
             this.alignedTraces.push({
                 type,
                 llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
                 llEndEvent: llEvent,
                 hlTrace: this.highLevelTrace,
-                hlEndEvent: hlEvent,
+                hlEndEvent: hlEvent
             });
             this.highLevelTrace = [];
         }
@@ -293,7 +298,7 @@ export class AlignedTraceBuilder extends BaseEEI {
                 );
             }
 
-            this.addSegment(this.curMode, llEvent, hlEvent, callerAccount)
+            this.addSegment(this.curMode, llEvent, hlEvent, callerAccount);
         }
 
         const calleeFirstStep = this.currentLLIdx;
@@ -324,7 +329,7 @@ export class AlignedTraceBuilder extends BaseEEI {
         }
 
         // 3. Remember mdoe
-        const oldCurMode = this.curMode
+        const oldCurMode = this.curMode;
 
         const info = this.getContractInfo(msg);
         let res: CallResult | undefined;
@@ -332,7 +337,7 @@ export class AlignedTraceBuilder extends BaseEEI {
         // 4. If this is a call to a contract with an AST:
         if (info && info.ast !== undefined) {
             // 4.1 Set mode to 'aligned'
-            this.curMode = 'aligned'
+            this.curMode = "aligned";
 
             // 4.2 Invoke interpreter
             try {
@@ -342,9 +347,8 @@ export class AlignedTraceBuilder extends BaseEEI {
                     msg.delegatingContract !== undefined
                         ? msg.delegatingContract
                         : res.newContract
-                            ? res.newContract
-                            : msg.to;
-
+                          ? res.newContract
+                          : msg.to;
 
                 // If the interepter returned an exception - then everything should already be matched and we can return
                 if (res.reverted) {
@@ -358,7 +362,10 @@ export class AlignedTraceBuilder extends BaseEEI {
                     const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
                     assert(llEvent !== undefined, `Couldn't find a return event`);
                     const hlAccount = this.state.get(calleeAccountAddr.toString());
-                    assert(hlAccount !== undefined, `Missing account for ${calleeAccountAddr.toString()}`);
+                    assert(
+                        hlAccount !== undefined,
+                        `Missing account for ${calleeAccountAddr.toString()}`
+                    );
 
                     this.tryMatchObservableEvents(
                         llEvent,
@@ -388,23 +395,27 @@ export class AlignedTraceBuilder extends BaseEEI {
                     // For unsupported inline assembly - add misalignment segment and continue in no-src mode
                     const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
                     assert(llEvent !== undefined, `Couldn't find a return event`);
-                    this.addSegment("misaligned:inline_asm", llEvent, undefined, undefined)
-                    this.curMode = "misaligned:earlier"
-                    res = undefined
+                    this.addSegment("misaligned:inline_asm", llEvent, undefined, undefined);
+                    this.curMode = "misaligned:earlier";
+                    res = undefined;
                 } else {
                     // For OoG/Error misalignment - add misalignment segment and continue in no-src mode
-                    const segType = e.llEvent instanceof EVMExceptionEvent && e.llEvent.data.type === ExceptionType.OutOfGas ? 'misaligned:out-of-gas' : 'misaligned:error'
+                    const segType =
+                        e.llEvent instanceof EVMExceptionEvent &&
+                        e.llEvent.data.type === ExceptionType.OutOfGas
+                            ? "misaligned:out-of-gas"
+                            : "misaligned:error";
                     // @todo add hlAccount info to MisalginmentError? Or otherwise get it from somewhere else? Or remove need for it?
-                    this.addSegment(segType, e.llEvent)
-                    this.curMode = "misaligned:earlier"
-                    res = undefined
+                    this.addSegment(segType, e.llEvent);
+                    this.curMode = "misaligned:earlier";
+                    res = undefined;
                 }
             }
         } else {
-            this.curMode = "no-source"
+            this.curMode = "no-source";
             const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
             assert(llEvent !== undefined, `Couldn't find a return event`);
-            this.addSegment(this.curMode, llEvent, undefined, undefined)
+            this.addSegment(this.curMode, llEvent, undefined, undefined);
         }
 
         // We have a known result for this execution context from interpretation - just restore curMode and return it
@@ -433,7 +444,10 @@ export class AlignedTraceBuilder extends BaseEEI {
                     this.curMode = oldCurMode;
                     return res;
                 }
-            } else if (curEvent instanceof EVMReturnEvent || curEvent instanceof EVMExceptionEvent) {
+            } else if (
+                curEvent instanceof EVMReturnEvent ||
+                curEvent instanceof EVMExceptionEvent
+            ) {
                 // 5.3 If its a RETURN / STOP / Exception - return from this context
                 const resFromStep = makeCallResultFromStep(step);
                 this.updateStateFromPrevLLStep();
@@ -443,7 +457,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             } else if (curEvent instanceof EVMEmitEvent || curEvent instanceof EVMGasLeft) {
                 // 5.5 If its an Event / Gasleft - nothing to do
             } else {
-                nyi(`Unknown EVM event type ${curEvent.constructor.name}`)
+                nyi(`Unknown EVM event type ${curEvent.constructor.name}`);
             }
 
             // Find next evm observable event and add the misaligned/no-source segment
@@ -535,7 +549,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             emit: function (interp: Interpreter, state: State, evt: EventDesc): void {
                 interp.expect(
                     interp.curNode instanceof sol.EmitStatement ||
-                    interp.curNode instanceof sol.FunctionCall,
+                        interp.curNode instanceof sol.FunctionCall,
                     `Unexpected event emit node ${interp.curNode.constructor.name}`
                 );
                 const call =

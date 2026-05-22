@@ -56,87 +56,15 @@ const misalignmentSamples: Array<[string, any]> = [
     [
         "test/samples/misalignment/inline_asm1.config.json",
         [
-            [
-                1,
-                1,
-                "aligned",
-                [
-                    "EVMCreateEvent",
-                    "SolCreateEvent",
-                ],
-            ],
-            [
-                2,
-                2,
-                "aligned",
-                [
-                    "EVMCreateEvent",
-                    "SolCreateEvent",
-                ],
-            ],
-            [
-                3,
-                3,
-                "aligned",
-                [
-                    "EVMReturnEvent",
-                    "SolReturnEvent",
-                ],
-            ],
-            [
-                2,
-                2,
-                "aligned",
-                [
-                    "EVMReturnEvent",
-                    "SolReturnEvent",
-                ],
-            ],
-            [
-                1,
-                1,
-                "aligned",
-                [
-                    "EVMCallEvent",
-                    "SolCallEvent",
-                ],
-            ],
-            [
-                2,
-                2,
-                "misaligned:inline_asm",
-                [
-                    "EVMCallEvent",
-                    "<undefined>",
-                ],
-            ],
-            [
-                3,
-                3,
-                "aligned",
-                [
-                    "EVMReturnEvent",
-                    "SolReturnEvent",
-                ],
-            ],
-            [
-                2,
-                2,
-                "misaligned:earlier",
-                [
-                    "EVMReturnEvent",
-                    "<undefined>",
-                ],
-            ],
-            [
-                1,
-                1,
-                "aligned",
-                [
-                    "EVMReturnEvent",
-                    "SolReturnEvent",
-                ],
-            ],
+            [1, 1, "aligned", ["EVMCreateEvent", "SolCreateEvent"]],
+            [2, 2, "aligned", ["EVMCreateEvent", "SolCreateEvent"]],
+            [3, 3, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
+            [2, 2, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
+            [1, 1, "aligned", ["EVMCallEvent", "SolCallEvent"]],
+            [2, 2, "misaligned:inline_asm", ["EVMCallEvent", "<undefined>"]],
+            [3, 3, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
+            [2, 2, "misaligned:earlier", ["EVMReturnEvent", "<undefined>"]],
+            [1, 1, "aligned", ["EVMReturnEvent", "SolReturnEvent"]]
         ]
     ]
 ];
@@ -264,7 +192,9 @@ function alignedTraceToDesc(t: AlignedTraces): any {
 
     for (const p of t) {
         const hlEvtDesc =
-            ((isAligned(p) || isMisaligned(p)) && p.hlEndEvent !== undefined) ? p.hlEndEvent.constructor.name : "<undefined>";
+            (isAligned(p) || isMisaligned(p)) && p.hlEndEvent !== undefined
+                ? p.hlEndEvent.constructor.name
+                : "<undefined>";
         res.push([
             p.llTrace[0].depth,
             p.llTrace[p.llTrace.length - 1].depth,
