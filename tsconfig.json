@@ -6,6 +6,7 @@
         "declarationMap": true,
         "sourceMap": true,
         "outDir": "dist",
+        "rootDir": "./src",
         "removeComments": false,
         "lib": [
             "ES2024"
@@ -23,7 +24,11 @@
         "esModuleInterop": true,
         "forceConsistentCasingInFileNames": true,
         "resolveJsonModule": true,
-        "allowJs": true
+        "allowJs": true,
+        "types": [
+            "node",
+            "jest"
+        ]
     },
     "include": [
         "src/**/*"

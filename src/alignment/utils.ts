@@ -24,7 +24,7 @@ import {
 export function makeSolMessageFromStep(
     s: BasicStepInfo & OpInfo & WithCallInfo & WithCreateInfo
 ): SolMessage {
-    const from: Address = s.address;
+    let sender: Address;
     let delegatingContract: Address | undefined;
     let to: Address;
     let data: Uint8Array;
@@ -35,18 +35,20 @@ export function makeSolMessageFromStep(
     const depth: number = s.depth;
 
     if (s.callInfo) {
+        sender = s.callInfo.sender;
         delegatingContract =
             s.op.opcode === OPCODES.DELEGATECALL || s.op.opcode === OPCODES.CALLCODE
-                ? s.callInfo.codeAddress
+                ? s.address
                 : undefined;
         to = s.callInfo.codeAddress;
         data = s.callInfo.msgData;
         gas = s.callInfo.gas;
-        value = s.callInfo.value === undefined ? 0n : s.callInfo.value;
+        value = s.callInfo.value;
         salt = undefined;
         isStaticCall = s.op.opcode === OPCODES.STATICCALL;
     } else {
         assert(s.createInfo !== undefined, ``);
+        sender = s.address;
         delegatingContract = undefined;
         to = ZERO_ADDRESS;
         data = s.createInfo.msgData;
@@ -56,7 +58,7 @@ export function makeSolMessageFromStep(
         isStaticCall = false;
     }
     return {
-        from,
+        from: sender,
         delegatingContract,
         to,
         data,

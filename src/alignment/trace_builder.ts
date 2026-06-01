@@ -250,6 +250,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             this.highLevelTrace = [];
         }
     }
+
     /**
      * Execute a message. May be called either from:
      * 1) The interpreter - in which case `alreadyAligned` is false, and we first need to align the traces to the next *CALL instruction

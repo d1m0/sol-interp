@@ -10,6 +10,7 @@ import {
     BytecodeTemplate,
     matchesTemplate
 } from "sol-dbg/dist/debug/artifact_manager/bytecode_templates";
+import { join } from "path";
 
 export interface EtherscanSourceResponse {
     ABI: string;
@@ -30,7 +31,45 @@ export interface EtherscanSourceResponse {
     SwamSource: string;
 }
 
-class EtherscanCache extends JSONCache<EtherscanSourceResponse> {
+async function etherscanJSONCall(
+    apiKey: string,
+    action: string,
+    params: { [key: string]: any },
+    module: string = "contract",
+    chainId: number = 1
+): Promise<any> {
+    const res = await axios.get(`https://api.etherscan.io/v2/api`, {
+        params: {
+            apiKey,
+            chainId,
+            module,
+            action,
+            ...params
+        }
+    });
+
+    if (res.status !== 200) {
+        throw new Error(`HTTP Error: ${res.status}`);
+    }
+
+    const jsonRes = res.data;
+
+    if (Number(jsonRes.status) !== 1 || jsonRes.message !== "OK") {
+        throw new Error(
+            `Invalid status or message in response from Etherscan action ${action}: ${JSON.stringify(jsonRes)}`
+        );
+    }
+
+    if (!(jsonRes.result instanceof Array && jsonRes.result.length === 1)) {
+        throw new Error(
+            `Invalid result field in response from Etherscan action ${action}: ${JSON.stringify(jsonRes)}`
+        );
+    }
+
+    return jsonRes.result[0];
+}
+
+class EtherscanGetSourcecodeCache extends JSONCache<EtherscanSourceResponse> {
     constructor(cacheDir: string) {
         super(cacheDir, 2);
     }
@@ -40,46 +79,56 @@ class EtherscanCache extends JSONCache<EtherscanSourceResponse> {
     }
 
     async make(apiKey: string, address: string): Promise<EtherscanSourceResponse> {
-        const res = await axios.get(`https://api.etherscan.io/v2/api`, {
-            params: {
-                apiKey,
-                chainId: 1,
-                module: "contract",
-                action: "getsourcecode",
-                address
-            }
-        });
-
-        if (res.status !== 200) {
-            throw new Error(`HTTP Error: ${res.status}`);
-        }
-
-        const jsonRes = res.data;
-
-        if (Number(jsonRes.status) !== 1 || jsonRes.message !== "OK") {
-            throw new Error(
-                `Invalid status or message in response from Etherscan for addr ${address}: ${JSON.stringify(jsonRes)}`
-            );
-        }
-
-        if (!(jsonRes.result instanceof Array && jsonRes.result.length === 1)) {
-            throw new Error(
-                `Invalid result field in response from Etherscan for addr ${address}: ${JSON.stringify(jsonRes)}`
-            );
-        }
-
-        return jsonRes.result[0];
+        return etherscanJSONCall(apiKey, "getsourcecode", { address: address });
     }
 }
 
 const ETHERSCAN_CACHE_DIR = ".etherscan_cache/";
-const eCache = new EtherscanCache(ETHERSCAN_CACHE_DIR);
+const eCache = new EtherscanGetSourcecodeCache(ETHERSCAN_CACHE_DIR);
 
 async function getEtherscanSourceInfo(
     address: Address | string,
     apiKey: string
 ): Promise<EtherscanSourceResponse> {
     return await eCache.get(apiKey, address instanceof Address ? address.toString() : address);
+}
+
+export interface EtherscanContractCreationResponse {
+    contractAddress: `0x${string}`;
+    contractCreator: `0x${string}`;
+    txHash: `0x${string}`;
+    blockNumber: string;
+    timestamp: string;
+    contractFactory: `0x${string}` | "";
+    creationBytecode: `0x${string}`;
+}
+
+class EtherscanGetContractCreationCache extends JSONCache<EtherscanContractCreationResponse> {
+    constructor(cacheDir: string) {
+        super(join(cacheDir, "getcontractcreation"), 2);
+    }
+
+    makeKey(apiKey: string, address: string): string {
+        return address;
+    }
+
+    async make(apiKey: string, address: string): Promise<EtherscanContractCreationResponse> {
+        return etherscanJSONCall(apiKey, "getcontractcreation", {
+            contractaddresses: address
+        });
+    }
+}
+
+const eCreationCache = new EtherscanGetContractCreationCache(ETHERSCAN_CACHE_DIR);
+
+export async function getEtherscanContractCreation(
+    address: Address | string,
+    apiKey: string
+): Promise<EtherscanContractCreationResponse> {
+    return await eCreationCache.get(
+        apiKey,
+        address instanceof Address ? address.toString() : address
+    );
 }
 
 const versionRE =
@@ -157,8 +206,7 @@ const ERC1167Template: BytecodeTemplate = {
     object: hexToBytes(
         "0x363d3d373d3d3d363d73bebebebebebebebebebebebebebebebebebebebe5af43d82803e903d91602b57fd5bf3"
     ),
-    skipRanges: [[10, 30]], // bytes 10-29 inclusive
-    contractInfo: undefined as unknown as any
+    skipRanges: [[10, 30]] // bytes 10-29 inclusive
 };
 
 /**
@@ -194,13 +242,26 @@ function detectFileName(artifact: any, contractName: string): string | undefined
     return res.length === 1 ? res[0] : undefined;
 }
 
+function getFileName(result: EtherscanSourceResponse): string {
+    if (result.ContractFileName !== "" && result.ContractFileName !== undefined) {
+        return result.ContractFileName;
+    }
+
+    if (result.ContractName) {
+        return result.ContractName;
+        //return result.ContractName.endsWith(".sol") ? result.ContractName : result.ContractName + '.sol'
+    }
+
+    return `Contract.sol`;
+}
+
 export async function getArtifact(
     address: Address | string,
     apiKey: string
 ): Promise<[PartialSolcOutput, string, string] | undefined> {
     const strAddr = address instanceof Address ? address.toString() : address;
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
-    let fileName = eInfo.ContractFileName === "" ? "dummy.sol" : eInfo.ContractFileName;
+    let fileName = getFileName(eInfo);
     const settings = {
         optimizer: {
             enabled: eInfo.OptimizationUsed === "1",

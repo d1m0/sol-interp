@@ -72,7 +72,6 @@ import { sleep } from "./utils";
                         }
 
                         for (const p of alignedTrace) {
-                            record(`segment`, null, false);
                             record(`segment:${p.type}`, null, false);
                         }
                     } catch (e) {

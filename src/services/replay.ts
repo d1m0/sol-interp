@@ -5,7 +5,8 @@ import {
     getArtifacts,
     tryMatchERC1167,
     record,
-    recordDistr
+    recordDistr,
+    getEtherscanContractCreation
 } from "../services";
 import {
     ArtifactInfo,
@@ -13,7 +14,8 @@ import {
     ImmMap,
     PartialSolcOutput,
     zip3,
-    bigEndianBufToBigint
+    bigEndianBufToBigint,
+    readInt16Be
 } from "sol-dbg";
 import { EVMStep, replayEVM } from "../alignment/evm_trace";
 import {
@@ -31,6 +33,7 @@ import { basename, dirname, join, normalize } from "path";
 import { assert } from "../utils";
 import { keccak256 } from "ethereum-cryptography/keccak";
 import { bigIntToBuf, Storage } from "sol-dbg";
+import { bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -97,6 +100,33 @@ export function getExecutedAddresses(trace: EVMStep[]): Set<string> {
     return addrsTouched;
 }
 
+import { Decoder } from "cbor";
+
+export function getMD(bytecode: Uint8Array): any | undefined {
+    try {
+        const off = readInt16Be(bytecode, bytecode.length - 2);
+
+        return Decoder.decodeAllSync(
+            bytecode.slice(bytecode.length - 2 - off, bytecode.length - 2),
+            {}
+        );
+    } catch {
+        return undefined;
+    }
+}
+
+export function getMDRange(bytecode: Uint8Array): [number, number] | undefined {
+    try {
+        const off = readInt16Be(bytecode, bytecode.length - 2);
+
+        Decoder.decodeAllSync(bytecode.slice(bytecode.length - 2 - off, bytecode.length - 2), {});
+
+        return [bytecode.length - 2 - off, bytecode.length - 2];
+    } catch {
+        return undefined;
+    }
+}
+
 export async function replayMainnetTX(
     txReplayInfo: ReplayInfo,
     quicknodeEndpoint: string,
@@ -105,12 +135,14 @@ export async function replayMainnetTX(
     maxNumSteps: number,
     srcDumpDir?: string
 ): Promise<[ArtifactManager, AlignedTraces, Map<string, [ArtifactInfo, string]>]> {
-    console.error(`Replay TX ${txReplayInfo.txHash} in block ${(txReplayInfo.block.header as any).number}.`);
+    console.error(
+        `Replay TX ${txReplayInfo.txHash} in block ${(txReplayInfo.block.header as any).number}.`
+    );
     record(`trace`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
 
     const blockManager = new QuicknodeBlockManager(quicknodeEndpoint);
 
-    const startReplay = Date.now()
+    const startReplay = Date.now();
     const [trace, , , block, evmTx] = await replayEVM(
         txReplayInfo.preState,
         txReplayInfo.tx,
@@ -119,13 +151,13 @@ export async function replayMainnetTX(
         txReplayInfo.sender
     );
 
-    const replayDone = Date.now()
+    const replayDone = Date.now();
 
     recordDistr("trace_len", trace.length, txReplayInfo.txHash);
     if (trace.length > 0) {
         record(`trace_non_zero`, txReplayInfo.txHash);
         recordDistr("trace_non_zero_len", trace.length, txReplayInfo.txHash);
-        recordDistr(`duration_evm_replay_done`, replayDone - startReplay, txReplayInfo.txHash)
+        recordDistr(`duration_evm_replay_done`, replayDone - startReplay, txReplayInfo.txHash);
     }
 
     const addrsTouched = getExecutedAddresses(trace);
@@ -141,6 +173,59 @@ export async function replayMainnetTX(
     }
 
     const addrToContract = await getArtifacts(nonProxyAddrsTouched, etherscanKey);
+    const toDelete = new Set<string>();
+
+    for (const [addr, [artifact, mainContractKey]] of addrToContract) {
+        const [fileName, contractName] = mainContractKey.split(":");
+        const mainContract = artifact.contracts[fileName][contractName];
+
+        if (mainContract !== undefined) {
+            const compiledBytecode = hexToBytes(`0x${mainContract.evm.deployedBytecode.object}`);
+            const onChainBytecode = await getCode(
+                quicknodeEndpoint,
+                addr,
+                Number(block.header.number + 1n)
+            );
+
+            if (equalsBytes(compiledBytecode, onChainBytecode)) {
+                record(`deployed_bytecode:equals`, addr);
+            } else {
+                record(
+                    `deployed_bytecode:not_equals:${compiledBytecode.length === onChainBytecode.length ? "len_equals" : "len_not_equals"}`,
+                    addr
+                );
+                record(`tx_has_mismatched_deployed_bytecode`, txReplayInfo.txHash);
+
+                if (compiledBytecode.length === onChainBytecode.length) {
+                    const onChainCreationResp = await getEtherscanContractCreation(
+                        addr,
+                        etherscanKey
+                    );
+                    if (onChainCreationResp.creationBytecode === "0x") {
+                        record(`creation_bytecode_lookup:no_bytecode`, addr);
+                        toDelete.add(addr);
+                    } else {
+                        const compiledCreationBytecode = hexToBytes(
+                            `0x${mainContract.evm.bytecode.object}`
+                        );
+                        mainContract.evm.bytecode.object =
+                            onChainCreationResp.creationBytecode.slice(
+                                2,
+                                compiledCreationBytecode.length * 2 + 2
+                            );
+                        mainContract.evm.deployedBytecode.object =
+                            bytesToHex(onChainBytecode).slice(2);
+                    }
+                } else {
+                    toDelete.add(addr);
+                }
+            }
+        }
+    }
+
+    for (const addr of toDelete) {
+        addrToContract.delete(addr);
+    }
 
     if (srcDumpDir !== undefined) {
         const srcBase = srcDumpDir;
@@ -179,8 +264,8 @@ export async function replayMainnetTX(
 
     const prevBlocks = blockManager.getCachedBlocks();
 
-    const prepAlignmentData = Date.now()
-    recordDistr(`duration_fetch_data`, prepAlignmentData - replayDone, txReplayInfo.txHash)
+    const prepAlignmentData = Date.now();
+    recordDistr(`duration_fetch_data`, prepAlignmentData - replayDone, txReplayInfo.txHash);
     const builder = new AlignedTraceBuilder(
         artifactManager,
         interpPreState,
@@ -195,9 +280,9 @@ export async function replayMainnetTX(
 
     const [alignedTraces] = builder.buildAlignedTraces();
 
-    const alignedDone = Date.now()
-    recordDistr(`duration_alignment`, alignedDone - prepAlignmentData, txReplayInfo.txHash)
-    recordDistr(`duration_replay`, alignedDone - startReplay, txReplayInfo.txHash)
+    const alignedDone = Date.now();
+    recordDistr(`duration_alignment`, alignedDone - prepAlignmentData, txReplayInfo.txHash);
+    recordDistr(`duration_replay`, alignedDone - startReplay, txReplayInfo.txHash);
 
     const addrToInfoMap = new Map<string, ContractInfo>(
         [...addrToContract.entries()].map(([strAddr, [, contractId]]) => [
@@ -211,74 +296,6 @@ export async function replayMainnetTX(
     const wellFormed = alignedTraceWellFormed(alignedTraces, trace, artifactManager, addrToInfoMap);
 
     recordDistr("num_segments", alignedTraces.length, txReplayInfo.txHash);
-    let numNoSrc = 0,
-        numAligned = 0,
-        numMisalignedOoG = 0,
-        numMisalignedAsm = 0,
-        numMisalignedErr = 0,
-        numMisalignedEarlier = 0;
-
-    let reason!: string;
-
-    for (let i = 0; i < alignedTraces.length; i++) {
-        const p = alignedTraces[i];
-        if (p.type === "no-source") {
-            numNoSrc++;
-            reason = "<no!>"
-        } else if (p.type === "aligned") {
-            numAligned++;
-            reason = "<no!>"
-        } else if (p.type === "misaligned:error") {
-            numMisalignedErr++;
-            reason = p.type
-        } else if (p.type === "misaligned:inline_asm") {
-            numMisalignedAsm++;
-            reason = p.type
-        } else if (p.type === "misaligned:out-of-gas") {
-            numMisalignedOoG++;
-            reason = p.type
-        } else if (p.type === "misaligned:earlier") {
-            if (reason === "misaligned:error") {
-                numMisalignedErr++;
-            } else if (reason === "misaligned:out-of-gas") {
-                numMisalignedOoG++;
-            } else if (reason === "misaligned:inline_asm") {
-                numMisalignedAsm++;
-            } else {
-                numMisalignedEarlier++;
-            }
-        }
-    }
-
-    if (alignedTraces.length > 0) {
-        recordDistr("segment_percent:noSrc", numNoSrc / alignedTraces.length, txReplayInfo.txHash);
-        recordDistr(
-            "segment_percent:aligned",
-            numAligned / alignedTraces.length,
-            txReplayInfo.txHash
-        );
-        recordDistr(
-            "segment_percent:error",
-            numMisalignedErr / alignedTraces.length,
-            txReplayInfo.txHash
-        );
-        recordDistr(
-            "segment_percent:out-of-gas",
-            numMisalignedOoG / alignedTraces.length,
-            txReplayInfo.txHash
-        );
-        recordDistr(
-            "segment_percent:inline_asm",
-            numMisalignedAsm / alignedTraces.length,
-            txReplayInfo.txHash
-        );
-        // This should be 0!
-        recordDistr(
-            "segment_percent:earlier",
-            numMisalignedEarlier / alignedTraces.length,
-            txReplayInfo.txHash
-        );
-    }
 
     if (!wellFormed) {
         record(`mallformed`, txReplayInfo.txHash);
