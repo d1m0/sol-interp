@@ -5,7 +5,6 @@ import {
     BaseEEI,
     SolMessage,
     BlockManagerI,
-    SolMessageType
 } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
@@ -42,7 +41,6 @@ import { makeCallResultFromStep, makeSolMessageFromCallCreateStep } from "./util
 import { AlignedTraces, isMisalignmentPairType, PairTypes } from "./trace_pairs";
 import { bytesToBigInt, bytesToHex } from "@ethereumjs/util";
 import { ExceptionType } from "./evm_trace/transformers";
-import { record } from "../services";
 
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
