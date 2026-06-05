@@ -6,7 +6,7 @@ import {
     createAddressFromString,
     hexToBytes
 } from "@ethereumjs/util";
-import { CallResult, SolMessage, FixedSetBlockManager, InterpEEI } from "../interp";
+import { CallResult, SolMessage, FixedSetBlockManager, InterpEEI, SolMessageType } from "../interp";
 import { ArtifactManager } from "../interp/artifactManager";
 import { TraceVisitor } from "../interp/visitors";
 import { ParsedStep } from "./ast/parser";
@@ -43,6 +43,7 @@ export class Runner {
     libMap = new Map<string, Address>();
     addrToInfo = new Map<string, ContractInfo>();
     SENDER = createAddressFromString("0x4838B106FCe9647Bdf1E7877BF73cE8B0BAD5f97");
+    nonce: bigint = 0n;
 
     constructor(
         private readonly artifactManager: ArtifactManager,
@@ -148,7 +149,7 @@ export class Runner {
         this.error(`No method/getter ${name} in contract ${contract.name}`);
     }
 
-    getMsgFromStep(step: ParsedStep): [SolMessage, ContractInfo] {
+    getMsgFromStep(step: ParsedStep, nonce: bigint): [SolMessage, ContractInfo] {
         let to: Address;
         let targetContract: ContractInfo;
         let target: sol.FunctionDefinition | sol.VariableDeclaration | undefined;
@@ -212,17 +213,15 @@ export class Runner {
         }
 
         return [
-            {
-                from: this.SENDER,
-                delegatingContract: undefined,
+            SolMessage.testMessage(
+                step.kind === "Deploy" ? SolMessageType.CREATE : SolMessageType.CALL,
+                this.SENDER,
                 to,
                 data,
-                gas: 0n,
-                value: 1000n,
-                salt: undefined,
-                isStaticCall: false,
-                depth: 0
-            },
+                0n,
+                1000n,
+                nonce
+            ),
             targetContract
         ];
     }
@@ -257,7 +256,7 @@ export class Runner {
     }
 
     run(step: ParsedStep): [CallResult, BaseValue[] | undefined] {
-        const [msg, info] = this.getMsgFromStep(step);
+        const [msg, info] = this.getMsgFromStep(step, this.nonce++);
 
         const res = this.chain.execMsg(msg);
 

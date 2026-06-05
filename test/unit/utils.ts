@@ -14,7 +14,7 @@ import {
 import * as sol from "solc-typed-ast";
 import * as fse from "fs-extra";
 import { BaseScope, LocalsScope } from "../../src/interp/scope";
-import { makeStateWithConstants, State } from "../../src/interp/state";
+import { makeTestStateWithConstants, State } from "../../src/interp/state";
 import { Value as InterpValue } from "../../src/interp/value";
 import { getStateStorage, isValueType, setStateStorage } from "../../src/interp/utils";
 import { addSources, ArtifactManager } from "../../src/interp/artifactManager";
@@ -49,7 +49,7 @@ export function makeState(
     sol.assert(contract !== undefined, ``);
     const contractInfo = interp.artifactManager.getContractInfo(contract);
     sol.assert(contractInfo !== undefined, ``);
-    const res = makeStateWithConstants(interp.artifactManager, contractInfo);
+    const res = makeTestStateWithConstants(interp.artifactManager, contractInfo);
 
     // Builtins
     let scope: BaseScope = interp.makeStaticScope(loc, res);

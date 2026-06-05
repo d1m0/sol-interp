@@ -323,7 +323,7 @@ export function getThis(state: State): Address {
  * @returns
  */
 export function getMsgSender(state: State): Address {
-    return state.msg.from;
+    return state.msg.sender;
 }
 
 export function decodeView(lv: View, state: State): BaseValue {

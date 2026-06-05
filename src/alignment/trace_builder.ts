@@ -4,19 +4,20 @@ import {
     CallResult,
     BaseEEI,
     SolMessage,
-    BlockManagerI
+    BlockManagerI,
+    SolMessageType
 } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { Block } from "@ethereumjs/block";
-import { ContractInfo, EventDesc, ImmMap, OPCODES, stackTop, ZERO_ADDRESS } from "sol-dbg";
+import { ContractInfo, EventDesc, ImmMap, min, nyi, OPCODES, stackTop, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError, Unsupported } from "../interp/exceptions";
 import { State, takeStateSnapshot } from "../interp/state";
 import { Value, LValue } from "../interp/value";
-import { EVMStep, isCall, rebuildStateFromTrace } from "./evm_trace";
+import { EVMStep, rebuildStateFromTrace } from "./evm_trace";
 import { assert } from "../utils";
 import {
     eventsMatch,
@@ -37,53 +38,17 @@ import {
     SolObservableEvent,
     SolReturnEvent
 } from "./observable_events";
-import {
-    makeCallResultFromStep,
-    makeEVMEventFromStep,
-    makeSolEventFromStep,
-    makeSolMessageFromStep
-} from "./utils";
-import { AlignedTraces, MisalignedPairTypes } from "./trace_pairs";
+import { makeCallResultFromStep, makeSolMessageFromCallCreateStep } from "./utils";
+import { AlignedTraces, isMisalignmentPairType, PairTypes } from "./trace_pairs";
 import { bytesToBigInt, bytesToHex } from "@ethereumjs/util";
 import { ExceptionType } from "./evm_trace/transformers";
-
-/**
- * Find the first index `i` in `llTrace` after `afterIdx` at depth `depth`. If the trace depth becomes less than `depth` before
- * reaching `depth`, or we never reach `depth` return -1.
- */
-function findFirstIdxAtDepthAfter(llTrace: EVMStep[], depth: number, afterIdx: number): number {
-    assert(
-        afterIdx >= llTrace.length - 1 || llTrace[afterIdx + 1].depth >= depth,
-        `After idx must be at a higher depth`
-    );
-    for (let i = afterIdx + 1; i < llTrace.length; i++) {
-        if (llTrace[i].depth < depth) {
-            return -1;
-        }
-
-        if (llTrace[i].depth == depth) {
-            return i;
-        }
-    }
-
-    return -1;
-}
+import { record } from "../services";
 
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
  */
 export function makeSolMessage(tx: TypedTransaction): SolMessage {
-    return {
-        from: tx.getSenderAddress(),
-        delegatingContract: undefined,
-        to: tx.to === undefined ? ZERO_ADDRESS : tx.to,
-        data: tx.data,
-        gas: tx.gasLimit,
-        value: tx.value,
-        salt: undefined,
-        isStaticCall: false,
-        depth: 0
-    };
+    return SolMessage.fromTx(tx);
 }
 
 class MisalignmentError extends Error {
@@ -95,7 +60,7 @@ class MisalignmentError extends Error {
     }
 }
 
-class MatchedInfiniteLoop extends Error {}
+class MatchedInfiniteLoop extends Error { }
 
 export class AlignedTraceBuilder extends BaseEEI {
     highLevelTrace: BaseStep[] = [];
@@ -142,32 +107,6 @@ export class AlignedTraceBuilder extends BaseEEI {
             hlTrace: this.highLevelTrace,
             llEndEvent,
             hlEndEvent
-        });
-
-        this.highLevelTrace = [];
-    }
-
-    private addMisalignedSegment(
-        llEvent: EVMObservableEvent,
-        hlEvent: SolObservableEvent,
-        isDueToInlineAsm: boolean
-    ): void {
-        let type: MisalignedPairTypes;
-
-        if (llEvent instanceof EVMExceptionEvent && llEvent.data.type === ExceptionType.OutOfGas) {
-            type = "misaligned:out-of-gas";
-        } else if (isDueToInlineAsm) {
-            type = "misaligned:inline_asm";
-        } else {
-            type = "misaligned:error";
-        }
-
-        this.alignedTraces.push({
-            type,
-            llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
-            llEndEvent: llEvent,
-            hlTrace: this.highLevelTrace,
-            hlEndEvent: hlEvent
         });
 
         this.highLevelTrace = [];
@@ -225,35 +164,6 @@ export class AlignedTraceBuilder extends BaseEEI {
         this.updateStateFromLLStep(this.currentLLIdx - 1);
     }
 
-    private reSyncAtDepth(
-        expDepth: number,
-        isDueToInlineAsm: boolean
-    ): [EVMObservableEvent, SolObservableEvent] {
-        let resyncLLIdx: number;
-
-        // Couldnt synchronize at the root
-        if (expDepth === 0) {
-            resyncLLIdx = this.lowLevelTrace.length;
-        } else {
-            resyncLLIdx = findFirstIdxAtDepthAfter(this.lowLevelTrace, expDepth, this.currentLLIdx);
-        }
-
-        assert(
-            resyncLLIdx > 0,
-            `Couldn't find an index at depth ${expDepth} after idx ${this.currentLLIdx}`
-        );
-        const lastStep = this.lowLevelTrace[resyncLLIdx - 1];
-
-        const evmEvent: EVMObservableEvent = makeEVMEventFromStep(lastStep, resyncLLIdx - 1);
-        const solEvent: SolObservableEvent = makeSolEventFromStep(lastStep);
-
-        // This sets this.currentLLIdx to resyncLLIdx
-        this.addMisalignedSegment(evmEvent, solEvent, isDueToInlineAsm);
-        this.updateStateFromPrevLLStep();
-
-        return [evmEvent, solEvent];
-    }
-
     private getContractInfo(msg: SolMessage): ContractInfo | undefined {
         if (msg.to.equals(ZERO_ADDRESS)) {
             return this.artifactManager.getContractFromCreationBytecode(msg.data);
@@ -288,37 +198,106 @@ export class AlignedTraceBuilder extends BaseEEI {
     }
 
     /**
-     * Simulate executing messages when we don't have source info. This function
-     * recursively calls itself for every call context, as it scans the trace.
-     * When we hit a context with source info, we call execMsg
-     * @param msg
+     * Index of the first yet un-aligned low-level step.
+     * Always right after the end of the last aligned segment
      */
-    execMsgNoSource(msg: SolMessage, calleeFirstStep: number): [CallResult, number] {
-        const info = this.getContractInfo(msg);
-
-        // If we have an AST, run the interpreter
-        if (info !== undefined) {
-            sol.assert(calleeFirstStep >= this.currentLLIdx, ``);
-
-            if (calleeFirstStep > this.currentLLIdx) {
-                this.addNoSourceSegment(
-                    makeEVMEventFromStep(
-                        this.lowLevelTrace[calleeFirstStep - 1],
-                        calleeFirstStep - 1
-                    )
-                );
-
-                this.updateStateFromPrevLLStep();
-            }
-
-            sol.assert(this.highLevelTrace.length === 0, `Missed high-level steps`);
-            const res = this.execMsg(msg, true);
-            return [res, this.currentLLIdx];
+    get currentLLIdx(): number {
+        if (this.alignedTraces.length === 0) {
+            return 0;
         }
 
-        // Special case - handle calls to contracts with no code
+        return this.alignedTraces[this.alignedTraces.length - 1].llEndEvent.idx + 1;
+    }
+
+    curMode!: PairTypes;
+
+    addSegment(
+        type: PairTypes,
+        llEvent: EVMObservableEvent,
+        hlEvent?: SolObservableEvent,
+        hlAccountInfo?: AccountInfo
+    ): void {
+        if (type === "aligned") {
+            this.expect(
+                hlEvent !== undefined && hlAccountInfo !== undefined,
+                `Cannot add an aligned segment without a hlEvent and hlAccount`
+            );
+
+            this.tryMatchObservableEvents(
+                llEvent,
+                this.lowLevelTrace[llEvent.idx],
+                hlEvent,
+                hlAccountInfo
+            );
+        } else if (type === "no-source") {
+            this.addNoSourceSegment(llEvent);
+        } else if (isMisalignmentPairType(type)) {
+            this.alignedTraces.push({
+                type,
+                llTrace: this.lowLevelTrace.slice(this.currentLLIdx, llEvent.idx + 1),
+                llEndEvent: llEvent,
+                hlTrace: this.highLevelTrace,
+                hlEndEvent: hlEvent
+            });
+            this.highLevelTrace = [];
+        }
+    }
+
+    /**
+     * Execute a message. May be called either from:
+     * 1) The interpreter - in which case `alreadyAligned` is false, and we first need to align the traces to the next *CALL instruction
+     * 2) Recursively by itself - in this case `alreadyAligned` should be true, and the traces already aligned up to the current call
+     * 3) by buildAlignedTraces() at the start of the trace - in this case `alreadyAligned` is true, and the traces are trivially aligned since we are at the start
+     *
+     * This method should:
+     * 1. Aligned the traces if `!alreadyAligned` up to the next *CALL instruction
+     * 2. Handle the case when this is a call to a contract with no code
+     * 3. Remember `mode`
+     * 4. If this is a call to a contract with an AST:
+     *      4.1 Set mode to 'aligned'
+     *      4.2 Invoke interpreter
+     *      4.3 If interpreter fails/misaligns, set mode to `misaligned:...`
+     *      4.4 Finish this context as if its 'no-source' mode
+     * 5. Else if this is a call to a contract without AST, or interpretation failed,
+     *      5.1 Step through each observable event in the LL trace, adding an appropriate (according to curMode) segment
+     *      5.2 If its a *CALL recusirvely call execMsg()
+     *      5.3 If its a RETURN/STOP - return from this context
+     *      5.4 If its an Exception - return exception data
+     *      5.5 If its an Event/Gasleft - just add the segment
+     * 6. Restore rememberd 'mode' and return response
+     */
+    execMsg(msg: SolMessage, alreadyAligned: boolean = false): CallResult {
+        if (!alreadyAligned) {
+            // If we are not alreadyAligned to the start of the call, we are in the context of the caller in the llTrace.
+            // Align to the next *CALL instruction in the llTrace
+            let callerAccount: AccountInfo | undefined;
+            let hlEvent: SolObservableEvent | undefined;
+
+            const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+            assert(llEvent !== undefined, `Couldnt find next event at the start of execMsg`);
+
+            if (this.curMode === "aligned") {
+                const callerAddress = msg.originatingContextAddress;
+                callerAccount = this.state.get(callerAddress.toString());
+
+                hlEvent = msg.to.equals(ZERO_ADDRESS)
+                    ? new SolCreateEvent(msg)
+                    : new SolCallEvent(msg);
+
+                sol.assert(
+                    callerAccount !== undefined,
+                    `Couldn't find caller account for address ${callerAddress.toString()}`
+                );
+            }
+
+            this.addSegment(this.curMode, llEvent, hlEvent, callerAccount);
+        }
+
+        const calleeFirstStep = this.currentLLIdx;
+
+        // 2. Handle calls to contracts with no state
         if (this.isCallToAccountWithNoCode(calleeFirstStep - 1)) {
-            const fromAccount = this.getAccount(msg.from);
+            const fromAccount = this.getAccount(msg.originatingContextAddress);
             this.expect(fromAccount !== undefined);
 
             const reverted = fromAccount.balance < msg.value;
@@ -338,195 +317,149 @@ export class AlignedTraceBuilder extends BaseEEI {
                 this.updateStateFromLLStep(calleeFirstStep);
             }
 
-            return [{ reverted, data: new Uint8Array() }, calleeFirstStep];
+            return { reverted, data: new Uint8Array() };
         }
 
-        let pos = calleeFirstStep;
-        let res: CallResult;
+        // 3. Remember mdoe
+        const oldCurMode = this.curMode;
 
-        // Seek through the ll trace
-        while (pos < this.lowLevelTrace.length) {
-            const nextEvent = findNextEvent(this.lowLevelTrace, pos);
-            this.expect(nextEvent !== undefined, `Ran out of the trace`);
-            const step = this.lowLevelTrace[nextEvent.idx];
-            pos = nextEvent.idx + 1;
-
-            if (nextEvent instanceof EVMEmitEvent) {
-                // Nothing to do
-            } else if (nextEvent instanceof EVMCallEvent || nextEvent instanceof EVMCreateEvent) {
-                const msg = makeSolMessageFromStep(step);
-                this.addNoSourceSegment(nextEvent);
-                this.updateStateFromPrevLLStep();
-                [res, pos] = this.execMsgNoSource(msg, pos); // result ignored
-
-                if (pos >= this.lowLevelTrace.length) {
-                    return [res, pos];
-                }
-            } else {
-                this.expect(
-                    nextEvent instanceof EVMReturnEvent || nextEvent instanceof EVMExceptionEvent
-                );
-                const resFromStep = makeCallResultFromStep(step);
-                this.addNoSourceSegment(nextEvent);
-                this.updateStateFromPrevLLStep();
-
-                return [resFromStep, pos];
-            }
-        }
-
-        this.expect(false, `Shouldn't get here`);
-    }
-
-    /**
-     * Index of the first yet un-aligned low-level step.
-     * Always right after the end of the last aligned segment
-     */
-    get currentLLIdx(): number {
-        if (this.alignedTraces.length === 0) {
-            return 0;
-        }
-
-        return this.alignedTraces[this.alignedTraces.length - 1].llEndEvent.idx + 1;
-    }
-
-    /**
-     * Execute a message. May be called either from:
-     * 1) the interpreter, in which case we need to find the matching call in the low-level trace and align first
-     * 2) from alignMessage()/initially, in which case we may assume that the traces are already aligned up to currentLLIdx
-     *
-     * When we are called from the interpreter `llIdxAtStartOfCallee` will be false, and we will re-sync with the low-level trace upon entry.
-     */
-    execMsg(msg: SolMessage, llIdxAtStartOfCallee: boolean = false): CallResult {
-        // Here we are in the context of the caller.
-        // If there are unaligned LL steps, try and find the matching call in the LL trace and
-        if (!llIdxAtStartOfCallee) {
-            const callerAddress =
-                msg.delegatingContract !== undefined ? msg.delegatingContract : msg.from;
-            const callerAccount = this.state.get(callerAddress.toString());
-
-            const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
-            assert(llEvent !== undefined, `Couldnt find next event at the start of execMsg`);
-            const hlEvent: SolObservableEvent = msg.to.equals(ZERO_ADDRESS)
-                ? new SolCreateEvent(msg)
-                : new SolCallEvent(msg);
-
-            sol.assert(
-                callerAccount !== undefined,
-                `Couldn't find caller account for address ${callerAddress.toString()}`
-            );
-
-            this.tryMatchObservableEvents(
-                llEvent,
-                this.lowLevelTrace[llEvent.idx],
-                hlEvent,
-                callerAccount
-            );
-        }
-
-        // At this point this.currentLLIdx is the first step in the callee context
-        // Index of the first low-level step in the callee context
-        const calleeStartIdx = this.currentLLIdx;
-        const callerDepth = this.lowLevelTrace[this.currentLLIdx].depth - 1;
         const info = this.getContractInfo(msg);
+        let res: CallResult | undefined;
 
-        if (!info) {
-            const [res] = this.execMsgNoSource(msg, this.currentLLIdx);
+        // 4. If this is a call to a contract with an AST:
+        if (info && info.ast !== undefined) {
+            // 4.1 Set mode to 'aligned'
+            this.curMode = "aligned";
+
+            // 4.2 Invoke interpreter
+            try {
+                res = super.execMsg(msg);
+
+                const calleeAccountAddr = msg.executingContextAddress();
+
+                // If the interepter returned an exception - then everything should already be matched and we can return
+                if (res.reverted) {
+                    sol.assert(
+                        this.highLevelTrace.length === 0,
+                        `High-level exception should be matched already if we got here`
+                    );
+                } else {
+                    // Otherwise we need to match the interpreter normal return with an EVM return
+                    const hlEvent = new SolReturnEvent(res);
+                    const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+                    assert(llEvent !== undefined, `Couldn't find a return event`);
+                    const hlAccount = this.state.get(calleeAccountAddr.toString());
+                    assert(
+                        hlAccount !== undefined,
+                        `Missing account for ${calleeAccountAddr.toString()}`
+                    );
+
+                    this.tryMatchObservableEvents(
+                        llEvent,
+                        this.lowLevelTrace[llEvent.idx],
+                        hlEvent,
+                        hlAccount
+                    );
+                }
+            } catch (e) {
+                if (
+                    !(
+                        e instanceof MisalignmentError ||
+                        e instanceof MatchedInfiniteLoop ||
+                        (e instanceof Unsupported && e.node instanceof sol.InlineAssembly)
+                    )
+                ) {
+                    throw e;
+                }
+
+                // For MatchedInfiniteLoop we have a known result as we matched an OoG or stack overflow and can return
+                if (e instanceof MatchedInfiniteLoop) {
+                    res = {
+                        reverted: true,
+                        data: new Uint8Array()
+                    };
+                } else if (e instanceof Unsupported) {
+                    // For unsupported inline assembly - add misalignment segment and continue in no-src mode
+                    const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+                    assert(llEvent !== undefined, `Couldn't find a return event`);
+                    this.addSegment("misaligned:inline_asm", llEvent, undefined, undefined);
+                    this.curMode = "misaligned:earlier";
+                    res = undefined;
+                } else {
+                    // For OoG/Error misalignment - add misalignment segment and continue in no-src mode
+                    const segType =
+                        e.llEvent instanceof EVMExceptionEvent &&
+                            e.llEvent.data.type === ExceptionType.OutOfGas
+                            ? "misaligned:out-of-gas"
+                            : "misaligned:error";
+                    // @todo add hlAccount info to MisalginmentError? Or otherwise get it from somewhere else? Or remove need for it?
+                    this.addSegment(segType, e.llEvent);
+                    this.curMode = "misaligned:earlier";
+                    res = undefined;
+                }
+            }
+        } else {
+            this.curMode = "no-source";
+            const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+            assert(llEvent !== undefined, `Couldn't find a return event`);
+            this.addSegment(this.curMode, llEvent, undefined, undefined);
+        }
+
+        // We have a known result for this execution context from interpretation - just restore curMode and return it
+        if (res !== undefined) {
+            this.curMode = oldCurMode;
             return res;
         }
 
-        let res: CallResult;
+        // @todo if curMode is `misaligned:inline_asm` since we added a segment for the misalignment, check that we aren't already at the return
 
-        try {
-            res = super.execMsg(msg);
-        } catch (e) {
-            if (
-                !(
-                    e instanceof MisalignmentError ||
-                    e instanceof MatchedInfiniteLoop ||
-                    (e instanceof Unsupported && e.node instanceof sol.InlineAssembly)
-                )
+        // 5. Else if this is a call to a contract without AST, or interpretation failed,
+
+        // 5.1 Step through each observable event in the LL trace, adding an appropriate(according to curMode) segment
+        // Note that we already have a no-source/misalignment segment upon start of the loop to look at.
+        while (this.currentLLIdx < this.lowLevelTrace.length) {
+            const curEvent = this.alignedTraces[this.alignedTraces.length - 1].llEndEvent;
+            const step = this.lowLevelTrace[curEvent.idx];
+
+            if (curEvent instanceof EVMCallEvent || curEvent instanceof EVMCreateEvent) {
+                // 5.2 If its a * CALL recusirvely call execMsg()
+                this.updateStateFromPrevLLStep();
+                res = this.execMsg(makeSolMessageFromCallCreateStep(step), true);
+
+                if (this.currentLLIdx >= this.lowLevelTrace.length) {
+                    this.curMode = oldCurMode;
+                    return res;
+                }
+            } else if (
+                curEvent instanceof EVMReturnEvent ||
+                curEvent instanceof EVMExceptionEvent
             ) {
-                throw e;
+                // 5.3 If its a RETURN / STOP / Exception - return from this context
+                const resFromStep = makeCallResultFromStep(step);
+                this.updateStateFromPrevLLStep();
+
+                this.curMode = oldCurMode;
+                return resFromStep;
+            } else if (curEvent instanceof EVMEmitEvent || curEvent instanceof EVMGasLeft) {
+                // 5.5 If its an Event / Gasleft - nothing to do
+            } else {
+                nyi(`Unknown EVM event type ${curEvent.constructor.name}`);
             }
 
-            if (e instanceof MisalignmentError || e instanceof Unsupported) {
-                const isInlineAsm =
-                    e instanceof Unsupported && e.node instanceof sol.InlineAssembly;
-                const [, solEvent] = this.reSyncAtDepth(callerDepth, isInlineAsm);
-                return solEvent instanceof SolReturnEvent
-                    ? solEvent.data
-                    : { reverted: true, data: solEvent.data as Uint8Array };
-            }
+            // Find next evm observable event and add the misaligned/no-source segment
+            const nextEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
+            this.expect(nextEvent !== undefined, `Ran out of the trace`);
 
-            // Matched a too-long execution in the interpreter with an out-of-gas or stack overflow exception
-            res = {
-                reverted: true,
-                data: new Uint8Array()
-            };
+            this.addSegment(this.curMode, nextEvent);
         }
 
-        if (res.reverted) {
-            sol.assert(
-                this.highLevelTrace.length === 0,
-                `High-level exception should be matched already if we got here`
-            );
-            return res;
-        }
+        const curEvent = this.alignedTraces[this.alignedTraces.length - 1].llEndEvent;
+        this.expect(curEvent instanceof EVMReturnEvent || curEvent instanceof EVMExceptionEvent);
+        const resFromStep = makeCallResultFromStep(this.lowLevelTrace[curEvent.idx]);
+        this.updateStateFromPrevLLStep();
 
-        // Special case - call to a contract with no code succeeds, but has no corresponding RETURN instruction
-        if (
-            this.currentLLIdx === calleeStartIdx &&
-            this.currentLLIdx > 0 &&
-            isCall(this.lowLevelTrace[this.currentLLIdx - 1]) &&
-            this.lowLevelTrace[this.currentLLIdx - 1].depth ===
-                this.lowLevelTrace[this.currentLLIdx].depth
-        ) {
-            // This should push an empty low-level and high-level traces and leave currentLLIdx unchanged
-            this.addAlignedSegment(
-                new EVMReturnNoContractEvent(
-                    this.currentLLIdx - 1,
-                    this.lowLevelTrace[this.currentLLIdx - 1]
-                ),
-                new SolReturnEvent(res)
-            );
-
-            return res;
-        }
-
-        const hlEvent = new SolReturnEvent(res);
-        const llEvent = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
-        assert(llEvent !== undefined, `Couldn't find a return event`);
-
-        const calleeAccountAddr =
-            msg.delegatingContract !== undefined
-                ? msg.delegatingContract
-                : res.newContract
-                  ? res.newContract
-                  : msg.to;
-
-        const hlAccount = this.state.get(calleeAccountAddr.toString());
-        assert(hlAccount !== undefined, `Missing account for ${calleeAccountAddr.toString()}`);
-
-        try {
-            this.tryMatchObservableEvents(
-                llEvent,
-                this.lowLevelTrace[llEvent.idx],
-                hlEvent,
-                hlAccount
-            );
-        } catch (e) {
-            // Note that Unsuported is not an option for e here as `tryMatchObservableEvents` does not invoke the interpreter
-            if (!(e instanceof MisalignmentError)) {
-                throw e;
-            }
-
-            const [, solEvent] = this.reSyncAtDepth(callerDepth, false);
-            return solEvent instanceof SolReturnEvent
-                ? solEvent.data
-                : { reverted: true, data: solEvent.data as Uint8Array };
-        }
-
-        return res;
+        this.curMode = oldCurMode;
+        return resFromStep;
     }
 
     /**
@@ -538,10 +471,7 @@ export class AlignedTraceBuilder extends BaseEEI {
         const nextEvt = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
         const endIdx = nextEvt === undefined ? this.lowLevelTrace.length : nextEvt.idx;
 
-        for (let i = this.currentLLIdx; i < endIdx; i++) {
-            if (i === 0) {
-                continue;
-            }
+        for (let i = this.currentLLIdx + 1; i <= min(endIdx, this.lowLevelTrace.length - 1); i++) {
             const lastStep = this.lowLevelTrace[i - 1];
             if (lastStep.op.opcode !== OPCODES.GAS) {
                 continue;
@@ -602,7 +532,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             emit: function (interp: Interpreter, state: State, evt: EventDesc): void {
                 interp.expect(
                     interp.curNode instanceof sol.EmitStatement ||
-                        interp.curNode instanceof sol.FunctionCall,
+                    interp.curNode instanceof sol.FunctionCall,
                     `Unexpected event emit node ${interp.curNode.constructor.name}`
                 );
                 const call =
@@ -645,7 +575,7 @@ export class AlignedTraceBuilder extends BaseEEI {
         };
 
         this.addVisitor(visitor);
-        this.execMsgNoSource(this.msg, 0);
+        this.execMsg(this.msg, true);
 
         return [this.alignedTraces, this.state];
     }

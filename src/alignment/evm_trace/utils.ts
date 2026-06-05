@@ -17,7 +17,7 @@ import { stateManagerToAccountInfo } from "./transformers";
  * @todo move to sol-dbg
  */
 export function isOutOfGas(step: BasicStepInfo): boolean {
-    return step.gasCost > step.gas;
+    return step.dynamicGasCost > step.gas;
 }
 
 // @todo move to sol-dbg

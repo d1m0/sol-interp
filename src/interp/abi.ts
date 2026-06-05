@@ -306,9 +306,9 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
         } else if (type.toType instanceof rtt.StringType) {
             sol.assert(
                 val instanceof rtt.BytesMemView ||
-                    val instanceof rtt.BytesStorageView ||
-                    val instanceof rtt.BytesCalldataView ||
-                    val instanceof rtt.BytesSliceCalldataView,
+                val instanceof rtt.BytesStorageView ||
+                val instanceof rtt.BytesCalldataView ||
+                val instanceof rtt.BytesSliceCalldataView,
                 ``
             );
             const bytes = decodeView(val, state);
@@ -363,7 +363,8 @@ export function encodePacked(vs: Value[], ts: BaseInterpType[], state: State): U
             const arrVal = decodeView(val as unknown as View, state);
             const memView = PointerMemView.allocMemFor(arrVal, type.toType, memAlloc);
             memView.encode(arrVal, memAlloc.memory, memAlloc);
-            els.push(memAlloc.memory.slice(0x80));
+            // Get the array contents minus the length
+            els.push(memAlloc.memory.slice(Number(memView.offset + 32n)));
         } else {
             els.push(encodePackedSingle(val, type, state));
         }

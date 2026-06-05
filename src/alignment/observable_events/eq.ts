@@ -36,17 +36,11 @@ function msgDataEq(hlData: Uint8Array, llData: Uint8Array): boolean {
         }
     }
 
-    for (let i = hlData.length; i < llData.length; i++) {
-        if (llData[i] !== 0) {
-            return false;
-        }
-    }
-
-    return true;
+    return isAllZeroes(llData, hlData.length, llData.length)
 }
 
-function isAllZeroes(b: Uint8Array): boolean {
-    for (let i = 0; i < b.length; i++) {
+function isAllZeroes(b: Uint8Array, start = 0, end = b.length): boolean {
+    for (let i = start; i < end; i++) {
         if (b[i] !== 0) {
             return false;
         }
@@ -105,6 +99,16 @@ function eventsEq(llEvent: EventDesc, hlEvent: EventDesc): boolean {
         }
     }
 
+    // Sometimes we have extra 0 bytes in the hlEvent payload. Tracked under #88
+    if (hlEvent.payload.length > llEvent.payload.length) {
+        if (!equalsBytes(llEvent.payload, hlEvent.payload.slice(0, llEvent.payload.length))) {
+            return false;
+        }
+
+        const extraBytes = hlEvent.payload.slice(llEvent.payload.length);
+        return isAllZeroes(extraBytes);
+    }
+
     return equalsBytes(llEvent.payload, hlEvent.payload);
 }
 
@@ -124,7 +128,7 @@ export function eventsMatch(
         const llData = llEvent.data;
         const hlData = hlEvent.data;
 
-        const hlAddress = hlData.delegatingContract ? hlData.delegatingContract : hlData.to;
+        const hlAddress = hlData.executingContextAddress();
         const hlCodeAddress = hlData.to;
 
         assert(

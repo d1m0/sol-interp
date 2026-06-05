@@ -42,6 +42,13 @@ import { sleep } from "./utils";
         }
     }
 
+    // Txs that currently cause OoM
+    const skipSet = new Set<string>([
+        "0x3bc7756d3ae0367c774a9eec7e65c388cecf691c066e763c4d88f5f64a47bcb9",
+        "0x386769acb1f7e97a6780de6b82067db6e4f610fab86101aa6a1a9a71d5eb2ba5",
+        "0xa2266d846b719240d7076384afcd8dc506142d96de62daa358a73f1bf7abeab7"
+    ]);
+
     if (opts.blockNums) {
         for (const blockNum of opts.blockNums) {
             try {
@@ -49,6 +56,10 @@ import { sleep } from "./utils";
                     opts.quicknodeEndpoint,
                     Number(blockNum)
                 )) {
+                    if (skipSet.has(txReplayInfo.txHash)) {
+                        console.error(`Skipping ${txReplayInfo.txHash}`);
+                        continue;
+                    }
                     try {
                         const [, alignedTrace] = await replayMainnetTX(
                             txReplayInfo,
@@ -58,8 +69,8 @@ import { sleep } from "./utils";
                             Number(opts.maxNumSteps),
                             opts.dumpSources
                         );
+
                         for (const p of alignedTrace) {
-                            record(`segment`, null, false);
                             record(`segment:${p.type}`, null, false);
                         }
                     } catch (e) {

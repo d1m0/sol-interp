@@ -1,5 +1,5 @@
 import { Value, ImmMap, typeIdToRuntimeType, EventDesc } from "sol-dbg";
-import { EmitStep, FixedSetBlockManager, InterpEEI } from "../../src";
+import { EmitStep, FixedSetBlockManager, InterpEEI, SolMessage, SolMessageType } from "../../src";
 import * as sol from "solc-typed-ast";
 import * as ethABI from "web3-eth-abi";
 import { loadSamples, SampleInfo } from "./utils";
@@ -234,17 +234,9 @@ describe("Simple function call tests", () => {
                 hexToBytes(ethABI.encodeParameters(argTs, argVals) as `0x${string}`)
             );
 
-            const res = chain.execMsg({
-                from: SENDER,
-                to: RECEIVER,
-                delegatingContract: undefined,
-                data,
-                gas: 0n,
-                value: 0n,
-                salt: undefined,
-                isStaticCall: false,
-                depth: 0
-            });
+            const res = chain.execMsg(
+                SolMessage.testMessage(SolMessageType.CALL, SENDER, RECEIVER, data, 0n, 0n)
+            );
 
             if (expectedReturns instanceof Array) {
                 expect(res.reverted).toBeFalsy();

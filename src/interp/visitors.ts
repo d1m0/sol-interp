@@ -12,9 +12,9 @@ import {
     ExtReturnStep,
     Trace
 } from "./step";
-import { EventDesc, ZERO_ADDRESS } from "sol-dbg";
+import { EventDesc } from "sol-dbg";
 import { getThis } from "./utils";
-import { CallResult, SolMessage } from "./env";
+import { CallResult, SolMessage, SolMessageType } from "./env";
 
 export interface InterpVisitor {
     call(interp: Interpreter, state: State, msg: SolMessage): void;
@@ -43,7 +43,7 @@ export class TraceVisitor implements InterpVisitor {
             data
         };
 
-        if (state.msg.to.equals(ZERO_ADDRESS)) {
+        if (state.msg.type === SolMessageType.CREATE) {
             res.newContract = getThis(state);
         }
 

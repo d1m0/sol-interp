@@ -1,18 +1,39 @@
 {
-    "roots": ["<rootDir>"],
-    "testMatch": ["**/test/**/*.spec.ts"],
-    "moduleDirectories": ["node_modules"],
-    "moduleNameMapper": {
-    },
+    "roots": [
+        "<rootDir>"
+    ],
+    "testMatch": [
+        "**/test/**/*.spec.ts"
+    ],
+    "moduleDirectories": [
+        "node_modules"
+    ],
+    "transformIgnorePatterns": [
+        "/node_modules/(?!@noble)/"
+    ],
     "transform": {
-        "^.+\\.ts$": "ts-jest"
+        "^.+\\.ts$": [
+            "ts-jest",
+            {
+                "useESM": false,
+                "tsconfig": "tsconfig.json"
+            }
+        ],
+        "^.*@noble/.*\\.js$": "babel-jest"
     },
-
     "testTimeout": 2000,
     "verbose": true,
-
-    "coveragePathIgnorePatterns": ["/node_modules/", "/test/", "/coverage/", "/.compiler_cache/"],
-    "coverageReporters": ["text", "text-summary", "lcov"],
+    "coveragePathIgnorePatterns": [
+        "/node_modules/",
+        "/test/",
+        "/coverage/",
+        "/.compiler_cache/"
+    ],
+    "coverageReporters": [
+        "text",
+        "text-summary",
+        "lcov"
+    ],
     "coverageThreshold": {
         "global": {
             "statements": 85,

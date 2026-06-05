@@ -7,19 +7,23 @@ import {
     mustReadMem,
     OPCODES,
     OpInfo,
-    wordToAddress
+    wordToAddress,
+    ZERO_ADDRESS
 } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import * as sol from "solc-typed-ast";
 import { PrecomiledAddresses } from "../../utils";
+import { TypedTransaction } from "@ethereumjs/tx";
+import { CreateInfo, WithCreateInfo } from "./create";
 
 /**
  * Interface with additional data regarding a *CALL* op
  */
 export interface CallInfo {
-    address: Address; // Target contract address
+    address: Address; // Target contract address (for delegate calls the address of the account whose storage we are modifying)
     codeAddress: Address; // Address of the executing code (only different from address for delegate calls)
-    value: bigint | undefined; // value sent. undefined for staticcall
+    sender: Address; // Sender is the current contract for everything but DELEGATECALL. DELEGATECALL preserves current sender
+    value: bigint; // value sent. Must be 0 for staticcall. Must forward current value for delegatecalls
     gas: bigint; // gas forwarded
     msgData: Uint8Array; // msg data
     nonce: bigint; // caller nonce
@@ -38,14 +42,51 @@ const CALL_OPS = new Set([
     OPCODES.STATICCALL
 ]);
 
+function getRootCallInfo(tx: TypedTransaction, s: BasicStepInfo & OpInfo): CallInfo {
+    return {
+        address: tx.to === undefined ? ZERO_ADDRESS : tx.to,
+        codeAddress: s.address,
+        sender: tx.getSenderAddress(),
+        value: tx.value,
+        gas: tx.gasLimit,
+        msgData: tx.data,
+        nonce: tx.nonce,
+        callToNoCodeAccount: false,
+        isPrecompile: false
+    };
+}
+
+function getCallOrCreateInfoAtStep(
+    idx: number,
+    trace: Array<LowerStepT & WithCallInfo>,
+    tx: TypedTransaction
+): CallInfo | CreateInfo {
+    if (idx < 0) {
+        return getRootCallInfo(tx, trace[0]);
+    }
+
+    const step = trace[idx];
+    sol.assert(step !== undefined, ``);
+
+    if (step.callInfo) {
+        return step.callInfo;
+    }
+
+    sol.assert(step.createInfo !== undefined, ``);
+    return step.createInfo;
+}
+
+type LowerStepT = object & BasicStepInfo & OpInfo & WithCreateInfo;
+
 /**
  * Adds call info for steps that are about to do an external call
  */
-export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
+export async function addCallInfo<T extends LowerStepT>(
     vm: VM,
     step: InterpreterStep,
     state: T,
     trace: Array<T & WithCallInfo>,
+    tx: TypedTransaction,
     callStack: number[]
 ): Promise<T & WithCallInfo> {
     const op = state.op;
@@ -56,6 +97,9 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
             callInfo: undefined
         };
     }
+
+    const lastCallStep = callStack[callStack.length - 1];
+    const curInfo = getCallOrCreateInfoAtStep(lastCallStep, trace, tx);
 
     callStack.push(trace.length);
 
@@ -75,6 +119,8 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
 
     if (op.opcode === OPCODES.CALL || op.opcode === OPCODES.CALLCODE) {
         value = bigEndianBufToBigint(state.evmStack[stackTop - 2]);
+    } else if (op.opcode === OPCODES.DELEGATECALL) {
+        value = curInfo.value;
     }
 
     const start = bigEndianBufToNumber(state.evmStack[stackTop - argStackOff]);
@@ -85,10 +131,13 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     const callerAccount = await vm.stateManager.getAccount(step.address);
     sol.assert(callerAccount !== undefined, ``);
 
+    const sender = op.opcode === OPCODES.DELEGATECALL ? curInfo.sender : step.address;
+
     const callInfo: CallInfo = {
         address,
         codeAddress,
         value,
+        sender,
         gas,
         msgData,
         nonce: callerAccount.nonce,
