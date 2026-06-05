@@ -12,7 +12,7 @@ import * as rtt from "sol-dbg";
 import { Allocator } from "sol-dbg";
 import { BuiltinFunction, Value } from "./value";
 import { ArtifactManager } from "./artifactManager";
-import { AccountInfo, SolMessage } from "./env";
+import { AccountInfo, SolMessage, SolMessageType } from "./env";
 import { Block, createBlock } from "@ethereumjs/block";
 import { createTx, TypedTransaction } from "@ethereumjs/tx";
 
@@ -59,17 +59,7 @@ export function makeConstantsEvalState(): State {
         partialDeployedBytecode: undefined,
         memory: memAllocator.memory,
         memAllocator,
-        msg: {
-            from: ZERO_ADDRESS,
-            to: ZERO_ADDRESS,
-            delegatingContract: undefined,
-            data: new Uint8Array(),
-            gas: 0n,
-            value: 0n,
-            salt: undefined,
-            isStaticCall: false,
-            depth: 0
-        },
+        msg: SolMessage.constantEvalMessage(),
         intCallStack: [],
         scope: undefined,
         constantsMap: new Map(),
@@ -88,7 +78,7 @@ export function makeStateForAccount(
     artifactManager: ArtifactManager,
     account: AccountInfo,
     codeAccount: AccountInfo | undefined,
-    storageReadOnly: boolean
+    msg: SolMessage
 ): State {
     const memAllocator = new DefaultAllocator();
     const contract = (codeAccount !== undefined ? codeAccount : account).contract;
@@ -105,28 +95,18 @@ export function makeStateForAccount(
         partialDeployedBytecode: undefined,
         memory: memAllocator.memory,
         memAllocator,
-        msg: {
-            from: ZERO_ADDRESS,
-            to: ZERO_ADDRESS,
-            delegatingContract: undefined,
-            data: new Uint8Array(),
-            gas: 0n,
-            value: 0n,
-            salt: undefined,
-            isStaticCall: false,
-            depth: 0
-        },
+        msg,
         intCallStack: [],
         scope: undefined,
         constantsMap: constantsMap,
-        storageReadOnly,
+        storageReadOnly: msg.type === SolMessageType.STATICCALL,
         block: createBlock(),
         tx: createTx({}),
         isConstantsEval: false
     };
 }
 
-export function makeStateWithConstants(
+export function makeTestStateWithConstants(
     artifactManager: ArtifactManager,
     contract: rtt.ContractInfo
 ): State {
@@ -141,7 +121,7 @@ export function makeStateWithConstants(
             nonce: 0n
         },
         undefined,
-        false
+        SolMessage.constantEvalMessage()
     );
 }
 

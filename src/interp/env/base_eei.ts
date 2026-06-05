@@ -2,18 +2,14 @@ import { Storage, ZERO_ADDRESS, ImmMap } from "sol-dbg";
 import { makeStateForAccount } from "../state";
 import { Interpreter } from "../interp";
 import { ArtifactManager } from "../artifactManager";
-import {
-    Address,
-    createAddressFromString,
-    createContractAddress,
-    createContractAddress2
-} from "@ethereumjs/util";
+import { Address, createAddressFromString } from "@ethereumjs/util";
 import { InterpVisitor } from "../visitors";
 import { ppAccount } from "../pp";
-import { AccountInfo, CallResult, EthereumEnvInterface, AccountMap, SolMessage } from "./types";
+import { AccountInfo, CallResult, EthereumEnvInterface, AccountMap } from "./types";
 import { Block } from "@ethereumjs/block";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { BlockManagerI } from "./block_manager";
+import { SolMessage } from "./message";
 
 export function ppChainState(state: AccountMap): string {
     const t: string[] = [];
@@ -37,10 +33,10 @@ export abstract class BaseEEI implements EthereumEnvInterface {
     constructor(
         public readonly artifactManager: ArtifactManager,
         initialState: AccountMap = ImmMap.fromEntries([]),
-        private readonly block: Block,
-        private readonly tx: TypedTransaction,
-        private readonly blockManager: BlockManagerI,
-        private readonly maxNumSteps: undefined | number = undefined
+        protected readonly block: Block,
+        protected readonly tx: TypedTransaction,
+        protected readonly blockManager: BlockManagerI,
+        protected readonly maxNumSteps: undefined | number = undefined
     ) {
         this.state = initialState;
         this.visitors = [];
@@ -61,13 +57,13 @@ export abstract class BaseEEI implements EthereumEnvInterface {
         return val === undefined
             ? val
             : {
-                  address: val.address,
-                  contract: val.contract,
-                  deployedBytecode: val.deployedBytecode,
-                  storage: val.storage,
-                  balance: val.balance,
-                  nonce: val.nonce
-              };
+                address: val.address,
+                contract: val.contract,
+                deployedBytecode: val.deployedBytecode,
+                storage: val.storage,
+                balance: val.balance,
+                nonce: val.nonce
+            };
     }
 
     getOrMakeAccount(address: string | Address): AccountInfo {
@@ -124,7 +120,7 @@ export abstract class BaseEEI implements EthereumEnvInterface {
 
     private getAccountForMessage(msg: SolMessage): AccountInfo {
         // Normal call
-        if (!msg.to.equals(ZERO_ADDRESS)) {
+        if (!msg.isCreation()) {
             let account = this.getAccount(msg.to);
 
             if (account === undefined) {
@@ -136,15 +132,10 @@ export abstract class BaseEEI implements EthereumEnvInterface {
         }
 
         // Contract creation - initialize a new empty account
-        const sender = this.getAccount(msg.from);
+        const sender = this.getAccount(msg.originatingContextAddress);
         this.expect(sender !== undefined);
 
-        let newAddress;
-        if (msg.salt === undefined) {
-            newAddress = createContractAddress(sender.address, sender.nonce - 1n);
-        } else {
-            newAddress = createContractAddress2(sender.address, msg.salt, msg.data);
-        }
+        const newAddress = msg.newContractAddress();
 
         const contract = this.artifactManager.getContractFromCreationBytecode(msg.data);
         this.expect(contract !== undefined);
@@ -167,12 +158,14 @@ export abstract class BaseEEI implements EthereumEnvInterface {
 
     execMsg(msg: SolMessage): CallResult {
         const checkpoint = this.state;
-        const fromAccount = this.getAccount(msg.from);
-        this.expect(fromAccount !== undefined, `No account for sender ${msg.from.toString()}`);
+        const fromAccount = this.getAccount(msg.originatingContextAddress);
+        this.expect(
+            fromAccount !== undefined,
+            `No account for sender ${msg.originatingContextAddress.toString()}`
+        );
+        const delegatingAddr = msg.delegatingContract();
         const delegatingAccount: AccountInfo | undefined =
-            msg.delegatingContract === undefined
-                ? undefined
-                : this.getAccount(msg.delegatingContract);
+            delegatingAddr === undefined ? undefined : this.getAccount(delegatingAddr);
 
         const valueSendingAccount =
             delegatingAccount !== undefined ? delegatingAccount : fromAccount;
@@ -226,7 +219,7 @@ export abstract class BaseEEI implements EthereumEnvInterface {
             this.artifactManager,
             delegatingAccount ? delegatingAccount : toAccount,
             delegatingAccount ? toAccount : undefined,
-            msg.isStaticCall
+            msg
         );
 
         interpState.block = this.block;

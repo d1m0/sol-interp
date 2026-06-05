@@ -25,7 +25,14 @@ import {
     abiValueToBaseValue,
     toABIEncodedType
 } from "../../src/interp/abi";
-import { CallResult, SolMessage, Trace, FixedSetBlockManager, InterpEEI } from "../../src";
+import {
+    CallResult,
+    SolMessage,
+    Trace,
+    FixedSetBlockManager,
+    InterpEEI,
+    SolMessageType
+} from "../../src";
 import { getGetterArgAndReturnTs } from "../../src/interp/utils";
 import { TraceVisitor } from "../../src/interp/visitors";
 import { createBlock } from "@ethereumjs/block";
@@ -220,7 +227,7 @@ export class TransactionSet {
         }
     }
 
-    messageFromStep(step: TransactionDesc): SolMessage {
+    messageFromStep(step: TransactionDesc, nonce: bigint): SolMessage {
         let to: Address | undefined;
 
         const [info, entrypoint] = this.getEntypoint(step);
@@ -243,17 +250,15 @@ export class TransactionSet {
             data = this.encodeCreateArgs(step.args, info);
         }
 
-        return {
-            from: SENDER,
+        return SolMessage.testMessage(
+            step.type === "deploy" ? SolMessageType.CREATE : SolMessageType.CALL,
+            SENDER,
             to,
-            delegatingContract: undefined,
             data,
-            gas: 0n,
-            value: step.value === undefined ? 0n : step.value,
-            salt: undefined,
-            isStaticCall: false,
-            depth: 0
-        };
+            0n,
+            step.value === undefined ? 0n : step.value,
+            nonce
+        );
     }
 
     ppStep(step: TransactionDesc): string {
@@ -265,8 +270,9 @@ export class TransactionSet {
     }
 
     run(): boolean {
+        let nonce = 0n;
         for (const step of this.steps) {
-            const msg = this.messageFromStep(step);
+            const msg = this.messageFromStep(step, nonce++);
             const [info, entrypoint] = this.getEntypoint(step);
             this.msgs.push(msg);
 
@@ -334,7 +340,7 @@ export class TransactionSet {
             gasLimit: "0xff0000",
             gasPrice: "0x1",
             input: bytesToHex(msg.data),
-            origin: msg.from.toString(),
+            origin: msg.sender.toString(),
             value: bigIntToHex(msg.value),
             blockCoinbase: "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0",
             blockDifficulty: "0xc",

@@ -42,7 +42,13 @@ import { sleep } from "./utils";
         }
     }
 
-    const allTouchedAddrs = new Set<string>();
+    // Txs that currently cause OoM
+    const skipSet = new Set<string>([
+        "0x3bc7756d3ae0367c774a9eec7e65c388cecf691c066e763c4d88f5f64a47bcb9",
+        "0x386769acb1f7e97a6780de6b82067db6e4f610fab86101aa6a1a9a71d5eb2ba5",
+        "0xa2266d846b719240d7076384afcd8dc506142d96de62daa358a73f1bf7abeab7"
+    ]);
+
     if (opts.blockNums) {
         for (const blockNum of opts.blockNums) {
             try {
@@ -50,15 +56,12 @@ import { sleep } from "./utils";
                     opts.quicknodeEndpoint,
                     Number(blockNum)
                 )) {
-                    if (
-                        txReplayInfo.txHash ===
-                        "0x3bc7756d3ae0367c774a9eec7e65c388cecf691c066e763c4d88f5f64a47bcb9"
-                    ) {
+                    if (skipSet.has(txReplayInfo.txHash)) {
                         console.error(`Skipping ${txReplayInfo.txHash}`);
                         continue;
                     }
                     try {
-                        const [, alignedTrace, addrToInfoM] = await replayMainnetTX(
+                        const [, alignedTrace] = await replayMainnetTX(
                             txReplayInfo,
                             opts.quicknodeEndpoint,
                             opts.etherscanKey,
@@ -66,10 +69,6 @@ import { sleep } from "./utils";
                             Number(opts.maxNumSteps),
                             opts.dumpSources
                         );
-
-                        for (const addr in addrToInfoM) {
-                            allTouchedAddrs.add(addr);
-                        }
 
                         for (const p of alignedTrace) {
                             record(`segment:${p.type}`, null, false);
@@ -88,6 +87,5 @@ import { sleep } from "./utils";
         }
     }
 
-    console.error(`${allTouchedAddrs.size} addrs touched total.`);
     dump(opts.stats ? opts.stats : "-");
 })();

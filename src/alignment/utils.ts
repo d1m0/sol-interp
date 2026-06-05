@@ -1,11 +1,5 @@
-import { BasicStepInfo, OPCODES, OpInfo, ZERO_ADDRESS } from "sol-dbg";
 import { CallResult, SolMessage } from "../interp";
-import {
-    WithCallInfo,
-    WithCreateInfo,
-    WithExceptionInfo,
-    WithReturnInfo
-} from "./evm_trace/transformers";
+import { WithExceptionInfo, WithReturnInfo } from "./evm_trace/transformers";
 import { assert } from "../utils";
 import { Address, createAddressFromBigInt } from "@ethereumjs/util";
 import { EVMStep } from "./evm_trace";
@@ -20,54 +14,50 @@ import {
     SolObservableEvent,
     SolReturnEvent
 } from "./observable_events";
+import { OPCODES } from "sol-dbg";
 
-export function makeSolMessageFromStep(
-    s: BasicStepInfo & OpInfo & WithCallInfo & WithCreateInfo
-): SolMessage {
-    let sender: Address;
-    let delegatingContract: Address | undefined;
-    let to: Address;
-    let data: Uint8Array;
-    let gas: bigint;
-    let value: bigint;
-    let salt: Uint8Array | undefined;
-    let isStaticCall: boolean;
-    const depth: number = s.depth;
-
+/**
+ * Build the SolMessage that will be created from a CREATE/*CALL step.
+ * Note that this is different from step.msg. `step.msg` is the `SolMessage` of the current caller context.
+ * This function returns the `SolMessage` of the callee context.
+ */
+export function makeSolMessageFromCallCreateStep(s: EVMStep): SolMessage {
     if (s.callInfo) {
-        sender = s.callInfo.sender;
-        delegatingContract =
-            s.op.opcode === OPCODES.DELEGATECALL || s.op.opcode === OPCODES.CALLCODE
-                ? s.address
-                : undefined;
-        to = s.callInfo.codeAddress;
-        data = s.callInfo.msgData;
-        gas = s.callInfo.gas;
-        value = s.callInfo.value;
-        salt = undefined;
-        isStaticCall = s.op.opcode === OPCODES.STATICCALL;
+        if (s.op.opcode === OPCODES.DELEGATECALL) {
+            return s.msg.delegatecall(s.callInfo.gas, s.callInfo.codeAddress, s.callInfo.msgData);
+        }
+
+        if (s.op.opcode === OPCODES.CALLCODE) {
+            return s.msg.callcode(
+                s.callInfo.gas,
+                s.callInfo.codeAddress,
+                s.callInfo.value,
+                s.callInfo.msgData
+            );
+        }
+
+        if (s.op.opcode === OPCODES.STATICCALL) {
+            return s.msg.staticcall(s.callInfo.gas, s.callInfo.codeAddress, s.callInfo.msgData);
+        }
+
+        assert(s.op.opcode === OPCODES.CALL, `Unknown call opcode ${s.op.mnemonic}`);
+
+        return s.msg.call(
+            s.callInfo.gas,
+            s.callInfo.codeAddress,
+            s.callInfo.value,
+            s.callInfo.msgData
+        );
     } else {
         assert(s.createInfo !== undefined, ``);
-        sender = s.address;
-        delegatingContract = undefined;
-        to = ZERO_ADDRESS;
-        data = s.createInfo.msgData;
-        gas = 0n;
-        value = s.createInfo.value === undefined ? 0n : s.createInfo.value;
-        salt = s.createInfo.salt;
-        isStaticCall = false;
+
+        return s.msg.create(
+            s.createInfo.value,
+            s.createInfo.salt,
+            s.createInfo.msgData,
+            s.createInfo.nonce
+        );
     }
-    return {
-        from: sender,
-        delegatingContract,
-        to,
-        data,
-        gas,
-        value,
-        salt,
-        isStaticCall,
-        depth
-    };
 }
 
 export function makeCallResultFromStep(s: WithReturnInfo & WithExceptionInfo): CallResult {

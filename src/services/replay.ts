@@ -33,7 +33,7 @@ import { basename, dirname, join, normalize } from "path";
 import { assert } from "../utils";
 import { keccak256 } from "ethereum-cryptography/keccak";
 import { bigIntToBuf, Storage } from "sol-dbg";
-import { bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
+import { bytesToHex, equalsBytes, hexToBigInt, hexToBytes } from "@ethereumjs/util";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -136,7 +136,7 @@ export async function replayMainnetTX(
     srcDumpDir?: string
 ): Promise<[ArtifactManager, AlignedTraces, Map<string, [ArtifactInfo, string]>]> {
     console.error(
-        `Replay TX ${txReplayInfo.txHash} in block ${(txReplayInfo.block.header as any).number}.`
+        `Replay TX ${txReplayInfo.txHash} in block ${hexToBigInt((txReplayInfo.block.header as any).number)}.`
     );
     record(`trace`, [txReplayInfo.blockHash, txReplayInfo.txHash]);
 

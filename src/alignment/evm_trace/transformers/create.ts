@@ -16,10 +16,11 @@ import { assert } from "../../../utils";
  */
 export interface CreateInfo {
     address: Address; // New contract address to be created
-    value: bigint | undefined; // value sent. undefined for staticcall
+    value: bigint; // value sent
     msgData: Uint8Array; // msg data
     salt: Uint8Array | undefined;
     nonce: bigint; // caller nonce
+    sender: Address;
 }
 
 export interface WithCreateInfo {
@@ -72,7 +73,8 @@ export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
         value,
         msgData,
         salt,
-        nonce: callerAccount.nonce
+        nonce: callerAccount.nonce,
+        sender: step.address
     };
 
     return {

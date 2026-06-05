@@ -8,9 +8,6 @@
     "moduleDirectories": [
         "node_modules"
     ],
-    "moduleNameMapper": {
-        "@ethereumjs/evm/dist/esm/common": "<rootDir>/node_modules/@ethereumjs/evm/dist/cjs/common"
-    },
     "transformIgnorePatterns": [
         "/node_modules/(?!@noble)/"
     ],

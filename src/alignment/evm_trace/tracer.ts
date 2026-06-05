@@ -16,6 +16,7 @@ import {
     addCreateInfo,
     addEventInfo,
     addExceptionInfo,
+    addMessage,
     addReturnInfo,
     CallInfo,
     CreateInfo,
@@ -30,6 +31,7 @@ import { addCodeInfo, CodeInfo } from "./transformers/code";
 import { StateManagerInterface } from "@ethereumjs/common";
 import { assert } from "../../utils";
 import { isOutOfGas } from "./utils";
+import { SolMessage } from "../../interp";
 
 /**
  * Annotated evm step struct used for aligning traces.
@@ -42,6 +44,7 @@ export interface EVMStep extends StepVMState {
     exceptionInfo: ExceptionInfo | undefined;
     snapshotInfo: SnapshotInfo | undefined;
     codeInfo: CodeInfo;
+    msg: SolMessage;
 }
 
 interface TracerContext {
@@ -101,7 +104,8 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
         const withExceptions = await addExceptionInfo(vm, step, withRet, trace, ctx.callStack);
         const withSnapshot = await addSnapshotInfo(vm, step, withExceptions, trace, tx);
         const withCode = await addCodeInfo(vm, step, withSnapshot, trace, tx);
+        const withMessage = await addMessage(vm, step, withCode, trace, tx);
 
-        return [withCode, ctx];
+        return [withMessage, ctx];
     }
 }

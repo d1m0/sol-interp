@@ -105,7 +105,7 @@ export function ppTrace(t: Trace, artifactManager: ArtifactManager): string {
             const [line, col] = artifactManager.getStartLoc(step.expr);
             return `[${line}:${col}]${indent}  eval ${printNode(step.expr)} -> ${ppLVorRV(step.val)}`;
         } else if (step instanceof ExtCallStep) {
-            const s = `[----:--]${indent}call ${step.msg.from.toString()} -> ${step.msg.to.toString()}`;
+            const s = `[----:--]${indent}call ${step.msg.originatingContextAddress.toString()} -> ${step.msg.to.toString()}`;
             indent += "  ";
             return s;
         } else if (step instanceof ExtReturnStep) {

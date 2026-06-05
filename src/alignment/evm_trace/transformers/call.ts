@@ -14,6 +14,7 @@ import { InterpreterStep } from "@ethereumjs/evm";
 import * as sol from "solc-typed-ast";
 import { PrecomiledAddresses } from "../../utils";
 import { TypedTransaction } from "@ethereumjs/tx";
+import { CreateInfo, WithCreateInfo } from "./create";
 
 /**
  * Interface with additional data regarding a *CALL* op
@@ -55,25 +56,32 @@ function getRootCallInfo(tx: TypedTransaction, s: BasicStepInfo & OpInfo): CallI
     };
 }
 
-function getCallInfoAtStep<T extends object & BasicStepInfo & OpInfo>(
+function getCallOrCreateInfoAtStep(
     idx: number,
-    trace: Array<T & WithCallInfo>,
+    trace: Array<LowerStepT & WithCallInfo>,
     tx: TypedTransaction
-): CallInfo {
+): CallInfo | CreateInfo {
     if (idx < 0) {
         return getRootCallInfo(tx, trace[0]);
     }
 
     const step = trace[idx];
-    sol.assert(step !== undefined && step.callInfo !== undefined, ``);
+    sol.assert(step !== undefined, ``);
 
-    return step.callInfo;
+    if (step.callInfo) {
+        return step.callInfo;
+    }
+
+    sol.assert(step.createInfo !== undefined, ``);
+    return step.createInfo;
 }
+
+type LowerStepT = object & BasicStepInfo & OpInfo & WithCreateInfo;
 
 /**
  * Adds call info for steps that are about to do an external call
  */
-export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
+export async function addCallInfo<T extends LowerStepT>(
     vm: VM,
     step: InterpreterStep,
     state: T,
@@ -91,7 +99,7 @@ export async function addCallInfo<T extends object & BasicStepInfo & OpInfo>(
     }
 
     const lastCallStep = callStack[callStack.length - 1];
-    const curInfo = getCallInfoAtStep(lastCallStep, trace, tx);
+    const curInfo = getCallOrCreateInfoAtStep(lastCallStep, trace, tx);
 
     callStack.push(trace.length);
 

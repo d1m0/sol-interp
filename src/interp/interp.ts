@@ -105,7 +105,6 @@ import {
     getLibraryLinkedAddress,
     getModifiers,
     getMsg,
-    getMsgSender,
     getRuntimeBytecode,
     getStateStorage,
     getThis,
@@ -2768,6 +2767,7 @@ export class Interpreter {
         let [to, , value, gas, salt] = getExternalCallComponents(callee);
         let data: Uint8Array;
         let isDelegateCall: boolean;
+        let isStaticCall: boolean;
 
         if (callee.target instanceof rtt.ExternalFunRef) {
             const astTarget = expr.vReferencedDeclaration;
@@ -2796,6 +2796,11 @@ export class Interpreter {
             const toContract = astTarget.vScope;
             this.expect(toContract instanceof sol.ContractDefinition);
             isDelegateCall = toContract.kind === sol.ContractKind.Library;
+            isStaticCall =
+                astTarget instanceof sol.FunctionDefinition &&
+                (astTarget.stateMutability === sol.FunctionStateMutability.View ||
+                    astTarget.stateMutability === sol.FunctionStateMutability.Pure ||
+                    astTarget.stateMutability === sol.FunctionStateMutability.Constant);
         } else if (callee.target instanceof NewCall) {
             const contract = this.ctx.locate((callee.target.type as sol.ContractTypeId).id);
             this.expect(contract instanceof sol.ContractDefinition);
@@ -2827,6 +2832,7 @@ export class Interpreter {
 
             data = concatBytes(creationBytecode, argData);
             isDelegateCall = false;
+            isStaticCall = false;
         } else {
             const args = expr.vArguments.map((arg) => this.eval(arg, state));
 
@@ -2858,25 +2864,34 @@ export class Interpreter {
                     this.expect(dataView instanceof View && dataView.type instanceof rtt.BytesType);
                     data = decodeView(dataView, state) as Uint8Array;
                 }
-
-                isDelegateCall = callee.callKind === "delegatecall";
             }
+
+            isDelegateCall = callee.callKind === "delegatecall";
+            isStaticCall = callee.callKind === "staticcall";
         }
 
         // If this is a delegate call we preserve msg.sender
-        const thisAddr = getThis(state);
+        let msg: SolMessage;
 
-        const msg: SolMessage = {
-            from: isDelegateCall ? getMsgSender(state) : thisAddr,
-            to,
-            delegatingContract: isDelegateCall ? thisAddr : undefined,
-            data,
-            gas: gas === undefined ? 0n : gas,
-            value: value === undefined ? 0n : value,
-            salt: salt,
-            isStaticCall: callee.callKind === "staticcall",
-            depth: state.msg.depth + 1
-        };
+        if (callee.callKind === "contract_deployment") {
+            msg = state.msg.create(
+                value === undefined ? 0n : value,
+                salt,
+                data,
+                state.account.nonce
+            );
+        } else if (isDelegateCall) {
+            msg = state.msg.delegatecall(gas === undefined ? 0n : gas, to, data);
+        } else if (isStaticCall) {
+            msg = state.msg.staticcall(gas === undefined ? 0n : gas, to, data);
+        } else {
+            msg = state.msg.call(
+                gas === undefined ? 0n : gas,
+                to,
+                value === undefined ? 0n : value,
+                data
+            );
+        }
 
         return this.makeMsgCall(msg, state);
     }

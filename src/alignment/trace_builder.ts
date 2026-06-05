@@ -4,13 +4,14 @@ import {
     CallResult,
     BaseEEI,
     SolMessage,
-    BlockManagerI
+    BlockManagerI,
+    SolMessageType
 } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { Block } from "@ethereumjs/block";
-import { ContractInfo, EventDesc, ImmMap, nyi, OPCODES, stackTop, ZERO_ADDRESS } from "sol-dbg";
+import { ContractInfo, EventDesc, ImmMap, min, nyi, OPCODES, stackTop, ZERO_ADDRESS } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError, Unsupported } from "../interp/exceptions";
@@ -37,26 +38,17 @@ import {
     SolObservableEvent,
     SolReturnEvent
 } from "./observable_events";
-import { makeCallResultFromStep, makeSolMessageFromStep } from "./utils";
+import { makeCallResultFromStep, makeSolMessageFromCallCreateStep } from "./utils";
 import { AlignedTraces, isMisalignmentPairType, PairTypes } from "./trace_pairs";
 import { bytesToBigInt, bytesToHex } from "@ethereumjs/util";
 import { ExceptionType } from "./evm_trace/transformers";
+import { record } from "../services";
 
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
  */
 export function makeSolMessage(tx: TypedTransaction): SolMessage {
-    return {
-        from: tx.getSenderAddress(),
-        delegatingContract: undefined,
-        to: tx.to === undefined ? ZERO_ADDRESS : tx.to,
-        data: tx.data,
-        gas: tx.gasLimit,
-        value: tx.value,
-        salt: undefined,
-        isStaticCall: false,
-        depth: 0
-    };
+    return SolMessage.fromTx(tx);
 }
 
 class MisalignmentError extends Error {
@@ -68,7 +60,7 @@ class MisalignmentError extends Error {
     }
 }
 
-class MatchedInfiniteLoop extends Error {}
+class MatchedInfiniteLoop extends Error { }
 
 export class AlignedTraceBuilder extends BaseEEI {
     highLevelTrace: BaseStep[] = [];
@@ -285,8 +277,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             assert(llEvent !== undefined, `Couldnt find next event at the start of execMsg`);
 
             if (this.curMode === "aligned") {
-                const callerAddress =
-                    msg.delegatingContract !== undefined ? msg.delegatingContract : msg.from;
+                const callerAddress = msg.originatingContextAddress;
                 callerAccount = this.state.get(callerAddress.toString());
 
                 hlEvent = msg.to.equals(ZERO_ADDRESS)
@@ -306,7 +297,7 @@ export class AlignedTraceBuilder extends BaseEEI {
 
         // 2. Handle calls to contracts with no state
         if (this.isCallToAccountWithNoCode(calleeFirstStep - 1)) {
-            const fromAccount = this.getAccount(msg.from);
+            const fromAccount = this.getAccount(msg.originatingContextAddress);
             this.expect(fromAccount !== undefined);
 
             const reverted = fromAccount.balance < msg.value;
@@ -344,12 +335,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             try {
                 res = super.execMsg(msg);
 
-                const calleeAccountAddr =
-                    msg.delegatingContract !== undefined
-                        ? msg.delegatingContract
-                        : res.newContract
-                          ? res.newContract
-                          : msg.to;
+                const calleeAccountAddr = msg.executingContextAddress();
 
                 // If the interepter returned an exception - then everything should already be matched and we can return
                 if (res.reverted) {
@@ -403,7 +389,7 @@ export class AlignedTraceBuilder extends BaseEEI {
                     // For OoG/Error misalignment - add misalignment segment and continue in no-src mode
                     const segType =
                         e.llEvent instanceof EVMExceptionEvent &&
-                        e.llEvent.data.type === ExceptionType.OutOfGas
+                            e.llEvent.data.type === ExceptionType.OutOfGas
                             ? "misaligned:out-of-gas"
                             : "misaligned:error";
                     // @todo add hlAccount info to MisalginmentError? Or otherwise get it from somewhere else? Or remove need for it?
@@ -437,9 +423,8 @@ export class AlignedTraceBuilder extends BaseEEI {
 
             if (curEvent instanceof EVMCallEvent || curEvent instanceof EVMCreateEvent) {
                 // 5.2 If its a * CALL recusirvely call execMsg()
-                const msg = makeSolMessageFromStep(step);
                 this.updateStateFromPrevLLStep();
-                res = this.execMsg(msg, true);
+                res = this.execMsg(makeSolMessageFromCallCreateStep(step), true);
 
                 if (this.currentLLIdx >= this.lowLevelTrace.length) {
                     this.curMode = oldCurMode;
@@ -486,10 +471,7 @@ export class AlignedTraceBuilder extends BaseEEI {
         const nextEvt = findNextEvent(this.lowLevelTrace, this.currentLLIdx);
         const endIdx = nextEvt === undefined ? this.lowLevelTrace.length : nextEvt.idx;
 
-        for (let i = this.currentLLIdx; i < endIdx; i++) {
-            if (i === 0) {
-                continue;
-            }
+        for (let i = this.currentLLIdx + 1; i <= min(endIdx, this.lowLevelTrace.length - 1); i++) {
             const lastStep = this.lowLevelTrace[i - 1];
             if (lastStep.op.opcode !== OPCODES.GAS) {
                 continue;
@@ -550,7 +532,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             emit: function (interp: Interpreter, state: State, evt: EventDesc): void {
                 interp.expect(
                     interp.curNode instanceof sol.EmitStatement ||
-                        interp.curNode instanceof sol.FunctionCall,
+                    interp.curNode instanceof sol.FunctionCall,
                     `Unexpected event emit node ${interp.curNode.constructor.name}`
                 );
                 const call =
