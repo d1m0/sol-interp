@@ -253,6 +253,11 @@ export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDes
 // Values that represent possible internal call targets. Currently just InteranalFunRef
 export type InternalCallTargetValue = InternalFunRef | CurriedVal;
 
+// Values that (along with additional context state) can be reduced to an
+// ExternalCallTargetValue This includes CurriedVal's (that contain additional
+// implicit arguments) and references to external library functions
+export type ReducibleToExternalCallTargetValue = ExternalCallTargetValue | CurriedVal | DefValue;
+
 export class LengthView extends rtt.BaseStorageView<bigint, rtt.IntType> {
     nextLoc(): [bigint, number] | undefined {
         throw new Error("Method not implemented.");
@@ -400,5 +405,17 @@ export function match<T extends ValueTypeConstructors>(
 export function isExternalCallTarget(v: any): v is ExternalCallTargetValue {
     return (
         v instanceof ExternalFunRef || v instanceof ExternalCallDescription || v instanceof NewCall
+    );
+}
+
+export function isReducibleToExternalCallTargetValue(
+    v: Value
+): v is ReducibleToExternalCallTargetValue {
+    return (
+        v instanceof CurriedVal ||
+        v instanceof rtt.ExternalFunRef ||
+        v instanceof NewCall ||
+        v instanceof ExternalCallDescription ||
+        v instanceof DefValue
     );
 }

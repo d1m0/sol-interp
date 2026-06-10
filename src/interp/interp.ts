@@ -67,7 +67,9 @@ import {
     NoneValue,
     SuperVal,
     idFunVal,
-    IdFunVal
+    IdFunVal,
+    isReducibleToExternalCallTargetValue,
+    ReducibleToExternalCallTargetValue
 } from "./value";
 import {
     Address,
@@ -1039,14 +1041,14 @@ export class Interpreter {
     }
 
     private execTryStatement(stmt: sol.TryStatement, state: State): ControlFlow {
-        const callee = this.coerceToExternallyCallable(
-            this.evalNP(stmt.vExternalCall.vExpression, state),
-            state
-        );
-        this.expect(callee !== undefined);
-        const res = this._evalMsgCall(stmt.vExternalCall, liftExtCalRef(callee), state);
+        const callee = this.evalNP(stmt.vExternalCall.vExpression, state);
+        this.expect(isReducibleToExternalCallTargetValue(callee));
+        const res = this._evalMsgCall(stmt.vExternalCall, callee, state);
 
-        const actualCallee = callee instanceof ExternalCallDescription ? callee.target : callee;
+        const callTraget = this.coerceToExternallyCallable(callee, state);
+        const actualCallee =
+            callTraget instanceof ExternalCallDescription ? callTraget.target : callTraget;
+
         this.expect(
             actualCallee instanceof NewCall || actualCallee instanceof rtt.ExternalFunRef,
             `Unexpected call target in try statement ${ppValue(callee)}`
@@ -2838,18 +2840,25 @@ export class Interpreter {
 
     private _evalMsgCall(
         expr: sol.FunctionCall,
-        callee: ExternalCallDescription,
+        callee: ReducibleToExternalCallTargetValue,
         state: State
     ): CallResult {
+        const extCallTarget: ExternalCallTargetValue | undefined = this.coerceToExternallyCallable(
+            callee,
+            state
+        );
+        this.expect(extCallTarget !== undefined);
+        const extCallDesc = liftExtCalRef(extCallTarget);
+
         // eslint-disable-next-line prefer-const
-        let [to, , value, gas, salt] = getExternalCallComponents(callee);
+        let [to, , value, gas, salt] = getExternalCallComponents(extCallDesc);
         let data: Uint8Array;
         let isDelegateCall: boolean;
         let isStaticCall: boolean;
 
-        if (callee.target instanceof rtt.ExternalFunRef) {
+        if (extCallDesc.target instanceof rtt.ExternalFunRef) {
             const astTarget = expr.vReferencedDeclaration;
-            const selector = callee.target.selector;
+            const selector = extCallDesc.target.selector;
             let argTs: rtt.BaseRuntimeType[];
 
             if (astTarget instanceof sol.FunctionDefinition) {
@@ -2864,8 +2873,13 @@ export class Interpreter {
             }
 
             // Next compute the msg data
-            const argVs = expr.vArguments.map((arg) => this.eval(arg, state));
-            const castArgVs = this.castNTo(argVs, argTs, state);
+            const args = expr.vArguments.map((arg) => this.eval(arg, state));
+
+            if (callee instanceof CurriedVal) {
+                args.unshift(...callee.args);
+            }
+
+            const castArgVs = this.castNTo(args, argTs, state);
             const argData = encode(castArgVs, argTs, state);
 
             this.expect(argData instanceof Uint8Array);
@@ -2879,10 +2893,14 @@ export class Interpreter {
                 (astTarget.stateMutability === sol.FunctionStateMutability.View ||
                     astTarget.stateMutability === sol.FunctionStateMutability.Pure ||
                     astTarget.stateMutability === sol.FunctionStateMutability.Constant);
-        } else if (callee.target instanceof NewCall) {
-            const contract = this.ctx.locate((callee.target.type as sol.ContractTypeId).id);
+        } else if (extCallDesc.target instanceof NewCall) {
+            const contract = this.ctx.locate((extCallDesc.target.type as sol.ContractTypeId).id);
             this.expect(contract instanceof sol.ContractDefinition);
             const args = expr.vArguments.map((arg) => this.eval(arg, state));
+
+            if (callee instanceof CurriedVal) {
+                args.unshift(...callee.args);
+            }
 
             let argTs: BaseInterpType[] = [];
 
@@ -2914,7 +2932,7 @@ export class Interpreter {
         } else {
             const args = expr.vArguments.map((arg) => this.eval(arg, state));
 
-            if (callee.callKind === "send" || callee.callKind === "transfer") {
+            if (extCallDesc.callKind === "send" || extCallDesc.callKind === "transfer") {
                 this.expect(
                     args.length === 1 && typeof args[0] === "bigint",
                     `Unexpected arguments to *call builtin`
@@ -2944,14 +2962,14 @@ export class Interpreter {
                 }
             }
 
-            isDelegateCall = callee.callKind === "delegatecall";
-            isStaticCall = callee.callKind === "staticcall";
+            isDelegateCall = extCallDesc.callKind === "delegatecall";
+            isStaticCall = extCallDesc.callKind === "staticcall";
         }
 
         // If this is a delegate call we preserve msg.sender
         let msg: SolMessage;
 
-        if (callee.callKind === "contract_deployment") {
+        if (extCallDesc.callKind === "contract_deployment") {
             msg = state.msg.create(
                 value === undefined ? 0n : value,
                 salt,
@@ -2996,11 +3014,8 @@ export class Interpreter {
 
     evalExternalCall(expr: sol.FunctionCall, state: State): Value {
         const calleeVal = this.evalNP(expr.vExpression, state);
-        const extCallee = this.coerceToExternallyCallable(calleeVal, state);
-
-        this.expect(extCallee !== undefined);
-        const callee = liftExtCalRef(extCallee);
-        const res = this._evalMsgCall(expr, callee, state);
+        this.expect(isReducibleToExternalCallTargetValue(calleeVal));
+        const res = this._evalMsgCall(expr, calleeVal, state);
         const astTarget = expr.vReferencedDeclaration;
         this.expect(astTarget !== undefined);
 
@@ -3202,7 +3217,7 @@ export class Interpreter {
 
         // Contract Creation
         if (astT instanceof sol.ContractTypeId) {
-            const res = this._evalMsgCall(expr, liftExtCalRef(callee), state);
+            const res = this._evalMsgCall(expr, callee, state);
 
             if (res.reverted) {
                 this.runtimeError(RuntimeError, state, "Contract creation reverted", res.data);
