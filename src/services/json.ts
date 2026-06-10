@@ -70,7 +70,9 @@ export abstract class JSONCache<T> {
             res = await res;
         }
 
-        fse.writeJsonSync(cachedFilePath, res);
+        if (res !== undefined) {
+            fse.writeJsonSync(cachedFilePath, res);
+        }
 
         return res;
     }

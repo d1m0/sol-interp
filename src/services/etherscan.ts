@@ -416,14 +416,10 @@ export async function getArtifacts(
 
         console.error(`Try fetching source for ${strAddr}:`);
         const art = await artifactCache.get(addr, apiKey);
-        if (
-            art.artifact !== undefined &&
-            art.contractName !== undefined &&
-            art.fileName !== undefined
-        ) {
+        if (art !== undefined) {
             assert(
                 art.fileName in art.artifact.contracts &&
-                    art.contractName in art.artifact.contracts[art.fileName],
+                art.contractName in art.artifact.contracts[art.fileName],
                 `Missing info for main contract {0}:{1}`,
                 art.fileName,
                 art.contractName
