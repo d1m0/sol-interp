@@ -191,7 +191,7 @@ export class CurriedVal {
     constructor(
         public readonly args: Value[],
         public readonly argTs: BaseInterpType[],
-        public readonly target: InternalFunRef | BuiltinFunction
+        public readonly target: InternalFunRef | ExternalFunRef | BuiltinFunction
     ) {
         sol.assert(args.length === argTs.length, `Expected same number of args and types`);
     }

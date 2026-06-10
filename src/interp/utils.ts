@@ -32,10 +32,10 @@ import {
 import { AccountInfo, CallResult, EthereumEnvInterface } from "./env";
 import { BaseInterpType, typeIdToRuntimeType } from "./types";
 import { Address, setLengthLeft } from "@ethereumjs/util";
-import { decodeLinkMap } from "sol-dbg/dist/debug/decoding/utils";
 import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
 import { Block } from "@ethereumjs/block";
+import { ArtifactManager } from "./artifactManager";
 const shajs = require("sha.js");
 
 export function castBytesViewToString<
@@ -200,7 +200,7 @@ export function getBytecodeInfo(state: State): [rtt.BytecodeInfo, Uint8Array] {
     const info = state.account.contract;
     sol.assert(info !== undefined, ``);
 
-    if (state.msg.to.equals(rtt.ZERO_ADDRESS)) {
+    if (state.msg.isCreation()) {
         sol.assert(info.bytecode !== undefined, ``);
         const creationBytecode = getMsg(state).slice(0, info.bytecode.bytecode.length);
         return [info.bytecode, creationBytecode];
@@ -250,15 +250,12 @@ export function getRuntimeBytecode(state: State): Uint8Array {
  */
 export function getLibraryLinkedAddress(
     lib: sol.ContractDefinition,
-    state: State
+    state: State,
+    artifactManager: ArtifactManager
 ): Address | undefined {
-    sol.assert(lib.kind === sol.ContractKind.Library, ``);
-    const libId = `${lib.vScope.sourceEntryKey}:${lib.name}`;
-    const [bytecodeInfo, bytecode] = getBytecodeInfo(state);
-    const linkMap = decodeLinkMap(bytecodeInfo, bytecode);
-    const addr = linkMap.get(libId);
-
-    return addr;
+    const contractInfo = getCodeContractInfo(state);
+    const [, bytecode] = getBytecodeInfo(state);
+    return artifactManager.getLibraryAddress(lib, contractInfo, state.msg.isCreation(), bytecode);
 }
 
 /**

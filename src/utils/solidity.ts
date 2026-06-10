@@ -7,3 +7,28 @@ export function isBlock04Scope(block: sol.Block | sol.UncheckedBlock): boolean {
         block.parent instanceof sol.ModifierDefinition
     );
 }
+
+export function getActuallCalleeExpr(callee: sol.Expression): sol.Expression {
+    if (callee instanceof sol.FunctionCallOptions) {
+        return getActuallCalleeExpr(callee.vExpression);
+    }
+
+    if (callee instanceof sol.FunctionCall) {
+        sol.assert(
+            callee.vFunctionName === "gas" ||
+                callee.vFunctionName === "value" ||
+                callee.vFunctionName === "salt",
+            ``
+        );
+        sol.assert(callee.vExpression instanceof sol.MemberAccess, ``);
+        return getActuallCalleeExpr(callee.vExpression.vExpression);
+    }
+
+    if (callee instanceof sol.TupleExpression && callee.vOriginalComponents.length === 1) {
+        const comp = callee.vOriginalComponents[0];
+        sol.assert(comp !== null, ``);
+        return getActuallCalleeExpr(comp);
+    }
+
+    return callee;
+}

@@ -30,15 +30,19 @@ import { sleep } from "./utils";
 
     if (opts.txHashes) {
         for (const hash of opts.txHashes) {
-            const info = await getTXReplayInfo(opts.quicknodeEndpoint, hash);
-            await replayMainnetTX(
-                info,
-                opts.quicknodeEndpoint,
-                opts.etherscanKey,
-                opts.addState,
-                Number(opts.maxNumSteps),
-                opts.dumpSources
-            );
+            try {
+                const info = await getTXReplayInfo(opts.quicknodeEndpoint, hash);
+                await replayMainnetTX(
+                    info,
+                    opts.quicknodeEndpoint,
+                    opts.etherscanKey,
+                    opts.addState,
+                    Number(opts.maxNumSteps),
+                    opts.dumpSources
+                );
+            } catch (e) {
+                record(`${(e as any).constructor.name}:${(e as any).message}`, hash);
+            }
         }
     }
 
@@ -74,10 +78,10 @@ import { sleep } from "./utils";
                             record(`segment:${p.type}`, null, false);
                         }
                     } catch (e) {
-                        record(`${(e as any).constructor.name}:${(e as any).message}`, [
-                            txReplayInfo.blockHash,
+                        record(
+                            `${(e as any).constructor.name}:${(e as any).message}`,
                             txReplayInfo.txHash
-                        ]);
+                        );
                     }
                 }
             } catch (e) {

@@ -6,16 +6,17 @@ import {
     tryMatchERC1167,
     record,
     recordDistr,
-    getEtherscanContractCreation
+    getEtherscanContractCreation,
+    CompiledArtifact
 } from "../services";
 import {
     ArtifactInfo,
     ContractInfo,
     ImmMap,
-    PartialSolcOutput,
     zip3,
     bigEndianBufToBigint,
-    readInt16Be
+    readInt16Be,
+    zip
 } from "sol-dbg";
 import { EVMStep, replayEVM } from "../alignment/evm_trace";
 import {
@@ -33,7 +34,13 @@ import { basename, dirname, join, normalize } from "path";
 import { assert } from "../utils";
 import { keccak256 } from "ethereum-cryptography/keccak";
 import { bigIntToBuf, Storage } from "sol-dbg";
-import { bytesToHex, equalsBytes, hexToBigInt, hexToBytes } from "@ethereumjs/util";
+import {
+    bytesToHex,
+    createAddressFromString,
+    equalsBytes,
+    hexToBigInt,
+    hexToBytes
+} from "@ethereumjs/util";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -175,9 +182,10 @@ export async function replayMainnetTX(
     const addrToContract = await getArtifacts(nonProxyAddrsTouched, etherscanKey);
     const toDelete = new Set<string>();
 
-    for (const [addr, [artifact, mainContractKey]] of addrToContract) {
-        const [fileName, contractName] = mainContractKey.split(":");
-        const mainContract = artifact.contracts[fileName][contractName];
+    for (const [addr, artifact] of addrToContract) {
+        const fileName = artifact.fileName;
+        const contractName = artifact.contractName;
+        const mainContract = artifact.artifact.contracts[fileName][contractName];
 
         if (mainContract !== undefined) {
             const compiledBytecode = hexToBytes(`0x${mainContract.evm.deployedBytecode.object}`);
@@ -230,10 +238,10 @@ export async function replayMainnetTX(
     if (srcDumpDir !== undefined) {
         const srcBase = srcDumpDir;
         fse.mkdirpSync(srcBase);
-        for (const [addr, [artifact]] of addrToContract.entries()) {
+        for (const [addr, artifact] of addrToContract.entries()) {
             const addrBase = join(srcBase, addr);
             fse.mkdirpSync(addrBase);
-            for (const [file, source] of Object.entries(artifact.sources)) {
+            for (const [file, source] of Object.entries(artifact.artifact.sources)) {
                 if (source.contents === undefined) {
                     continue;
                 }
@@ -246,14 +254,45 @@ export async function replayMainnetTX(
         }
     }
 
-    const addrsAndSolcJSONs: Array<[string, [PartialSolcOutput, string]]> = [
+    const addrsAndCompiledArtifacts: Array<[string, CompiledArtifact]> = [
         ...addrToContract.entries()
     ];
-    const artifactManager = new ArtifactManager(addrsAndSolcJSONs.map((p) => p[1][0]));
-    const addrsArtifactInfoAndMainContractId = zip3(
-        addrsAndSolcJSONs.map((k) => k[0]),
+    const artifactManager = new ArtifactManager(
+        addrsAndCompiledArtifacts.map((p) => p[1].artifact)
+    );
+
+    for (const [artifactInfo, addrAndArtifact] of zip(
         artifactManager.artifacts(),
-        addrsAndSolcJSONs.map((k) => k[1][1])
+        addrsAndCompiledArtifacts
+    )) {
+        const artifact = addrAndArtifact[1];
+        if (!(artifact.input && artifact.input.settings && artifact.input.settings.libraries)) {
+            continue;
+        }
+
+        for (const contractId in artifact.input.settings.libraries) {
+            let libToAddrM = artifactInfo.linkedLibraries.get(contractId);
+
+            if (libToAddrM === undefined) {
+                libToAddrM = new Map();
+                artifactInfo.linkedLibraries.set(contractId, libToAddrM);
+            }
+
+            for (const libraryName in artifact.input.settings.libraries[contractId]) {
+                libToAddrM.set(
+                    libraryName,
+                    createAddressFromString(
+                        artifact.input.settings.libraries[contractId][libraryName]
+                    )
+                );
+            }
+        }
+    }
+
+    const addrsArtifactInfoAndMainContractId = zip3(
+        addrsAndCompiledArtifacts.map((k) => k[0]),
+        artifactManager.artifacts(),
+        addrsAndCompiledArtifacts.map((k) => `${k[1].fileName}:${k[1].contractName}`)
     );
     const addrToArtifactAndContractId = new Map<string, [ArtifactInfo, string]>(
         addrsArtifactInfoAndMainContractId.map(([addr, info, id]) => [addr, [info, id]])
@@ -285,11 +324,15 @@ export async function replayMainnetTX(
     recordDistr(`duration_replay`, alignedDone - startReplay, txReplayInfo.txHash);
 
     const addrToInfoMap = new Map<string, ContractInfo>(
-        [...addrToContract.entries()].map(([strAddr, [, contractId]]) => [
+        [...addrToContract.entries()].map(([strAddr, artifact]) => [
             strAddr,
             artifactManager
                 .contracts()
-                .filter((ci) => contractId === `${ci.fileName}:${ci.contractName}`)[0]
+                .filter(
+                    (ci) =>
+                        `${artifact.fileName}:${artifact.contractName}` ===
+                        `${ci.fileName}:${ci.contractName}`
+                )[0]
         ])
     );
 

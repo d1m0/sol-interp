@@ -32,7 +32,7 @@ export class SolMessage {
         public readonly depth: number,
         private readonly nonce: bigint | undefined,
         private readonly _parent: SolMessage | TypedTransaction
-    ) { }
+    ) {}
 
     isCreation(): boolean {
         return this.type === SolMessageType.CREATE;
