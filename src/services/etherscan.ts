@@ -195,14 +195,14 @@ export interface CompiledArtifact {
 /**
  * Cache for the compilation step
  */
-class ArtifactCache extends JSONCache<CompiledArtifact> {
+class ArtifactCache extends JSONCache<CompiledArtifact | null> {
     makeKey(address: Address | string): string {
         return address instanceof Address ? address.toString() : address;
     }
     async make(
         address: Address | string,
         etherscanAPIKey: string
-    ): Promise<CompiledArtifact | undefined> {
+    ): Promise<CompiledArtifact | null> {
         return getArtifact(address, etherscanAPIKey);
     }
 }
@@ -263,7 +263,7 @@ function getFileName(result: EtherscanSourceResponse): string {
 export async function getArtifact(
     address: Address | string,
     apiKey: string
-): Promise<CompiledArtifact | undefined> {
+): Promise<CompiledArtifact | null> {
     const strAddr = address instanceof Address ? address.toString() : address;
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
     let fileName = getFileName(eInfo);
@@ -280,12 +280,12 @@ export async function getArtifact(
         version = getCompilerVersion(eInfo.CompilerVersion);
     } catch (e) {
         record(`Artifact:BadCompilerVersion`, strAddr);
-        return undefined;
+        return null;
     }
 
     if (eInfo.SourceCode === "") {
         record(`Artifact:NoSource`, strAddr);
-        return undefined;
+        return null;
     }
 
     const inJson = tryGetInputJSON(eInfo.SourceCode, settings);
@@ -342,7 +342,7 @@ export async function getArtifact(
                 e.message.startsWith("Unsupported wasm compiler version")
             ) {
                 record(`Artifact:UnsupportedWasmVersion`, strAddr);
-                return undefined;
+                return null;
             }
 
             if (e instanceof sol.CompileFailedError) {
@@ -380,7 +380,7 @@ export async function getArtifact(
     } catch (e: any) {
         if (e.message !== undefined && e.message.startsWith("Unsupported wasm compiler version")) {
             record(`Artifact:UnsupportedWasmVersion`, strAddr);
-            return undefined;
+            return null;
         }
 
         if (e instanceof sol.CompileFailedError) {
@@ -416,10 +416,10 @@ export async function getArtifacts(
 
         console.error(`Try fetching source for ${strAddr}:`);
         const art = await artifactCache.get(addr, apiKey);
-        if (art !== undefined) {
+        if (art !== null) {
             assert(
                 art.fileName in art.artifact.contracts &&
-                art.contractName in art.artifact.contracts[art.fileName],
+                    art.contractName in art.artifact.contracts[art.fileName],
                 `Missing info for main contract {0}:{1}`,
                 art.fileName,
                 art.contractName

@@ -188,29 +188,31 @@ export async function replayMainnetTX(
         const mainContract = artifact.artifact.contracts[fileName][contractName];
 
         if (mainContract !== undefined) {
-            const compiledBytecode = hexToBytes(`0x${mainContract.evm.deployedBytecode.object}`);
+            let compiledBytecode: Uint8Array;
+            try {
+                compiledBytecode = hexToBytes(`0x${mainContract.evm.deployedBytecode.object}`);
+            } catch (e) {
+                if (e instanceof RangeError) {
+                    record(`bad_bytecode_chars`, txReplayInfo.txHash);
+                    toDelete.add(addr);
+                    continue;
+                } else {
+                    throw e;
+                }
+            }
             const onChainBytecode = await getCode(
                 quicknodeEndpoint,
                 addr,
                 Number(block.header.number + 1n)
             );
 
-            if (equalsBytes(compiledBytecode, onChainBytecode)) {
-                record(`deployed_bytecode:equals`, addr);
-            } else {
-                record(
-                    `deployed_bytecode:not_equals:${compiledBytecode.length === onChainBytecode.length ? "len_equals" : "len_not_equals"}`,
-                    addr
-                );
-                record(`tx_has_mismatched_deployed_bytecode`, txReplayInfo.txHash);
-
+            if (!equalsBytes(compiledBytecode, onChainBytecode)) {
                 if (compiledBytecode.length === onChainBytecode.length) {
                     const onChainCreationResp = await getEtherscanContractCreation(
                         addr,
                         etherscanKey
                     );
                     if (onChainCreationResp.creationBytecode === "0x") {
-                        record(`creation_bytecode_lookup:no_bytecode`, addr);
                         toDelete.add(addr);
                     } else {
                         const compiledCreationBytecode = hexToBytes(
@@ -266,6 +268,13 @@ export async function replayMainnetTX(
         addrsAndCompiledArtifacts
     )) {
         const artifact = addrAndArtifact[1];
+        if (!(artifact.input && artifact.input.settings)) {
+            continue;
+        }
+
+        artifactInfo.codegen =
+            "viaIR" in artifact.input.settings && artifact.input.settings.viaIR ? "ir" : "old";
+
         if (!(artifact.input && artifact.input.settings && artifact.input.settings.libraries)) {
             continue;
         }

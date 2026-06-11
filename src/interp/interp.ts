@@ -3179,10 +3179,23 @@ export class Interpreter {
     }
 
     evalInternalCall(expr: sol.FunctionCall, state: State): Value {
-        const argVals = expr.vArguments.map((arg) => this.eval(arg, state));
+        let argVals: Value[];
+        let callee: Value;
+
+        const codeAccount = getCodeContractInfo(state);
+
+        // In the legacy pipeline usually arguments are evaluated before callee.
+        // In the IR pipeline its the opposite.
+        if (codeAccount.artifact.codegen === "old") {
+            argVals = expr.vArguments.map((arg) => this.eval(arg, state));
+            callee = this.evalNP(expr.vExpression, state);
+        } else {
+            callee = this.evalNP(expr.vExpression, state);
+            argVals = expr.vArguments.map((arg) => this.eval(arg, state));
+        }
+
         const argTs = expr.vArguments.map((arg) => this.typeOf(arg));
 
-        const callee = this.evalNP(expr.vExpression, state);
         const intCallee = this.coerceToInternallyCallable(callee);
         this.expect(intCallee !== undefined, `Unknown callee ${ppValue(callee)}`);
 
