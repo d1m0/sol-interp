@@ -57,13 +57,13 @@ export abstract class BaseEEI implements EthereumEnvInterface {
         return val === undefined
             ? val
             : {
-                address: val.address,
-                contract: val.contract,
-                deployedBytecode: val.deployedBytecode,
-                storage: val.storage,
-                balance: val.balance,
-                nonce: val.nonce
-            };
+                  address: val.address,
+                  contract: val.contract,
+                  deployedBytecode: val.deployedBytecode,
+                  storage: val.storage,
+                  balance: val.balance,
+                  nonce: val.nonce
+              };
     }
 
     getOrMakeAccount(address: string | Address): AccountInfo {

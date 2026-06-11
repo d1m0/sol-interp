@@ -175,30 +175,35 @@ function tryGetInputJSON(srcStr: string, settings: any): any {
     return undefined;
 }
 
-interface CompiledArtifact {
-    artifact?: PartialSolcOutput;
-    fileName?: string;
-    contractName?: string;
+interface PartialSolcInput {
+    settings?: {
+        libraries?: {
+            [fileName: string]: {
+                [contractName: string]: string;
+            };
+        };
+    };
+}
+
+export interface CompiledArtifact {
+    artifact: PartialSolcOutput;
+    fileName: string;
+    contractName: string;
+    input?: PartialSolcInput;
 }
 
 /**
  * Cache for the compilation step
  */
-class ArtifactCache extends JSONCache<CompiledArtifact> {
+class ArtifactCache extends JSONCache<CompiledArtifact | null> {
     makeKey(address: Address | string): string {
         return address instanceof Address ? address.toString() : address;
     }
-    async make(address: Address | string, etherscanAPIKey: string): Promise<CompiledArtifact> {
-        const t = await getArtifact(address, etherscanAPIKey);
-        if (t === undefined) {
-            return {};
-        }
-
-        return {
-            artifact: t[0],
-            fileName: t[1],
-            contractName: t[2]
-        };
+    async make(
+        address: Address | string,
+        etherscanAPIKey: string
+    ): Promise<CompiledArtifact | null> {
+        return getArtifact(address, etherscanAPIKey);
     }
 }
 
@@ -258,7 +263,7 @@ function getFileName(result: EtherscanSourceResponse): string {
 export async function getArtifact(
     address: Address | string,
     apiKey: string
-): Promise<[PartialSolcOutput, string, string] | undefined> {
+): Promise<CompiledArtifact | null> {
     const strAddr = address instanceof Address ? address.toString() : address;
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
     let fileName = getFileName(eInfo);
@@ -275,12 +280,12 @@ export async function getArtifact(
         version = getCompilerVersion(eInfo.CompilerVersion);
     } catch (e) {
         record(`Artifact:BadCompilerVersion`, strAddr);
-        return undefined;
+        return null;
     }
 
     if (eInfo.SourceCode === "") {
         record(`Artifact:NoSource`, strAddr);
-        return undefined;
+        return null;
     }
 
     const inJson = tryGetInputJSON(eInfo.SourceCode, settings);
@@ -330,14 +335,14 @@ export async function getArtifact(
             }
 
             record(`Artifact:Success`, strAddr);
-            return [data, fileName, eInfo.ContractName];
+            return { artifact: data, fileName, contractName: eInfo.ContractName, input: inJson };
         } catch (e: any) {
             if (
                 e.message !== undefined &&
                 e.message.startsWith("Unsupported wasm compiler version")
             ) {
                 record(`Artifact:UnsupportedWasmVersion`, strAddr);
-                return undefined;
+                return null;
             }
 
             if (e instanceof sol.CompileFailedError) {
@@ -371,11 +376,11 @@ export async function getArtifact(
         addSourcesToResult(data, files);
 
         record(`Artifact:Success`, strAddr);
-        return [data, fileName, eInfo.ContractName];
+        return { artifact: data, fileName, contractName: eInfo.ContractName };
     } catch (e: any) {
         if (e.message !== undefined && e.message.startsWith("Unsupported wasm compiler version")) {
             record(`Artifact:UnsupportedWasmVersion`, strAddr);
-            return undefined;
+            return null;
         }
 
         if (e instanceof sol.CompileFailedError) {
@@ -403,19 +408,15 @@ const artifactCache = new ArtifactCache(ARTIFACTS_CACHE_DIR);
 export async function getArtifacts(
     addresses: Iterable<Address> | Iterable<string>,
     apiKey: string
-): Promise<Map<string, [PartialSolcOutput, string]>> {
-    const res = new Map<string, [PartialSolcOutput, string]>();
+): Promise<Map<string, CompiledArtifact>> {
+    const res = new Map<string, CompiledArtifact>();
 
     for (const addr of addresses) {
         const strAddr = addr instanceof Address ? addr.toString() : addr;
 
         console.error(`Try fetching source for ${strAddr}:`);
         const art = await artifactCache.get(addr, apiKey);
-        if (
-            art.artifact !== undefined &&
-            art.contractName !== undefined &&
-            art.fileName !== undefined
-        ) {
+        if (art !== null) {
             assert(
                 art.fileName in art.artifact.contracts &&
                     art.contractName in art.artifact.contracts[art.fileName],
@@ -423,7 +424,7 @@ export async function getArtifacts(
                 art.fileName,
                 art.contractName
             );
-            res.set(strAddr, [art.artifact, `${art.fileName}:${art.contractName}`]);
+            res.set(strAddr, art);
         }
     }
 

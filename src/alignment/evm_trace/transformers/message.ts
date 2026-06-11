@@ -6,7 +6,7 @@ import { WithReturnInfo } from "./return";
 import { VM } from "@ethereumjs/vm";
 import { InterpreterStep } from "@ethereumjs/evm";
 import { TypedTransaction } from "@ethereumjs/tx";
-import { BasicStepInfo, OPCODES, OpInfo, } from "sol-dbg";
+import { BasicStepInfo, OPCODES, OpInfo } from "sol-dbg";
 import { assert } from "solc-typed-ast";
 
 export interface WithMessage {
@@ -67,14 +67,18 @@ export async function addMessage<T extends LowerStepT>(
         let newMsg: SolMessage;
 
         if (lastStep.op.opcode === OPCODES.CALL) {
-            newMsg = lastStep.msg.call(info.gas, info.codeAddress, info.value, info.msgData)
+            newMsg = lastStep.msg.call(info.gas, info.codeAddress, info.value, info.msgData);
         } else if (lastStep.op.opcode === OPCODES.STATICCALL) {
-            newMsg = lastStep.msg.staticcall(info.gas, info.codeAddress, info.msgData)
+            newMsg = lastStep.msg.staticcall(info.gas, info.codeAddress, info.msgData);
         } else if (lastStep.op.opcode === OPCODES.DELEGATECALL) {
-            newMsg = lastStep.msg.delegatecall(info.gas, info.codeAddress, info.msgData)
+            newMsg = lastStep.msg.delegatecall(info.gas, info.codeAddress, info.msgData);
         } else {
-            assert(lastStep.op.opcode === OPCODES.CALLCODE, `Unknown call opcode {0}`, lastStep.op.mnemonic)
-            newMsg = lastStep.msg.callcode(info.gas, info.codeAddress, info.value, info.msgData)
+            assert(
+                lastStep.op.opcode === OPCODES.CALLCODE,
+                `Unknown call opcode {0}`,
+                lastStep.op.mnemonic
+            );
+            newMsg = lastStep.msg.callcode(info.gas, info.codeAddress, info.value, info.msgData);
         }
 
         return {

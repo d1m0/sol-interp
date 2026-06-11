@@ -4,13 +4,22 @@ import {
     CallResult,
     BaseEEI,
     SolMessage,
-    BlockManagerI,
+    BlockManagerI
 } from "../interp/env";
 import { ArtifactManager } from "../interp/artifactManager";
 import { BaseStep, EvalStep, ExecStep } from "../interp/step";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { Block } from "@ethereumjs/block";
-import { ContractInfo, EventDesc, ImmMap, min, nyi, OPCODES, stackTop, ZERO_ADDRESS } from "sol-dbg";
+import {
+    ContractInfo,
+    EventDesc,
+    ImmMap,
+    min,
+    nyi,
+    OPCODES,
+    stackTop,
+    ZERO_ADDRESS
+} from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import { Interpreter } from "../interp";
 import { RuntimeError, Unsupported } from "../interp/exceptions";
@@ -58,7 +67,7 @@ class MisalignmentError extends Error {
     }
 }
 
-class MatchedInfiniteLoop extends Error { }
+class MatchedInfiniteLoop extends Error {}
 
 export class AlignedTraceBuilder extends BaseEEI {
     highLevelTrace: BaseStep[] = [];
@@ -387,7 +396,7 @@ export class AlignedTraceBuilder extends BaseEEI {
                     // For OoG/Error misalignment - add misalignment segment and continue in no-src mode
                     const segType =
                         e.llEvent instanceof EVMExceptionEvent &&
-                            e.llEvent.data.type === ExceptionType.OutOfGas
+                        e.llEvent.data.type === ExceptionType.OutOfGas
                             ? "misaligned:out-of-gas"
                             : "misaligned:error";
                     // @todo add hlAccount info to MisalginmentError? Or otherwise get it from somewhere else? Or remove need for it?
@@ -530,7 +539,7 @@ export class AlignedTraceBuilder extends BaseEEI {
             emit: function (interp: Interpreter, state: State, evt: EventDesc): void {
                 interp.expect(
                     interp.curNode instanceof sol.EmitStatement ||
-                    interp.curNode instanceof sol.FunctionCall,
+                        interp.curNode instanceof sol.FunctionCall,
                     `Unexpected event emit node ${interp.curNode.constructor.name}`
                 );
                 const call =

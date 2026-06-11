@@ -30,15 +30,19 @@ import { sleep } from "./utils";
 
     if (opts.txHashes) {
         for (const hash of opts.txHashes) {
-            const info = await getTXReplayInfo(opts.quicknodeEndpoint, hash);
-            await replayMainnetTX(
-                info,
-                opts.quicknodeEndpoint,
-                opts.etherscanKey,
-                opts.addState,
-                Number(opts.maxNumSteps),
-                opts.dumpSources
-            );
+            try {
+                const info = await getTXReplayInfo(opts.quicknodeEndpoint, hash);
+                await replayMainnetTX(
+                    info,
+                    opts.quicknodeEndpoint,
+                    opts.etherscanKey,
+                    opts.addState,
+                    Number(opts.maxNumSteps),
+                    opts.dumpSources
+                );
+            } catch (e) {
+                record(`${(e as any).constructor.name}:${(e as any).message}`, hash);
+            }
         }
     }
 
@@ -46,7 +50,8 @@ import { sleep } from "./utils";
     const skipSet = new Set<string>([
         "0x3bc7756d3ae0367c774a9eec7e65c388cecf691c066e763c4d88f5f64a47bcb9",
         "0x386769acb1f7e97a6780de6b82067db6e4f610fab86101aa6a1a9a71d5eb2ba5",
-        "0xa2266d846b719240d7076384afcd8dc506142d96de62daa358a73f1bf7abeab7"
+        "0xa2266d846b719240d7076384afcd8dc506142d96de62daa358a73f1bf7abeab7",
+        "0x6f6933c5ca98b58813fe7f9eff228261025bd1fa6d5d0ab580c74c48211f0346"
     ]);
 
     if (opts.blockNums) {
@@ -74,10 +79,10 @@ import { sleep } from "./utils";
                             record(`segment:${p.type}`, null, false);
                         }
                     } catch (e) {
-                        record(`${(e as any).constructor.name}:${(e as any).message}`, [
-                            txReplayInfo.blockHash,
+                        record(
+                            `${(e as any).constructor.name}:${(e as any).message}`,
                             txReplayInfo.txHash
-                        ]);
+                        );
                     }
                 }
             } catch (e) {
