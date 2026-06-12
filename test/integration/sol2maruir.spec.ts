@@ -20,7 +20,8 @@ const libDependencies = new Map<string, string[]>([
     ["PublicGetterSelectorAccess.config.sol", ["BytesLib"]],
     ["EncodingWithSelectorOrSignature.config.sol", ["BytesLib"]],
     ["SelectorTest062.config.sol", ["TestLibrary"]],
-    ["using_for_functions.config.sol", ["Lib"]]
+    ["using_for_functions.config.sol", ["Lib"]],
+    ["map_storage_ptrs_in_call_args.config.sol", ["Lib"]]
 ]);
 
 /**

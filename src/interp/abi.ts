@@ -20,11 +20,12 @@ import {
     deref,
     indexView,
     int256,
+    isStoragePointerOrMap,
     isStructView,
     isValueType,
     length
 } from "./utils";
-import { BaseInterpType, RationalNumberType } from "./types";
+import { ArraySliceType, BaseInterpType, RationalNumberType } from "./types";
 import { isArrayLikeView } from "./view";
 import * as sol from "solc-typed-ast";
 
@@ -282,9 +283,8 @@ const ONE_B1 = new Uint8Array([1]);
  * Packed encode a single primitive value or bytes/strings
  */
 export function encodePackedSingle(val: Value, type: BaseInterpType, state: State): Uint8Array {
-    const memView = rtt.makeMemoryView(type, 0n);
-
     if (type instanceof rtt.IntType) {
+        const memView = rtt.makeMemoryView(type, 0n);
         sol.assert(typeof val === "bigint", ``);
         memView.encode(val, scratchWord, undefined as unknown as any);
         return scratchWord.slice(32 - type.numBits / 8);
@@ -315,6 +315,8 @@ export function encodePackedSingle(val: Value, type: BaseInterpType, state: Stat
             sol.assert(bytes instanceof Uint8Array, ``);
             return bytes;
         }
+    } else if (type instanceof ArraySliceType) {
+        return encodePackedSingle(val, type.innerT, state);
     }
 
     nyi(`encodePackedSingle(${ppValue(val)}, ${type.pp()})`);
@@ -565,4 +567,33 @@ export function decodesWithSelector(
     }
 
     return vals;
+}
+
+/**
+ * Given arrays of values and their types, return new copies of the two arrays,
+ * where for any i s.t.  vals[i] is a storage view and valTs[i] is a storage
+ * pointer or mapping, in the resulting array they are converted to the storage
+ * key and `uint256`
+ */
+export function encodeStoragePtrsForABI(
+    vals: Value[],
+    valTs: BaseInterpType[]
+): [Value[], BaseInterpType[]] {
+    const resVals: Value[] = [];
+    const resTs: BaseInterpType[] = [];
+
+    for (let i = 0; i < vals.length; i++) {
+        const v = vals[i];
+        const typ = valTs[i];
+
+        if (isStoragePointerOrMap(typ) && v instanceof rtt.BaseStorageView) {
+            resVals.push(v.key);
+            resTs.push(rtt.uint256);
+        } else {
+            resVals.push(v);
+            resTs.push(typ);
+        }
+    }
+
+    return [resVals, resTs];
 }

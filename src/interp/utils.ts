@@ -36,6 +36,7 @@ import { ppValue } from "./pp";
 import { NoPayloadError } from "./exceptions";
 import { Block } from "@ethereumjs/block";
 import { ArtifactManager } from "./artifactManager";
+import { getterArgsAndReturn } from "../utils";
 const shajs = require("sha.js");
 
 export function castBytesViewToString<
@@ -765,7 +766,7 @@ export function getGetterArgAndReturnTs(
     getter: sol.VariableDeclaration
 ): [BaseInterpType[], BaseInterpType[]] {
     const ctx = getter.requiredContext;
-    const [solArgTs, solRetT] = sol.getterArgsAndReturn(getter);
+    const [solArgTs, solRetT] = getterArgsAndReturn(getter);
     const argTs: BaseInterpType[] = solArgTs.map((solT) =>
         typeIdToRuntimeType(solT, ctx, sol.DataLocation.CallData)
     );
@@ -979,4 +980,11 @@ export function getFunDef(ref: rtt.InternalFunRef): sol.FunctionDefinition | und
 
 export function sha256(input: Uint8Array): Uint8Array {
     return new shajs.sha256().update(input).digest();
+}
+
+export function isStoragePointerOrMap(t: rtt.BaseRuntimeType): boolean {
+    return (
+        (t instanceof rtt.PointerType && t.location === sol.DataLocation.Storage) ||
+        t instanceof rtt.MappingType
+    );
 }

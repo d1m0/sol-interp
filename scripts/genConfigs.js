@@ -3,9 +3,9 @@ const sol = require("solc-typed-ast")
 const util = require("@ethereumjs/util");
 const { assert } = require("console");
 
-//const BASE_DIR = "test/samples/sol2maruir"
+const BASE_DIR = "test/samples/sol2maruir"
 //const BASE_DIR = "test/samples/alignment"
-const BASE_DIR = "test/samples/misalignment"
+//const BASE_DIR = "test/samples/misalignment"
 
 let samples = fse
     .readdirSync(BASE_DIR)
@@ -21,7 +21,8 @@ const libDependencies = new Map([
     ["EncodingWithSelectorOrSignature.config.sol", ["BytesLib"]],
     ["SelectorTest062.config.sol", ["TestLibrary"]],
     ["using_for_functions.config.sol", ["Lib"]],
-    ["using_for.config.sol", ["Search"]]
+    ["using_for.config.sol", ["Search"]],
+    ["map_storage_ptrs_in_call_args.config.sol", ["Lib"]]
 ]);
 
 function fillLinkRefs(bytecodeInfo) {
