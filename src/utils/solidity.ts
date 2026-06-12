@@ -14,14 +14,16 @@ export function getActuallCalleeExpr(callee: sol.Expression): sol.Expression {
     }
 
     if (callee instanceof sol.FunctionCall) {
-        sol.assert(
+        if (
             callee.vFunctionName === "gas" ||
-                callee.vFunctionName === "value" ||
-                callee.vFunctionName === "salt",
-            ``
-        );
-        sol.assert(callee.vExpression instanceof sol.MemberAccess, ``);
-        return getActuallCalleeExpr(callee.vExpression.vExpression);
+            callee.vFunctionName === "value" ||
+            callee.vFunctionName === "salt"
+        ) {
+            sol.assert(callee.vExpression instanceof sol.MemberAccess, ``);
+            return getActuallCalleeExpr(callee.vExpression.vExpression);
+        }
+
+        return callee;
     }
 
     if (callee instanceof sol.TupleExpression && callee.vOriginalComponents.length === 1) {
