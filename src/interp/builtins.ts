@@ -3,7 +3,6 @@ import * as rtt from "sol-dbg";
 import {
     BuiltinFunction,
     BuiltinStruct,
-    DefValue,
     ExternalCallDescription,
     ExternalCallTargetValue,
     isExternalCallTarget,
@@ -35,6 +34,7 @@ import {
     changeLocTo,
     decodeView,
     getMsgSender,
+    getSelectorFromValue,
     getSig,
     getStateStorage,
     isValueType,
@@ -305,20 +305,7 @@ export const abiEncodeCallBuiltin = new BuiltinFunction(
         const paramTs = getEncodeTypes(argTs, interp.ctx, false);
 
         interp.expect(args.length >= 1);
-        let selector: Uint8Array | undefined;
-
-        if (args[0] instanceof rtt.ExternalFunRef) {
-            selector = args[0].selector;
-        } else if (args[0] instanceof DefValue) {
-            const def = args[0].def;
-            interp.expect(
-                def instanceof sol.FunctionDefinition || def instanceof sol.VariableDeclaration,
-                `Unexpected argument to encodeCall`
-            );
-            selector = sol.signatureHash(def);
-        } else {
-            rtt.nyi(`encodeCall ${args[0]}`);
-        }
+        const selector: Uint8Array = getSelectorFromValue(args[0]);
 
         return [encodeImpl(paramTs.slice(1), args.slice(1), state, selector)];
     }

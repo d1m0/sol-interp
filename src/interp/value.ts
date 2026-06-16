@@ -205,6 +205,22 @@ export class SuperVal {
 // Used to implement UDVT's wrap/unwarp functions.
 export class IdFunVal extends SingletonValue {}
 
+/**
+ * Class representing the value of Contract.ExternalFun or super.ExternalFun.
+ * It differs from ExternalFunRef in that its essentially only a selector,
+ * without the receiver address.
+ */
+export class ExternalFunDeclValue {
+    constructor(public readonly decl: sol.FunctionDefinition | sol.VariableDeclaration) {
+        sol.assert(
+            decl instanceof sol.FunctionDefinition ||
+                decl.visibility === sol.StateVariableVisibility.Public,
+            `Unexpected non-public state var {0}`,
+            decl.name
+        );
+    }
+}
+
 export const noneVal = new NoneValue();
 export const idFunVal = new IdFunVal();
 
@@ -219,7 +235,8 @@ export type Value =
     | Value[]
     | CurriedVal
     | IdFunVal
-    | SuperVal;
+    | SuperVal
+    | ExternalFunDeclValue;
 
 /**
  * Primitive values are those that can be persisted in memory,storage,calldata or in a local varibale
@@ -236,7 +253,8 @@ type NonPoisonPrimitiveValue =
     | TypeValue // Type Values, TypeTuples, NewCall and ExternallCallDescription are considred "primitive" since they can be passed in to builtin functions (e.g. abi.decode).
     | NewCall
     | IdFunVal
-    | ExternalCallDescription;
+    | ExternalCallDescription
+    | ExternalFunDeclValue;
 
 export type NonPoisonValue =
     | NonPoisonPrimitiveValue

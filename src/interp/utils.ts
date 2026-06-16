@@ -19,7 +19,14 @@ import {
 } from "sol-dbg";
 import * as sol from "solc-typed-ast";
 import * as rtt from "sol-dbg";
-import { ExternalCallDescription, NewCall, noneVal, Value } from "./value";
+import {
+    DefValue,
+    ExternalCallDescription,
+    ExternalFunDeclValue,
+    NewCall,
+    noneVal,
+    Value
+} from "./value";
 import { State } from "./state";
 import {
     FixedBytesLocalView,
@@ -987,4 +994,32 @@ export function isStoragePointerOrMap(t: rtt.BaseRuntimeType): boolean {
         (t instanceof rtt.PointerType && t.location === sol.DataLocation.Storage) ||
         t instanceof rtt.MappingType
     );
+}
+
+/**
+ * Given some function-like-reference-like value `v`, get the referenced value's selector
+ */
+export function getSelectorFromValue(v: Value): Uint8Array {
+    if (v instanceof DefValue) {
+        // Handle Event/Error/Function definition selectors
+        if (
+            v.def instanceof sol.EventDefinition ||
+            v.def instanceof sol.ErrorDefinition ||
+            v.def instanceof sol.FunctionDefinition
+        ) {
+            return sol.signatureHash(v.def);
+        }
+    } else if (v instanceof rtt.InternalFunRef) {
+        sol.assert(
+            v.opaque instanceof sol.FunctionDefinition,
+            `Error: Trying to compute .selector on InternalFunRef read from storage/memory`
+        );
+        return sol.signatureHash(v.opaque);
+    } else if (v instanceof rtt.ExternalFunRef) {
+        return v.selector;
+    } else if (v instanceof ExternalFunDeclValue) {
+        return sol.signatureHash(v.decl);
+    }
+
+    nyi(`getSelector(${ppValue(v)})`);
 }

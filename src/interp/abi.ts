@@ -153,6 +153,10 @@ function valueToAbiValue(v: Value, typ: BaseInterpType, s: State): any {
         return valueToAbiValue(v, typ.toType, s);
     }
 
+    if (typ instanceof ArraySliceType) {
+        return valueToAbiValue(v, typ.innerT, s);
+    }
+
     if (typ instanceof rtt.BytesType) {
         sol.assert(v instanceof View, `Expected bytes View for ${typ.pp()} not ${ppValue(v)}`);
         const bytes = decodeView(v, s);
@@ -253,6 +257,10 @@ export function abiTypeToCanonicalName(t: rtt.BaseRuntimeType): string {
     // Locations are skipped in signature canonical names
     if (t instanceof rtt.PointerType) {
         return abiTypeToCanonicalName(t.toType);
+    }
+
+    if (t instanceof ArraySliceType) {
+        return abiTypeToCanonicalName(t.innerT);
     }
 
     sol.assert(false, "Unexpected ABI Type: {0}", t);
