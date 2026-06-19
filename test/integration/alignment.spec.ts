@@ -63,7 +63,7 @@ const misalignmentSamples: Array<[string, any]> = [
             [1, 1, "aligned", ["EVMCallEvent", "SolCallEvent"]],
             [2, 2, "misaligned:inline_asm", ["EVMCallEvent", "<undefined>"]],
             [3, 3, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
-            [2, 2, "misaligned:earlier", ["EVMReturnEvent", "<undefined>"]],
+            [2, 2, "misaligned:inline_asm", ["EVMReturnEvent", "<undefined>"]],
             [1, 1, "aligned", ["EVMReturnEvent", "SolReturnEvent"]]
         ]
     ]

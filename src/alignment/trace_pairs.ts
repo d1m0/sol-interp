@@ -8,17 +8,13 @@ import { EVMObservableEvent, SolObservableEvent } from "./observable_events";
 export type MisalignedPairTypes =
     | "misaligned:out-of-gas"
     | "misaligned:inline_asm"
-    | "misaligned:error"
-    | "misaligned:earlier"; // Misaligned due to an earlier misalignment
+    | "misaligned:error";
 
 export type PairTypes = "aligned" | MisalignedPairTypes | "no-source";
 
 export function isMisalignmentPairType(t: string): t is MisalignedPairTypes {
     return (
-        t === "misaligned:out-of-gas" ||
-        t === "misaligned:inline_asm" ||
-        t === "misaligned:error" ||
-        t === "misaligned:earlier"
+        t === "misaligned:out-of-gas" || t === "misaligned:inline_asm" || t === "misaligned:error"
     );
 }
 
