@@ -268,7 +268,7 @@ export type NonPoisonValue =
 // Values that represent possible external call targets. Must determine at least an address and a selector
 export type ExternalCallTargetValue = ExternalFunRef | NewCall | ExternalCallDescription;
 
-// Values that represent possible internal call targets. Currently just InteranalFunRef
+// Values that represent possible internal call targets.
 export type InternalCallTargetValue = InternalFunRef | CurriedVal;
 
 // Values that (along with additional context state) can be reduced to an
