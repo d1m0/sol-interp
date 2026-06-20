@@ -6,7 +6,6 @@ import {
     tryMatchERC1167,
     record,
     recordDistr,
-    getEtherscanContractCreation,
     CompiledArtifact
 } from "../services";
 import {
@@ -34,13 +33,7 @@ import { basename, dirname, join, normalize } from "path";
 import { assert } from "../utils";
 import { keccak256 } from "ethereum-cryptography/keccak";
 import { bigIntToBuf, Storage } from "sol-dbg";
-import {
-    bytesToHex,
-    createAddressFromString,
-    equalsBytes,
-    hexToBigInt,
-    hexToBytes
-} from "@ethereumjs/util";
+import { createAddressFromString, hexToBigInt } from "@ethereumjs/util";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -180,62 +173,6 @@ export async function replayMainnetTX(
     }
 
     const addrToContract = await getArtifacts(nonProxyAddrsTouched, etherscanKey);
-    const toDelete = new Set<string>();
-
-    for (const [addr, artifact] of addrToContract) {
-        const fileName = artifact.fileName;
-        const contractName = artifact.contractName;
-        const mainContract = artifact.artifact.contracts[fileName][contractName];
-
-        if (mainContract !== undefined) {
-            let compiledBytecode: Uint8Array;
-            try {
-                compiledBytecode = hexToBytes(`0x${mainContract.evm.deployedBytecode.object}`);
-            } catch (e) {
-                if (e instanceof RangeError) {
-                    record(`bad_bytecode_chars`, txReplayInfo.txHash);
-                    toDelete.add(addr);
-                    continue;
-                } else {
-                    throw e;
-                }
-            }
-            const onChainBytecode = await getCode(
-                quicknodeEndpoint,
-                addr,
-                Number(block.header.number + 1n)
-            );
-
-            if (!equalsBytes(compiledBytecode, onChainBytecode)) {
-                if (compiledBytecode.length === onChainBytecode.length) {
-                    const onChainCreationResp = await getEtherscanContractCreation(
-                        addr,
-                        etherscanKey
-                    );
-                    if (onChainCreationResp.creationBytecode === "0x") {
-                        toDelete.add(addr);
-                    } else {
-                        const compiledCreationBytecode = hexToBytes(
-                            `0x${mainContract.evm.bytecode.object}`
-                        );
-                        mainContract.evm.bytecode.object =
-                            onChainCreationResp.creationBytecode.slice(
-                                2,
-                                compiledCreationBytecode.length * 2 + 2
-                            );
-                        mainContract.evm.deployedBytecode.object =
-                            bytesToHex(onChainBytecode).slice(2);
-                    }
-                } else {
-                    toDelete.add(addr);
-                }
-            }
-        }
-    }
-
-    for (const addr of toDelete) {
-        addrToContract.delete(addr);
-    }
 
     if (srcDumpDir !== undefined) {
         const srcBase = srcDumpDir;

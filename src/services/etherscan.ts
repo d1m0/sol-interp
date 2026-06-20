@@ -1,4 +1,4 @@
-import { Address, hexToBytes } from "@ethereumjs/util";
+import { Address, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
 import { assert } from "../utils";
 import axios from "axios";
 import * as sol from "solc-typed-ast";
@@ -54,19 +54,20 @@ async function etherscanJSONCall(
 
     const jsonRes = res.data;
 
-    if (Number(jsonRes.status) !== 1 || jsonRes.message !== "OK") {
+    if (
+        (jsonRes.status !== undefined && Number(jsonRes.status) !== 1) ||
+        (jsonRes.message !== undefined && jsonRes.message !== "OK")
+    ) {
         throw new Error(
             `Invalid status or message in response from Etherscan action ${action}: ${JSON.stringify(jsonRes)}`
         );
     }
 
-    if (!(jsonRes.result instanceof Array && jsonRes.result.length === 1)) {
-        throw new Error(
-            `Invalid result field in response from Etherscan action ${action}: ${JSON.stringify(jsonRes)}`
-        );
+    if (jsonRes.result instanceof Array && jsonRes.result.length === 1) {
+        return jsonRes.result[0];
     }
 
-    return jsonRes.result[0];
+    return jsonRes.result;
 }
 
 class EtherscanGetSourcecodeCache extends JSONCache<EtherscanSourceResponse> {
@@ -129,6 +130,30 @@ export async function getEtherscanContractCreation(
         apiKey,
         address instanceof Address ? address.toString() : address
     );
+}
+
+class EtherscanGetCode extends JSONCache<`0x{string}`> {
+    constructor(cacheDir: string) {
+        super(join(cacheDir, "bytecode"), 2);
+    }
+
+    makeKey(apiKey: string, address: string): string {
+        return address;
+    }
+
+    async make(apiKey: string, address: string): Promise<EtherscanSourceResponse> {
+        return etherscanJSONCall(apiKey, "eth_getCode", { address: address }, "proxy");
+    }
+}
+
+const eCodeCache = new EtherscanGetCode(ETHERSCAN_CACHE_DIR);
+
+async function getCode(address: string | Address, apiKey: string): Promise<Uint8Array> {
+    const resp = await eCodeCache.get(
+        apiKey,
+        address instanceof Address ? address.toString() : address
+    );
+    return hexToBytes(resp);
 }
 
 const versionRE =
@@ -260,6 +285,74 @@ function getFileName(result: EtherscanSourceResponse): string {
     return `Contract.sol`;
 }
 
+/**
+ * Given a locally compiled `artifact` lookup the actual deployed/creation bytecodes on chain,
+ * and if they differ from the local artifact, but are close enough (as a hack, we just consider same length)
+ * then replace the artifact's bytecodes with the on-chain ones.
+ *
+ * Note: This is hacky, but seems to work. Whenever I've seen a difference in bytecodes but same length,
+ * its due to different compiler MD hashes embedded in the bytecode.
+ *
+ * Returns `true` if the compiled code matches, or we successfully fixed it up from on-chain
+ * Returns `false` if the compiled code doesnt match and we werent able to patch it up
+ */
+async function fixUpBytecode(
+    artifact: PartialSolcOutput,
+    fileName: string,
+    contractName: string,
+    address: Address | string,
+    apiKey: string
+): Promise<boolean> {
+    const mainContract = artifact.contracts[fileName][contractName];
+
+    if (mainContract === undefined) {
+        return true;
+    }
+
+    let compiledBytecode: Uint8Array;
+    try {
+        compiledBytecode = hexToBytes(`0x${mainContract.evm.deployedBytecode.object}`);
+    } catch (e) {
+        if (e instanceof RangeError) {
+            record(`bad_bytecode_chars`, address.toString());
+            return false;
+        } else {
+            throw e;
+        }
+    }
+
+    const onChainBytecode = await getCode(address, apiKey);
+
+    // Compiled bytecode matches on-chain bytecode
+    if (equalsBytes(compiledBytecode, onChainBytecode)) {
+        return true;
+    }
+
+    // On-chain bytecode and compiled bytecode dont even have the same length -
+    // there is a structural difference and we cant match them up
+    if (compiledBytecode.length !== onChainBytecode.length) {
+        return false;
+    }
+
+    const onChainCreationResp = await getEtherscanContractCreation(address, apiKey);
+
+    // @todo when `creationBytecode` is empty that usually means that `onChianCreationResp.contractFactory`
+    // is set. I think this corresponds to creations in inner TXs? Handle this case separately.
+    if (onChainCreationResp.creationBytecode === "0x") {
+        return false;
+    }
+
+    const compiledCreationBytecode = hexToBytes(`0x${mainContract.evm.bytecode.object}`);
+
+    mainContract.evm.bytecode.object = onChainCreationResp.creationBytecode.slice(
+        2,
+        compiledCreationBytecode.length * 2 + 2
+    );
+    mainContract.evm.deployedBytecode.object = bytesToHex(onChainBytecode).slice(2);
+
+    return true;
+}
+
 export async function getArtifact(
     address: Address | string,
     apiKey: string
@@ -276,15 +369,15 @@ export async function getArtifact(
 
     let version;
 
+    if (eInfo.SourceCode === "") {
+        record(`Artifact:NoSource`, strAddr);
+        return null;
+    }
+
     try {
         version = getCompilerVersion(eInfo.CompilerVersion);
     } catch (e) {
         record(`Artifact:BadCompilerVersion`, strAddr);
-        return null;
-    }
-
-    if (eInfo.SourceCode === "") {
-        record(`Artifact:NoSource`, strAddr);
         return null;
     }
 
@@ -334,6 +427,10 @@ export async function getArtifact(
                 }
             }
 
+            if (!(await fixUpBytecode(data, fileName, eInfo.ContractName, strAddr, apiKey))) {
+                return null;
+            }
+
             record(`Artifact:Success`, strAddr);
             return { artifact: data, fileName, contractName: eInfo.ContractName, input: inJson };
         } catch (e: any) {
@@ -374,6 +471,10 @@ export async function getArtifact(
             settings
         );
         addSourcesToResult(data, files);
+
+        if (!(await fixUpBytecode(data, fileName, eInfo.ContractName, strAddr, apiKey))) {
+            return null;
+        }
 
         record(`Artifact:Success`, strAddr);
         return { artifact: data, fileName, contractName: eInfo.ContractName };

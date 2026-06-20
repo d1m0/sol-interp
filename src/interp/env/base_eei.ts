@@ -9,7 +9,7 @@ import { AccountInfo, CallResult, EthereumEnvInterface, AccountMap } from "./typ
 import { Block } from "@ethereumjs/block";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { BlockManagerI } from "./block_manager";
-import { SolMessage } from "./message";
+import { SolMessage, SolMessageType } from "./message";
 
 export function ppChainState(state: AccountMap): string {
     const t: string[] = [];
@@ -167,33 +167,35 @@ export abstract class BaseEEI implements EthereumEnvInterface {
         const delegatingAccount: AccountInfo | undefined =
             delegatingAddr === undefined ? undefined : this.getAccount(delegatingAddr);
 
-        const valueSendingAccount =
-            delegatingAccount !== undefined ? delegatingAccount : fromAccount;
+        const actualSender = delegatingAccount !== undefined ? delegatingAccount : fromAccount;
 
         // Increment sender nonce
         if (msg.depth === 0) {
-            valueSendingAccount.nonce++;
-            this.updateAccount(valueSendingAccount);
+            actualSender.nonce++;
+            this.updateAccount(actualSender);
         }
 
         const toAccount = this.getAccountForMessage(msg);
         const contract = toAccount.contract;
 
-        const valueReceivingAccount =
-            delegatingAccount !== undefined ? delegatingAccount : toAccount;
+        // Update the sender/recepient balances (if this is a non-delegate non-static call)
+        if (msg.type === SolMessageType.CALL || msg.type === SolMessageType.CREATE) {
+            const valueReceivingAccount =
+                delegatingAccount !== undefined ? delegatingAccount : toAccount;
 
-        if (msg.value > valueSendingAccount.balance) {
-            this.state = checkpoint;
-            return { reverted: true, data: new Uint8Array() };
-        }
+            if (msg.value > actualSender.balance) {
+                this.state = checkpoint;
+                return { reverted: true, data: new Uint8Array() };
+            }
 
-        valueSendingAccount.balance -= msg.value;
-        // @todo what about overflow here?
-        valueReceivingAccount.balance += msg.value;
+            if (!actualSender.address.equals(valueReceivingAccount.address)) {
+                actualSender.balance -= msg.value;
+                // @todo what about overflow here?
+                valueReceivingAccount.balance += msg.value;
 
-        this.updateAccount(valueSendingAccount);
-        if (valueReceivingAccount !== valueSendingAccount) {
-            this.updateAccount(valueReceivingAccount);
+                this.updateAccount(actualSender);
+                this.updateAccount(valueReceivingAccount);
+            }
         }
 
         // Calls to contracts with no code succeed.
