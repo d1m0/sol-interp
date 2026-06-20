@@ -11,6 +11,7 @@ import {
     matchesTemplate
 } from "sol-dbg/dist/debug/artifact_manager/bytecode_templates";
 import { join } from "path";
+import { getCode as qnGetCode } from "./quicknode";
 
 export interface EtherscanSourceResponse {
     ABI: string;
@@ -148,7 +149,7 @@ class EtherscanGetCode extends JSONCache<`0x{string}`> {
 
 const eCodeCache = new EtherscanGetCode(ETHERSCAN_CACHE_DIR);
 
-async function getCode(address: string | Address, apiKey: string): Promise<Uint8Array> {
+export async function ethGetCode(address: string | Address, apiKey: string): Promise<Uint8Array> {
     const resp = await eCodeCache.get(
         apiKey,
         address instanceof Address ? address.toString() : address
@@ -226,9 +227,10 @@ class ArtifactCache extends JSONCache<CompiledArtifact | null> {
     }
     async make(
         address: Address | string,
-        etherscanAPIKey: string
+        etherscanAPIKey: string,
+        quicknodeEndpoint: string
     ): Promise<CompiledArtifact | null> {
-        return getArtifact(address, etherscanAPIKey);
+        return getArtifact(address, etherscanAPIKey, quicknodeEndpoint);
     }
 }
 
@@ -301,7 +303,8 @@ async function fixUpBytecode(
     fileName: string,
     contractName: string,
     address: Address | string,
-    apiKey: string
+    etherscanKey: string,
+    quicknodeEndpoint: string
 ): Promise<boolean> {
     const mainContract = artifact.contracts[fileName][contractName];
 
@@ -321,7 +324,9 @@ async function fixUpBytecode(
         }
     }
 
-    const onChainBytecode = await getCode(address, apiKey);
+    const strAddr = typeof address === "string" ? address : address.toString();
+    // @todo should specify a block number here. Works for now for testing
+    const onChainBytecode = await qnGetCode(quicknodeEndpoint, strAddr, "latest");
 
     // Compiled bytecode matches on-chain bytecode
     if (equalsBytes(compiledBytecode, onChainBytecode)) {
@@ -334,7 +339,7 @@ async function fixUpBytecode(
         return false;
     }
 
-    const onChainCreationResp = await getEtherscanContractCreation(address, apiKey);
+    const onChainCreationResp = await getEtherscanContractCreation(address, etherscanKey);
 
     // @todo when `creationBytecode` is empty that usually means that `onChianCreationResp.contractFactory`
     // is set. I think this corresponds to creations in inner TXs? Handle this case separately.
@@ -355,7 +360,8 @@ async function fixUpBytecode(
 
 export async function getArtifact(
     address: Address | string,
-    apiKey: string
+    apiKey: string,
+    quicknodeEndpoint: string
 ): Promise<CompiledArtifact | null> {
     const strAddr = address instanceof Address ? address.toString() : address;
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
@@ -427,7 +433,16 @@ export async function getArtifact(
                 }
             }
 
-            if (!(await fixUpBytecode(data, fileName, eInfo.ContractName, strAddr, apiKey))) {
+            if (
+                !(await fixUpBytecode(
+                    data,
+                    fileName,
+                    eInfo.ContractName,
+                    strAddr,
+                    apiKey,
+                    quicknodeEndpoint
+                ))
+            ) {
                 return null;
             }
 
@@ -472,7 +487,16 @@ export async function getArtifact(
         );
         addSourcesToResult(data, files);
 
-        if (!(await fixUpBytecode(data, fileName, eInfo.ContractName, strAddr, apiKey))) {
+        if (
+            !(await fixUpBytecode(
+                data,
+                fileName,
+                eInfo.ContractName,
+                strAddr,
+                apiKey,
+                quicknodeEndpoint
+            ))
+        ) {
             return null;
         }
 
@@ -508,7 +532,8 @@ const artifactCache = new ArtifactCache(ARTIFACTS_CACHE_DIR);
 
 export async function getArtifacts(
     addresses: Iterable<Address> | Iterable<string>,
-    apiKey: string
+    apiKey: string,
+    quicknodeEndpoint: string
 ): Promise<Map<string, CompiledArtifact>> {
     const res = new Map<string, CompiledArtifact>();
 
@@ -516,7 +541,7 @@ export async function getArtifacts(
         const strAddr = addr instanceof Address ? addr.toString() : addr;
 
         console.error(`Try fetching source for ${strAddr}:`);
-        const art = await artifactCache.get(addr, apiKey);
+        const art = await artifactCache.get(addr, apiKey, quicknodeEndpoint);
         if (art !== null) {
             assert(
                 art.fileName in art.artifact.contracts &&

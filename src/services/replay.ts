@@ -1,12 +1,12 @@
 import {
-    getCode,
     QuicknodeBlockManager,
     ReplayInfo,
     getArtifacts,
     tryMatchERC1167,
     record,
     recordDistr,
-    CompiledArtifact
+    CompiledArtifact,
+    getCode
 } from "../services";
 import {
     ArtifactInfo,
@@ -172,7 +172,11 @@ export async function replayMainnetTX(
         nonProxyAddrsTouched.push(addr);
     }
 
-    const addrToContract = await getArtifacts(nonProxyAddrsTouched, etherscanKey);
+    const addrToContract = await getArtifacts(
+        nonProxyAddrsTouched,
+        etherscanKey,
+        quicknodeEndpoint
+    );
 
     if (srcDumpDir !== undefined) {
         const srcBase = srcDumpDir;

@@ -194,11 +194,11 @@ class QuicknodeCode extends JSONCache<string> {
         super(join(basePath, "code"), 8);
     }
 
-    makeKey(endpoint: string, address: string, blockNum: number): string {
+    makeKey(endpoint: string, address: string, blockNum: number | string): string {
         return `${address}@${blockNum}`;
     }
 
-    async make(endpoint: string, address: string, blockNum: number): Promise<string> {
+    async make(endpoint: string, address: string, blockNum: number | string): Promise<string> {
         return await jsonCall(endpoint, "eth_getCode", [address, blockNum]);
     }
 }
@@ -221,7 +221,7 @@ export interface ReplayInfo {
 export async function getCode(
     endpoint: string,
     address: string,
-    blockNum: number
+    blockNum: number | string
 ): Promise<Uint8Array> {
     return hexToBytes((await qCode.get(endpoint, address, blockNum)).trim() as `0x{string}`);
 }
