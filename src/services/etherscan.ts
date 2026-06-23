@@ -287,9 +287,10 @@ function getFileName(result: EtherscanSourceResponse): string {
     return `Contract.sol`;
 }
 
-const linkRefRE = /__\$[0-9a-f]*\$__/g;
+const hexLinkRefRe = /__\$[0-9a-f]*\$__/g;
+const nameLinkRefRe = /_+.*:.*_+/g;
 /**
- * In older compiler versions the artifact bytecode contained sections like _$<hex>$_ in places
+ * In older compiler versions the artifact bytecode contained sections like `_$<hex>$_` or `__FileName.sol:ContractName___` in places
  * corresponding to link references. Replace those with 0s
  * @param artifact
  */
@@ -299,7 +300,11 @@ function cleanupArtifactBytecode(artifact: PartialSolcOutput): void {
             const contract = artifact.contracts[fileName][contractName];
 
             for (const bytecode of [contract.evm.bytecode, contract.evm.deployedBytecode]) {
-                bytecode.object = bytecode.object.replaceAll(linkRefRE, (oldStr) =>
+                bytecode.object = bytecode.object.replaceAll(hexLinkRefRe, (oldStr) =>
+                    "0".repeat(oldStr.length)
+                );
+
+                bytecode.object = bytecode.object.replaceAll(nameLinkRefRe, (oldStr) =>
                     "0".repeat(oldStr.length)
                 );
             }
