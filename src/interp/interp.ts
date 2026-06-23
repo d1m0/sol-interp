@@ -2980,7 +2980,7 @@ export class Interpreter {
             this.expect(argData instanceof Uint8Array, ``);
 
             const newContractInfo = this.artifactManager.getContractInfo(contract);
-            this.expect(newContractInfo !== undefined);
+            this.expect(newContractInfo !== undefined, `Unknown contract ${contract.name}`);
 
             // We need to fill in all the link references of the newly deployed contract from the current contract's refs
             const [curBytecodeInfo, curBytecode] = getBytecodeInfo(state);

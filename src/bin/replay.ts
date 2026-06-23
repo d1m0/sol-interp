@@ -1,7 +1,8 @@
 import { Command } from "commander";
-import { getBlockReplayInfo, getTXReplayInfo, dump, record } from "../services";
+import { getBlockReplayInfo, getTXReplayInfo, record, getArtifact, dump } from "../services";
 import { replayMainnetTX } from "../services/replay";
 import { sleep } from "./utils";
+import { exit } from "process";
 
 (async () => {
     const program = new Command();
@@ -16,13 +17,17 @@ import { sleep } from "./utils";
 
     program.option("-t, --tx-hashes <hashes...>", "A list of hashes of Mainnet TXs to replay.");
     program.option("-b, --block-nums <nums...>", "A list of numbers of Mainnet Blocks to replay.");
+    program.option(
+        "-a, --artifacts <addrs...>",
+        "A list of addresses for which to try and re-build the artifacts."
+    );
 
     program.option(
         "-d, --dump-sources <dir>",
         "Dump the sources for any contracts in the given directory."
     );
     program.option("--max-num-steps <max-num-steps>", "Maximum Number of steps", "1000000000");
-    program.option("--add-state", "Wether to add the state or not", false);
+    program.option("--add-state", "Wether to add the full state to the interpreter trace", false);
     program.option("--stats <stats-file>", "Path to a file in which to dump stats");
 
     program.parse(process.argv);
@@ -88,6 +93,17 @@ import { sleep } from "./utils";
             } catch (e) {
                 console.error(`Error getting block ${blockNum}: ${e}`);
                 await sleep(10000);
+            }
+        }
+    }
+
+    if (opts.artifacts) {
+        for (const addr of opts.artifacts) {
+            try {
+                await getArtifact(addr, opts.etherscanKey, opts.quicknodeEndpoint);
+            } catch (e) {
+                console.error(e);
+                exit(-1);
             }
         }
     }

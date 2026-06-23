@@ -2,21 +2,13 @@ import {
     QuicknodeBlockManager,
     ReplayInfo,
     getArtifacts,
-    tryMatchERC1167,
     record,
     recordDistr,
     CompiledArtifact,
-    getCode
+    getCode,
+    isProxy
 } from "../services";
-import {
-    ArtifactInfo,
-    ContractInfo,
-    ImmMap,
-    zip3,
-    bigEndianBufToBigint,
-    readInt16Be,
-    zip
-} from "sol-dbg";
+import { ArtifactInfo, ContractInfo, ImmMap, zip3, bigEndianBufToBigint, zip } from "sol-dbg";
 import { EVMStep, replayEVM } from "../alignment/evm_trace";
 import {
     AlignedTraceBuilder,
@@ -100,33 +92,6 @@ export function getExecutedAddresses(trace: EVMStep[]): Set<string> {
     return addrsTouched;
 }
 
-import { Decoder } from "cbor";
-
-export function getMD(bytecode: Uint8Array): any | undefined {
-    try {
-        const off = readInt16Be(bytecode, bytecode.length - 2);
-
-        return Decoder.decodeAllSync(
-            bytecode.slice(bytecode.length - 2 - off, bytecode.length - 2),
-            {}
-        );
-    } catch {
-        return undefined;
-    }
-}
-
-export function getMDRange(bytecode: Uint8Array): [number, number] | undefined {
-    try {
-        const off = readInt16Be(bytecode, bytecode.length - 2);
-
-        Decoder.decodeAllSync(bytecode.slice(bytecode.length - 2 - off, bytecode.length - 2), {});
-
-        return [bytecode.length - 2 - off, bytecode.length - 2];
-    } catch {
-        return undefined;
-    }
-}
-
 export async function replayMainnetTX(
     txReplayInfo: ReplayInfo,
     quicknodeEndpoint: string,
@@ -165,7 +130,7 @@ export async function replayMainnetTX(
 
     for (const addr of addrsTouched) {
         const code = await getCode(quicknodeEndpoint, addr, Number(block.header.number));
-        if (tryMatchERC1167(code) !== undefined) {
+        if (isProxy(code)) {
             continue;
         }
 

@@ -1,10 +1,9 @@
-import { Address, bytesToHex, equalsBytes, hexToBytes } from "@ethereumjs/util";
+import { Address, equalsBytes, hexToBytes } from "@ethereumjs/util";
 import { assert } from "../utils";
 import axios from "axios";
 import * as sol from "solc-typed-ast";
 import { JSONCache } from "./json";
 import { PartialSolcOutput } from "sol-dbg";
-import { addSourcesToResult } from "./utils";
 import { record } from "./stats";
 import {
     BytecodeTemplate,
@@ -12,6 +11,7 @@ import {
 } from "sol-dbg/dist/debug/artifact_manager/bytecode_templates";
 import { join } from "path";
 import { getCode as qnGetCode } from "./quicknode";
+import { fixArtifactBytecodes } from "./md";
 
 export interface EtherscanSourceResponse {
     ABI: string;
@@ -202,6 +202,11 @@ function tryGetInputJSON(srcStr: string, settings: any): any {
 }
 
 interface PartialSolcInput {
+    sources: {
+        [fileName: string]: {
+            content: string;
+        };
+    };
     settings?: {
         libraries?: {
             [fileName: string]: {
@@ -254,24 +259,20 @@ export function tryMatchERC1167(bytecode: Uint8Array): Address | undefined {
     return undefined;
 }
 
-/**
- * In some contracts (e.g. 0xab45c5a4b0c941a2f231c04c3f49182e1a254052) etherscan's fileName is empty, even though we have input JSON and a
- * a contractName that is visible in that JSON. Fix up those cases here.
- * @param artifact
- * @param contractName
- */
-function detectFileName(artifact: any, contractName: string): string | undefined {
-    const res: string[] = [];
+export function isERC1167Proxy(bytecode: Uint8Array): boolean {
+    return tryMatchERC1167(bytecode) !== undefined;
+}
 
-    for (const fileName in artifact.contracts) {
-        for (const cName in artifact.contracts[fileName]) {
-            if (cName === contractName) {
-                res.push(fileName);
-            }
-        }
-    }
+const minimalProxyBytecode = hexToBytes(
+    "0x363d3d373d3d363d7f360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc545af43d6000803e6038573d6000fd5b3d6000f3"
+);
 
-    return res.length === 1 ? res[0] : undefined;
+export function isMinimalProxy(bytecode: Uint8Array): boolean {
+    return equalsBytes(bytecode, minimalProxyBytecode);
+}
+
+export function isProxy(bytecode: Uint8Array): boolean {
+    return isMinimalProxy(bytecode) || isERC1167Proxy(bytecode);
 }
 
 function getFileName(result: EtherscanSourceResponse): string {
@@ -280,82 +281,39 @@ function getFileName(result: EtherscanSourceResponse): string {
     }
 
     if (result.ContractName) {
-        return result.ContractName;
-        //return result.ContractName.endsWith(".sol") ? result.ContractName : result.ContractName + '.sol'
+        return result.ContractName + ".sol";
     }
 
     return `Contract.sol`;
 }
 
+const linkRefRE = /__\$[0-9a-f]*\$__/g;
 /**
- * Given a locally compiled `artifact` lookup the actual deployed/creation bytecodes on chain,
- * and if they differ from the local artifact, but are close enough (as a hack, we just consider same length)
- * then replace the artifact's bytecodes with the on-chain ones.
- *
- * Note: This is hacky, but seems to work. Whenever I've seen a difference in bytecodes but same length,
- * its due to different compiler MD hashes embedded in the bytecode.
- *
- * Returns `true` if the compiled code matches, or we successfully fixed it up from on-chain
- * Returns `false` if the compiled code doesnt match and we werent able to patch it up
+ * In older compiler versions the artifact bytecode contained sections like _$<hex>$_ in places
+ * corresponding to link references. Replace those with 0s
+ * @param artifact
  */
-async function fixUpBytecode(
-    artifact: PartialSolcOutput,
-    fileName: string,
-    contractName: string,
-    address: Address | string,
-    etherscanKey: string,
-    quicknodeEndpoint: string
-): Promise<boolean> {
-    const mainContract = artifact.contracts[fileName][contractName];
+function cleanupArtifactBytecode(artifact: PartialSolcOutput): void {
+    for (const fileName in artifact.contracts) {
+        for (const contractName in artifact.contracts[fileName]) {
+            const contract = artifact.contracts[fileName][contractName];
 
-    if (mainContract === undefined) {
-        return true;
-    }
-
-    let compiledBytecode: Uint8Array;
-    try {
-        compiledBytecode = hexToBytes(`0x${mainContract.evm.deployedBytecode.object}`);
-    } catch (e) {
-        if (e instanceof RangeError) {
-            record(`bad_bytecode_chars`, address.toString());
-            return false;
-        } else {
-            throw e;
+            for (const bytecode of [contract.evm.bytecode, contract.evm.deployedBytecode]) {
+                bytecode.object = bytecode.object.replaceAll(linkRefRE, (oldStr) =>
+                    "0".repeat(oldStr.length)
+                );
+            }
         }
     }
+}
 
-    const strAddr = typeof address === "string" ? address : address.toString();
-    // @todo should specify a block number here. Works for now for testing
-    const onChainBytecode = await qnGetCode(quicknodeEndpoint, strAddr, "latest");
-
-    // Compiled bytecode matches on-chain bytecode
-    if (equalsBytes(compiledBytecode, onChainBytecode)) {
-        return true;
+function detectFileName(baseName: string, inJson: PartialSolcInput): string {
+    const res = Object.keys(inJson.sources).filter((name) => name.endsWith(baseName));
+    if (res.length === 1) {
+        return res[0];
     }
 
-    // On-chain bytecode and compiled bytecode dont even have the same length -
-    // there is a structural difference and we cant match them up
-    if (compiledBytecode.length !== onChainBytecode.length) {
-        return false;
-    }
-
-    const onChainCreationResp = await getEtherscanContractCreation(address, etherscanKey);
-
-    // @todo when `creationBytecode` is empty that usually means that `onChianCreationResp.contractFactory`
-    // is set. I think this corresponds to creations in inner TXs? Handle this case separately.
-    if (onChainCreationResp.creationBytecode === "0x") {
-        return false;
-    }
-
-    const compiledCreationBytecode = hexToBytes(`0x${mainContract.evm.bytecode.object}`);
-
-    mainContract.evm.bytecode.object = onChainCreationResp.creationBytecode.slice(
-        2,
-        compiledCreationBytecode.length * 2 + 2
-    );
-    mainContract.evm.deployedBytecode.object = bytesToHex(onChainBytecode).slice(2);
-
-    return true;
+    return baseName;
 }
 
 export async function getArtifact(
@@ -365,21 +323,14 @@ export async function getArtifact(
 ): Promise<CompiledArtifact | null> {
     const strAddr = address instanceof Address ? address.toString() : address;
     const eInfo = await getEtherscanSourceInfo(address, apiKey);
-    let fileName = getFileName(eInfo);
-    const settings = {
-        optimizer: {
-            enabled: eInfo.OptimizationUsed === "1",
-            runs: Number(eInfo.Runs)
-        }
-    };
-
-    let version;
 
     if (eInfo.SourceCode === "") {
         record(`Artifact:NoSource`, strAddr);
         return null;
     }
 
+    // Get proper compiler version
+    let version;
     try {
         version = getCompilerVersion(eInfo.CompilerVersion);
     } catch (e) {
@@ -387,144 +338,114 @@ export async function getArtifact(
         return null;
     }
 
-    const inJson = tryGetInputJSON(eInfo.SourceCode, settings);
-    if (inJson !== undefined) {
-        try {
-            // Force full emission over whatever settings we got from etherscan
-            inJson.settings.outputSelection = {
-                "*": {
-                    "*": ["*"],
-                    "": ["*"]
+    let compiler: sol.WasmCompiler | sol.NativeCompiler | undefined;
+    try {
+        compiler = await sol.getCompilerForVersion(version, sol.CompilerKind.WASM);
+    } catch (e) {
+        record(`Unsupported compiler version: ${version}`, strAddr);
+        return null;
+    }
+
+    if (compiler === undefined) {
+        record(`Unsupported compiler version: ${version}`, strAddr);
+        return null;
+    }
+
+    // Build canonical input json
+    let fileName = getFileName(eInfo);
+    const contractName = eInfo.ContractName;
+
+    const settings = {
+        remappings: [],
+        optimizer: {
+            enabled: eInfo.OptimizationUsed === "1",
+            runs: Number(eInfo.Runs)
+        },
+        libraries: {}
+    };
+
+    let inJson = tryGetInputJSON(eInfo.SourceCode, settings);
+    if (inJson === undefined) {
+        inJson = {
+            language: "Solidity",
+            sources: {
+                [fileName]: {
+                    content: eInfo.SourceCode
                 }
-            };
-            const compiler = await sol.getCompilerForVersion(version, sol.CompilerKind.WASM);
+            },
+            settings
+        };
+    } else {
+        fileName = detectFileName(fileName, inJson);
+    }
 
-            assert(
-                compiler !== undefined,
-                `Couldn't find wasm compiler for version ${version} for current platform`
-            );
+    inJson.settings.outputSelection = {
+        "*": {
+            "*": ["*"],
+            "": ["*"]
+        }
+    };
 
-            const data = await compiler.compile(inJson);
+    if (!(fileName in inJson.sources)) {
+        record(`cant_detect_filename`, strAddr);
+        return null;
+    }
 
-            const errors = sol.detectCompileErrors(data);
+    const data = await compiler.compile(inJson);
 
-            if (errors.length > 0) {
-                throw new sol.CompileFailedError([{ compilerVersion: version, errors }]);
+    const errors = sol.detectCompileErrors(data);
+
+    if (errors.length > 0) {
+        throw new sol.CompileFailedError([{ compilerVersion: version, errors }]);
+    }
+
+    if (data.sources) {
+        for (const fileName in data.sources) {
+            if (fileName in inJson.sources) {
+                data.sources[fileName].contents = inJson.sources[fileName].content;
             }
-
-            if (data.contracts === undefined) {
-                record(`Artifact:NoContracts`, strAddr);
-                throw new Error(`Compilation succeded but no contracts (ver ${version})`);
-            }
-
-            if (data.sources) {
-                for (const fileName in data.sources) {
-                    if (fileName in inJson.sources) {
-                        data.sources[fileName].contents = inJson.sources[fileName].content;
-                    }
-                }
-            }
-
-            if (fileName === "dummy.sol") {
-                const detectedName = detectFileName(data, eInfo.ContractName);
-                if (detectedName !== undefined) {
-                    record(`Artifact:MissingFileName`, strAddr);
-                    fileName = detectedName;
-                }
-            }
-
-            if (
-                !(await fixUpBytecode(
-                    data,
-                    fileName,
-                    eInfo.ContractName,
-                    strAddr,
-                    apiKey,
-                    quicknodeEndpoint
-                ))
-            ) {
-                return null;
-            }
-
-            record(`Artifact:Success`, strAddr);
-            return { artifact: data, fileName, contractName: eInfo.ContractName, input: inJson };
-        } catch (e: any) {
-            if (
-                e.message !== undefined &&
-                e.message.startsWith("Unsupported wasm compiler version")
-            ) {
-                record(`Artifact:UnsupportedWasmVersion`, strAddr);
-                return null;
-            }
-
-            if (e instanceof sol.CompileFailedError) {
-                for (const failure of e.failures) {
-                    console.error(
-                        failure.compilerVersion
-                            ? `SolcJS ${failure.compilerVersion}:`
-                            : "Unknown compiler:"
-                    );
-
-                    for (const error of failure.errors) {
-                        console.error(error);
-                    }
-                }
-            }
-
-            record(`Artifact:CompileError`, strAddr);
-            throw e;
         }
     }
 
+    cleanupArtifactBytecode(data);
+    const contractArtifact = data.contracts[fileName][contractName];
+
+    sol.assert(
+        contractArtifact !== undefined,
+        `Missing maing contract ${fileName}:${contractName}`
+    );
+
+    sol.assert(
+        contractArtifact.evm.bytecode.object !== "",
+        `Unexpected non-deployable main contract ${fileName}:${contractName}`
+    );
+
+    let compiledBytecode: Uint8Array;
     try {
-        const { data, files } = await sol.compileSourceString(
-            fileName,
-            eInfo.SourceCode,
-            version,
-            undefined,
-            [sol.CompilationOutput.ALL],
-            settings
-        );
-        addSourcesToResult(data, files);
-
-        if (
-            !(await fixUpBytecode(
-                data,
-                fileName,
-                eInfo.ContractName,
-                strAddr,
-                apiKey,
-                quicknodeEndpoint
-            ))
-        ) {
-            return null;
+        compiledBytecode = hexToBytes(`0x${contractArtifact.evm.deployedBytecode.object}`);
+    } catch (e) {
+        if (e instanceof RangeError) {
+            record(`bad_bytecode_chars`, strAddr);
         }
 
-        record(`Artifact:Success`, strAddr);
-        return { artifact: data, fileName, contractName: eInfo.ContractName };
-    } catch (e: any) {
-        if (e.message !== undefined && e.message.startsWith("Unsupported wasm compiler version")) {
-            record(`Artifact:UnsupportedWasmVersion`, strAddr);
-            return null;
-        }
-
-        if (e instanceof sol.CompileFailedError) {
-            for (const failure of e.failures) {
-                console.error(
-                    failure.compilerVersion
-                        ? `SolcJS ${failure.compilerVersion}:`
-                        : "Unknown compiler:"
-                );
-
-                for (const error of failure.errors) {
-                    console.error(error);
-                }
-            }
-        }
-
-        record(`Artifact:CompileError`, strAddr);
         throw e;
     }
+
+    // @todo should specify a block number here. Works for now for testing
+    const onChainBytecode = await qnGetCode(quicknodeEndpoint, strAddr, "latest");
+    if (onChainBytecode.length !== compiledBytecode.length) {
+        record(`different_lengths`, strAddr);
+        return null;
+    }
+
+    if (!equalsBytes(compiledBytecode, onChainBytecode)) {
+        if (!fixArtifactBytecodes(data, fileName, contractName, onChainBytecode)) {
+            record(`has_non_hash_diffs`, strAddr);
+            return null;
+        }
+    }
+
+    return { artifact: data, fileName, contractName, input: inJson };
 }
 
 const ARTIFACTS_CACHE_DIR = ".artifacts_cache";
@@ -545,7 +466,7 @@ export async function getArtifacts(
         if (art !== null) {
             assert(
                 art.fileName in art.artifact.contracts &&
-                    art.contractName in art.artifact.contracts[art.fileName],
+                art.contractName in art.artifact.contracts[art.fileName],
                 `Missing info for main contract {0}:{1}`,
                 art.fileName,
                 art.contractName
