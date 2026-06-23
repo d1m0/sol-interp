@@ -394,13 +394,18 @@ export class AlignedTraceBuilder extends BaseEEI {
                     res = undefined;
                 } else {
                     // For OoG/Error misalignment - add misalignment segment and continue in no-src mode
-                    const isOoG =
+                    const isImplicitEVMError =
                         e.llEvent instanceof EVMExceptionEvent &&
-                        e.llEvent.data.type === ExceptionType.OutOfGas;
-                    const segType = isOoG ? "misaligned:out-of-gas" : "misaligned:error";
+                        (e.llEvent.data.type === ExceptionType.OutOfGas ||
+                            e.llEvent.data.type === ExceptionType.Other);
+                    const segType = isImplicitEVMError
+                        ? "misaligned:low_level_exception"
+                        : "misaligned:error";
                     // @todo add hlAccount info to MisalginmentError? Or otherwise get it from somewhere else? Or remove need for it?
                     this.addSegment(segType, e.llEvent);
-                    this.curMode = isOoG ? "misaligned:out-of-gas" : "misaligned:error";
+                    this.curMode = isImplicitEVMError
+                        ? "misaligned:low_level_exception"
+                        : "misaligned:error";
                     res = undefined;
                 }
             }

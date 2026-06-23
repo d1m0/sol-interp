@@ -48,7 +48,7 @@ const misalignmentSamples: Array<[string, any]> = [
             [2, 2, "aligned", ["EVMCreateEvent", "SolCreateEvent"]],
             [3, 3, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
             [2, 2, "aligned", ["EVMCallEvent", "SolCallEvent"]],
-            [3, 3, "misaligned:out-of-gas", ["EVMExceptionEvent", "<undefined>"]],
+            [3, 3, "misaligned:low_level_exception", ["EVMExceptionEvent", "<undefined>"]],
             [2, 2, "aligned", ["EVMReturnEvent", "SolReturnEvent"]],
             [1, 1, "aligned", ["EVMReturnEvent", "SolReturnEvent"]]
         ]

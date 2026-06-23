@@ -265,7 +265,7 @@ export async function replayMainnetTX(
                 if (!hasMisaligned(alignedTraces)) {
                     record(`non_zero_w_source_aligned`, txReplayInfo.txHash);
                 } else {
-                    if (hasMisaligned(alignedTraces, "misaligned:out-of-gas")) {
+                    if (hasMisaligned(alignedTraces, "misaligned:low_level_exception")) {
                         record(`non_zero_w_source_out_of_gas`, txReplayInfo.txHash);
                     }
 

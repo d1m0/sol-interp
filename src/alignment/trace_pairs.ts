@@ -6,15 +6,20 @@ import { EVMObservableEvent, SolObservableEvent } from "./observable_events";
 
 // Pair misaligned due to some condition
 export type MisalignedPairTypes =
-    | "misaligned:out-of-gas"
+    // Misalignment due to the EVM trace runs into an exception not representable in Solidity (e.g. out-of-gas, stack over/under flow)
+    | "misaligned:low_level_exception"
+    // Misalignment due to the interpreter hitting inline assembly
     | "misaligned:inline_asm"
+    // Misalignment due to some other error
     | "misaligned:error";
 
 export type PairTypes = "aligned" | MisalignedPairTypes | "no-source";
 
 export function isMisalignmentPairType(t: string): t is MisalignedPairTypes {
     return (
-        t === "misaligned:out-of-gas" || t === "misaligned:inline_asm" || t === "misaligned:error"
+        t === "misaligned:low_level_exception" ||
+        t === "misaligned:inline_asm" ||
+        t === "misaligned:error"
     );
 }
 
