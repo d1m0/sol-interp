@@ -1,7 +1,6 @@
 import { InterpreterStep } from "@ethereumjs/evm";
 import { VM } from "@ethereumjs/vm";
 import {
-    addBasicInfo,
     addOpInfo,
     StepVMState,
     EventDesc,
@@ -32,6 +31,7 @@ import { StateManagerInterface } from "@ethereumjs/common";
 import { assert } from "../../utils";
 import { isOutOfGas } from "./utils";
 import { SolMessage } from "../../interp";
+import { addBasicInfo } from "./transformers/basic_info";
 
 /**
  * Annotated evm step struct used for aligning traces.

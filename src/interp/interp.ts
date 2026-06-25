@@ -3963,7 +3963,13 @@ export class Interpreter {
 
             for (const base of baseVal.bases) {
                 const t = resolve(def, base);
-                if (!(t && (!(t instanceof sol.FunctionDefinition) || t.vBody !== undefined))) {
+                if (
+                    !(
+                        t &&
+                        (!(t instanceof sol.FunctionDefinition) || t.vBody !== undefined) &&
+                        t.vScope === base
+                    )
+                ) {
                     continue;
                 }
 

@@ -6,3 +6,4 @@ export * from "./state_snapshot";
 export * from "./events";
 export * from "./code";
 export * from "./message";
+export * from "./basic_info";

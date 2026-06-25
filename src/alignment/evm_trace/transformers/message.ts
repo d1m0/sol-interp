@@ -40,17 +40,6 @@ export async function addMessage<T extends LowerStepT>(
 
     const lastStep = trace[trace.length - 1];
 
-    /*
-    // @todo for debugging only. delete
-    if (lastStep.op.opcode === OPCODES.SHA3) {
-        const off = Number(bigEndianBufToBigint(stackTop(lastStep.evmStack)))
-        const len = Number(bigEndianBufToBigint(stackInd(lastStep.evmStack, 1)))
-        const args = lastStep.memory.slice(off, off + len)
-        const res = stackTop(state.evmStack);
-        console.error(`KECCAK256(${bytesToHex(args)})=${bytesToHex(res)}`)
-    }
-    */
-
     // If there is no change to depth, then msg is the same as last step
     if (lastStep.depth === state.depth) {
         return {
