@@ -5,7 +5,7 @@ import { BasicStepInfo, Storage, OpInfo, ImmMap, OPCODES, wordToAddress } from "
 import { InterpreterStep } from "@ethereumjs/evm";
 import { assert } from "../../../utils";
 import { CreateInfo, WithCreateInfo } from "./create";
-import { WithCallInfo } from "./call";
+import { callWithNoTrace, WithCallInfo } from "./call";
 import { WithExceptionInfo } from "./exceptions";
 import { WithReturnInfo } from "./return";
 import { AccountInfo } from "../../../interp";
@@ -107,9 +107,8 @@ export async function addSnapshotInfo<T extends object & LowerStep>(
     // Take a snapshot of the caller and receiver to record the changes in balances
     if (
         lastStep &&
-        (lastStep.callInfo || lastStep.createInfo) &&
-        (state.depth === lastStep.depth + 1 ||
-            (lastStep.callInfo && lastStep.callInfo.callToNoCodeAccount))
+        ((lastStep.callInfo && callWithNoTrace(lastStep.callInfo)) ||
+            state.depth === lastStep.depth + 1)
     ) {
         const fromAddr = lastStep.address;
         const toAddr = lastStep.callInfo
