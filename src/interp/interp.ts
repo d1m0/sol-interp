@@ -4345,7 +4345,7 @@ export class Interpreter {
         const staticScope = this.makeStaticScope(nd, state);
 
         const localDecls = [...nd.vParameters.vParameters];
-        const localVals: Value[] = args;
+        const localVals: Value[] = [...args];
 
         // We keep the returns in the function scope as well
         if (nd instanceof sol.FunctionDefinition) {

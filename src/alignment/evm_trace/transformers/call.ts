@@ -76,6 +76,10 @@ function getCallOrCreateInfoAtStep(
     return step.createInfo;
 }
 
+export function callWithNoTrace(callInfo: CallInfo): boolean {
+    return callInfo.callToNoCodeAccount || callInfo.isPrecompile;
+}
+
 type LowerStepT = object & BasicStepInfo & OpInfo & WithCreateInfo;
 
 /**
@@ -89,6 +93,24 @@ export async function addCallInfo<T extends LowerStepT>(
     tx: TypedTransaction,
     callStack: number[]
 ): Promise<T & WithCallInfo> {
+    /**
+     * Its possible to have "no code" contracts with some code. E.g. for the code is 0xef0100000000009b1d0af20d8c6d0a44e162d11f9b8f00
+     * however calls to it, such as the one in tx 0x6a88f3c9a87d492d6f6b6080f4d75b43c8c60bfd80dfd8b39afffd6c423e75a3 succeed
+     */
+    if (trace.length > 0) {
+        const lastStep = trace[trace.length - 1];
+        if (lastStep.callInfo !== undefined && lastStep.depth === state.depth) {
+            // There are 2 possible ways to get here:
+            //  1. Successful call to a "no code" account
+            //  2. Exception in the dynamic gas handler of the first instruction of the account, such that we never saw that instruction
+            // Sadly there is no clear way to distinguish those. For now (hackily) assume its 1
+            if (!lastStep.callInfo.callToNoCodeAccount) {
+                callStack.pop();
+            }
+
+            lastStep.callInfo.callToNoCodeAccount = true;
+        }
+    }
     const op = state.op;
 
     if (!CALL_OPS.has(op.opcode)) {
@@ -146,7 +168,7 @@ export async function addCallInfo<T extends LowerStepT>(
     };
 
     // For calls to no-code accounts and precompiles there is no corresponding return. So don't push a call idx on the stack
-    if (callInfo.callToNoCodeAccount || callInfo.isPrecompile) {
+    if (callWithNoTrace(callInfo)) {
         callStack.pop();
     }
 
