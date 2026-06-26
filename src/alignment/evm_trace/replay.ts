@@ -199,17 +199,12 @@ export class EVMReplay {
 
             for (const tx of info.txs) {
                 const tracer = new EVMTracer(info.hardfork ? { forceHardfork: info.hardfork } : {});
-                const [trace, result, stateAfter] = await tracer.debugTx(
-                    {
-                        tx,
-                        block: info.block,
-                        stateBefore: res._curState.state,
-                        getBlock: async (num: bigint | number) => blockManager.getBlock(BigInt(num))
-                    },
-                    {
-                        callStack: [-1]
-                    }
-                );
+                const [trace, result, stateAfter] = await tracer.debugTx({
+                    tx,
+                    block: info.block,
+                    stateBefore: res._curState.state,
+                    getBlock: async (num: bigint | number) => blockManager.getBlock(BigInt(num))
+                });
 
                 if (tracer.failed) {
                     throw new EVMReplayError(...(tracer.failInfo as [number, any]));
@@ -271,17 +266,12 @@ export async function replayEVM(
     const stateManager = await makeStateManager(initialState);
 
     const tracer = new EVMTracer(forceHardfork ? { forceHardfork } : {});
-    const [trace, res, stateAfter] = await tracer.debugTx(
-        {
-            tx,
-            block,
-            stateBefore: stateManager,
-            getBlock: async (num) => blockManager.getBlock(BigInt(num))
-        },
-        {
-            callStack: [-1]
-        }
-    );
+    const [trace, res, stateAfter] = await tracer.debugTx({
+        tx,
+        block,
+        stateBefore: stateManager,
+        getBlock: async (num) => blockManager.getBlock(BigInt(num))
+    });
 
     if (tracer.failed) {
         throw new EVMReplayError(...(tracer.failInfo as [number, any]));

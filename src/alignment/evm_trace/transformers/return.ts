@@ -5,13 +5,12 @@ import {
     OPCODES,
     bigEndianBufToNumber,
     mustReadMem,
-    ZERO_ADDRESS
+    InstructionControlFlow
 } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import { Address } from "@ethereumjs/util";
-import { isCreate } from "../utils";
-import { TypedTransaction } from "@ethereumjs/tx";
-import { assert } from "../../../utils";
+import { TracerContext } from "../tracer";
+import { WithCallInfo } from "./call";
 
 /**
  * Interface with additional data regarding a RETURN/STOP op
@@ -28,18 +27,39 @@ export interface WithReturnInfo {
     returnInfo: ReturnInfo | undefined;
 }
 
+type LowerStep = object & BasicStepInfo & OpInfo & WithCallInfo;
+
 /**
  * Adds return info for steps that are about to return from the current context
  */
-export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
+export async function addReturnInfo<T extends LowerStep>(
     vm: VM,
     step: InterpreterStep,
     state: T,
     trace: Array<T & WithReturnInfo>,
-    callStack: number[],
-    tx: TypedTransaction
+    ctx: TracerContext
 ): Promise<T & WithReturnInfo> {
     const op = state.op;
+    const idx = state.callFrame.callOpStepIdx;
+    const newContract = state.callFrame.msg.isCreation() ? state.address : undefined;
+
+    const code = state.callFrame.code;
+
+    // Executing past the end of the code is equivalent to a STOP for any instruction
+    if (
+        state.pc === code.length - 1 &&
+        state.op.controlFlow === InstructionControlFlow.NextInstruction
+    ) {
+        ctx.callStack.pop();
+        return {
+            ...state,
+            returnInfo: {
+                retData: new Uint8Array(),
+                newContract,
+                correspCallIdx: idx
+            }
+        };
+    }
 
     if (
         op.opcode !== OPCODES.STOP &&
@@ -52,18 +72,16 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         };
     }
 
-    const idx = callStack.pop();
-    assert(idx !== undefined, ``);
-    const isCreation =
-        (idx > 0 && isCreate(trace[idx])) ||
-        (idx < 0 && (tx.to === undefined || tx.to.equals(ZERO_ADDRESS)));
+    ctx.callStack.pop();
 
-    if (op.opcode === OPCODES.STOP) {
+    if (
+        op.opcode === OPCODES.STOP
+    ) {
         return {
             ...state,
             returnInfo: {
                 retData: new Uint8Array(),
-                newContract: isCreation ? state.address : undefined,
+                newContract,
                 correspCallIdx: idx
             }
         };
@@ -89,7 +107,7 @@ export async function addReturnInfo<T extends object & BasicStepInfo & OpInfo>(
         ...state,
         returnInfo: {
             retData,
-            newContract: isCreation ? state.address : undefined,
+            newContract,
             correspCallIdx: idx
         }
     };

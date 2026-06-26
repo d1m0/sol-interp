@@ -22,13 +22,15 @@ import { OPCODES } from "sol-dbg";
  * This function returns the `SolMessage` of the callee context.
  */
 export function makeSolMessageFromCallCreateStep(s: EVMStep): SolMessage {
+    const msg = s.callFrame.msg;
+
     if (s.callInfo) {
         if (s.op.opcode === OPCODES.DELEGATECALL) {
-            return s.msg.delegatecall(s.callInfo.gas, s.callInfo.codeAddress, s.callInfo.msgData);
+            return msg.delegatecall(s.callInfo.gas, s.callInfo.codeAddress, s.callInfo.msgData);
         }
 
         if (s.op.opcode === OPCODES.CALLCODE) {
-            return s.msg.callcode(
+            return msg.callcode(
                 s.callInfo.gas,
                 s.callInfo.codeAddress,
                 s.callInfo.value,
@@ -37,12 +39,12 @@ export function makeSolMessageFromCallCreateStep(s: EVMStep): SolMessage {
         }
 
         if (s.op.opcode === OPCODES.STATICCALL) {
-            return s.msg.staticcall(s.callInfo.gas, s.callInfo.codeAddress, s.callInfo.msgData);
+            return msg.staticcall(s.callInfo.gas, s.callInfo.codeAddress, s.callInfo.msgData);
         }
 
         assert(s.op.opcode === OPCODES.CALL, `Unknown call opcode ${s.op.mnemonic}`);
 
-        return s.msg.call(
+        return msg.call(
             s.callInfo.gas,
             s.callInfo.codeAddress,
             s.callInfo.value,
@@ -51,7 +53,7 @@ export function makeSolMessageFromCallCreateStep(s: EVMStep): SolMessage {
     } else {
         assert(s.createInfo !== undefined, ``);
 
-        return s.msg.create(
+        return msg.create(
             s.createInfo.value,
             s.createInfo.salt,
             s.createInfo.msgData,
@@ -111,6 +113,10 @@ export enum PrecomiledAddresses {
     RIPEMD160,
     IDENTITY,
     MODEXP,
+    ECADD,
+    ECMUL,
+    ECPAIRING,
+    BLAKE2F,
     NUM
 }
 
@@ -119,7 +125,11 @@ const precompiles: Address[] = [
     createAddressFromBigInt(BigInt(PrecomiledAddresses.SHA256)),
     createAddressFromBigInt(BigInt(PrecomiledAddresses.RIPEMD160)),
     createAddressFromBigInt(BigInt(PrecomiledAddresses.IDENTITY)),
-    createAddressFromBigInt(BigInt(PrecomiledAddresses.MODEXP))
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.MODEXP)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.ECADD)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.ECMUL)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.ECPAIRING)),
+    createAddressFromBigInt(BigInt(PrecomiledAddresses.BLAKE2F))
 ];
 
 export function isPrecompile(addr: Address): boolean {

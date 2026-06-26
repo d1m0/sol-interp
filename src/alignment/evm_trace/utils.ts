@@ -59,12 +59,15 @@ export function rebuildStateFromTrace(
     for (let i = 0; i <= idx; i++) {
         const step = trace[i];
 
-        if (step.exceptionInfo) {
-            const oldState = stateMap.get(step.exceptionInfo.correspCallIdx);
-            assert(oldState !== undefined, ``);
-            // Restore the caller contract to the recorded state right after the exception.
-            // This is mostly to get the right nonce after a failed contract creation.
-            state = oldState;
+        if (i > 0) {
+            const lastStep = trace[i - 1];
+            if (lastStep.exceptionInfo) {
+                const oldState = stateMap.get(lastStep.exceptionInfo.correspCallIdx);
+                assert(oldState !== undefined, ``);
+                // Restore the caller contract to the recorded state right after the exception.
+                // This is mostly to get the right nonce after a failed contract creation.
+                state = oldState;
+            }
         }
 
         if (step.snapshotInfo) {
@@ -75,9 +78,9 @@ export function rebuildStateFromTrace(
             for (const deletedAcc of step.snapshotInfo.deletedAccounts) {
                 state = state.delete(deletedAcc);
             }
-
-            stateMap.set(i, state);
         }
+
+        stateMap.set(i, state);
     }
 
     return state;

@@ -15,22 +15,21 @@ import {
     addCreateInfo,
     addEventInfo,
     addExceptionInfo,
-    addMessage,
     addReturnInfo,
+    CallFrame,
     CallInfo,
     CreateInfo,
     ExceptionInfo,
     ExceptionType,
+    makeRootFrame,
     ReturnInfo
 } from "./transformers";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { addSnapshotInfo, SnapshotInfo } from "./transformers/state_snapshot";
 import { ArtifactManager } from "../../interp/artifactManager";
-import { addCodeInfo, CodeInfo } from "./transformers/code";
 import { StateManagerInterface } from "@ethereumjs/common";
 import { assert } from "../../utils";
 import { isOutOfGas } from "./utils";
-import { SolMessage } from "../../interp";
 import { addBasicInfo } from "./transformers/basic_info";
 
 /**
@@ -39,17 +38,16 @@ import { addBasicInfo } from "./transformers/basic_info";
 export interface EVMStep extends StepVMState {
     createInfo: CreateInfo | undefined;
     callInfo: CallInfo | undefined;
+    callFrame: CallFrame;
     returnInfo: ReturnInfo | undefined;
     emittedEvent: EventDesc | undefined;
     exceptionInfo: ExceptionInfo | undefined;
     snapshotInfo: SnapshotInfo | undefined;
-    codeInfo: CodeInfo;
-    msg: SolMessage;
 }
 
-interface TracerContext {
+export interface TracerContext {
     // Stack of indexes of the current *CALL* instructions
-    callStack: number[];
+    callStack: CallFrame[];
 }
 
 export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
@@ -59,9 +57,11 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
     }
 
     async debugTx(
-        info: TxReplayInfo,
-        ctx: TracerContext
+        info: TxReplayInfo
     ): Promise<[EVMStep[], FoundryTxResult, StateManagerInterface, TracerContext]> {
+        const ctx = {
+            callStack: [await makeRootFrame(info.tx, info.stateBefore)]
+        };
         const [trace, txRes, stateAfter, tracerCtx] = await super.debugTx(info, ctx);
 
         if (trace.length > 0) {
@@ -98,14 +98,12 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
         const opInfo = addOpInfo(vm, step, {});
         const basicInfo = await addBasicInfo(vm, step, opInfo, trace);
         const events = await addEventInfo(vm, step, basicInfo);
-        const withCreate = await addCreateInfo(vm, step, events, trace, ctx.callStack);
-        const withCall = await addCallInfo(vm, step, withCreate, trace, tx, ctx.callStack);
-        const withRet = await addReturnInfo(vm, step, withCall, trace, ctx.callStack, tx);
-        const withExceptions = await addExceptionInfo(vm, step, withRet, trace, ctx.callStack);
+        const withCreate = await addCreateInfo(vm, step, events, trace, ctx);
+        const withCall = await addCallInfo(vm, step, withCreate, trace, tx, ctx);
+        const withRet = await addReturnInfo(vm, step, withCall, trace, ctx);
+        const withExceptions = await addExceptionInfo(vm, step, withRet, trace, ctx);
         const withSnapshot = await addSnapshotInfo(vm, step, withExceptions, trace, tx);
-        const withCode = await addCodeInfo(vm, step, withSnapshot, trace, tx);
-        const withMessage = await addMessage(vm, step, withCode, trace, tx);
 
-        return [withMessage, ctx];
+        return [withSnapshot, ctx];
     }
 }

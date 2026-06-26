@@ -152,9 +152,10 @@ export function alignedTraceWellFormed(
             const addr = step.codeAddress !== undefined ? step.codeAddress : step.address;
             info = addrToInfoMap.get(addr.toString());
         } else {
-            info = step.codeInfo.isCreation
-                ? artifactManager.getContractFromCreationBytecode(step.codeInfo.code)
-                : artifactManager.getContractFromDeployedBytecode(step.codeInfo.code);
+            const frame = step.callFrame;
+            info = frame.msg.isCreation()
+                ? artifactManager.getContractFromCreationBytecode(frame.code)
+                : artifactManager.getContractFromDeployedBytecode(frame.code);
         }
 
         const hasAST = info !== undefined && info.ast !== undefined;

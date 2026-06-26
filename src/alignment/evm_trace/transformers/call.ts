@@ -1,4 +1,4 @@
-import { Address, bytesToBigInt } from "@ethereumjs/util";
+import { Address } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
 import {
     BasicStepInfo,
@@ -7,14 +7,51 @@ import {
     mustReadMem,
     OPCODES,
     OpInfo,
+    stackInd,
+    stackTop,
     wordToAddress,
     ZERO_ADDRESS
 } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import * as sol from "solc-typed-ast";
-import { PrecomiledAddresses } from "../../utils";
+import { isPrecompile } from "../../utils";
 import { TypedTransaction } from "@ethereumjs/tx";
-import { CreateInfo, WithCreateInfo } from "./create";
+import { WithCreateInfo } from "./create";
+import { SolMessage } from "../../../interp";
+import { makeSolMessage } from "../../trace_builder";
+import { StateManagerInterface } from "@ethereumjs/common";
+import { TracerContext } from "../tracer";
+
+export interface CallFrame {
+    // SolMessage giving rise to the current CallFrame
+    msg: SolMessage;
+    // Code being evaluated in the current CallFrame. Note that for contract creation frames this includes the constructor args.
+    code: Uint8Array;
+    // Index of the CALL/CREATE/CREATE2/DELEGATECALL/STATICCALL/CALLCODE opcode causing this frame.
+    // -1 for the root frame
+    callOpStepIdx: number;
+    parent: CallFrame | undefined;
+}
+
+export async function makeRootFrame(
+    tx: TypedTransaction,
+    state: StateManagerInterface
+): Promise<CallFrame> {
+    let code: Uint8Array;
+    if (tx.to === undefined || tx.to.equals(ZERO_ADDRESS)) {
+        // creation
+        code = tx.data;
+    } else {
+        code = await state.getCode(tx.to);
+    }
+
+    return {
+        msg: makeSolMessage(tx),
+        code,
+        callOpStepIdx: -1,
+        parent: undefined
+    };
+}
 
 /**
  * Interface with additional data regarding a *CALL* op
@@ -33,6 +70,7 @@ export interface CallInfo {
 
 export interface WithCallInfo {
     callInfo: CallInfo | undefined;
+    callFrame: CallFrame;
 }
 
 const CALL_OPS = new Set([
@@ -41,40 +79,6 @@ const CALL_OPS = new Set([
     OPCODES.DELEGATECALL,
     OPCODES.STATICCALL
 ]);
-
-function getRootCallInfo(tx: TypedTransaction, s: BasicStepInfo & OpInfo): CallInfo {
-    return {
-        address: tx.to === undefined ? ZERO_ADDRESS : tx.to,
-        codeAddress: s.address,
-        sender: tx.getSenderAddress(),
-        value: tx.value,
-        gas: tx.gasLimit,
-        msgData: tx.data,
-        nonce: tx.nonce,
-        callToNoCodeAccount: false,
-        isPrecompile: false
-    };
-}
-
-function getCallOrCreateInfoAtStep(
-    idx: number,
-    trace: Array<LowerStepT & WithCallInfo>,
-    tx: TypedTransaction
-): CallInfo | CreateInfo {
-    if (idx < 0) {
-        return getRootCallInfo(tx, trace[0]);
-    }
-
-    const step = trace[idx];
-    sol.assert(step !== undefined, ``);
-
-    if (step.callInfo) {
-        return step.callInfo;
-    }
-
-    sol.assert(step.createInfo !== undefined, ``);
-    return step.createInfo;
-}
 
 export function callWithNoTrace(callInfo: CallInfo): boolean {
     return callInfo.callToNoCodeAccount || callInfo.isPrecompile;
@@ -91,7 +95,7 @@ export async function addCallInfo<T extends LowerStepT>(
     state: T,
     trace: Array<T & WithCallInfo>,
     tx: TypedTransaction,
-    callStack: number[]
+    ctx: TracerContext
 ): Promise<T & WithCallInfo> {
     /**
      * Its possible to have "no code" contracts with some code. E.g. for the code is 0xef0100000000009b1d0af20d8c6d0a44e162d11f9b8f00
@@ -105,75 +109,103 @@ export async function addCallInfo<T extends LowerStepT>(
             //  2. Exception in the dynamic gas handler of the first instruction of the account, such that we never saw that instruction
             // Sadly there is no clear way to distinguish those. For now (hackily) assume its 1
             if (!lastStep.callInfo.callToNoCodeAccount) {
-                callStack.pop();
+                ctx.callStack.pop();
             }
 
             lastStep.callInfo.callToNoCodeAccount = true;
         }
     }
+
     const op = state.op;
+    const curFrame: CallFrame = stackTop(ctx.callStack);
 
     if (!CALL_OPS.has(op.opcode)) {
         return {
             ...state,
-            callInfo: undefined
+            callInfo: undefined,
+            callFrame: curFrame
         };
     }
 
-    const lastCallStep = callStack[callStack.length - 1];
-    const curInfo = getCallOrCreateInfoAtStep(lastCallStep, trace, tx);
+    let gas: bigint;
+    let receiver: Address;
+    let value: bigint;
+    let msgData: Uint8Array;
+    let newMsg: SolMessage;
 
-    callStack.push(trace.length);
-
-    const stackTop = state.evmStack.length - 1;
-    const argStackOff = op.opcode === OPCODES.CALL || op.opcode === OPCODES.CALLCODE ? 3 : 2;
-    const argSizeStackOff = argStackOff + 1;
-
-    const receiverArg = wordToAddress(state.evmStack[stackTop - 1]);
-
-    const address = op.opcode === OPCODES.DELEGATECALL ? state.address : receiverArg;
-    const codeAddress = receiverArg;
-
-    const receiverCode = await vm.stateManager.getCode(receiverArg);
-
-    const gas = bigEndianBufToBigint(state.evmStack[stackTop]);
-    let value = 0n;
-
-    if (op.opcode === OPCODES.CALL || op.opcode === OPCODES.CALLCODE) {
-        value = bigEndianBufToBigint(state.evmStack[stackTop - 2]);
+    if (op.opcode === OPCODES.CALL) {
+        gas = bigEndianBufToBigint(stackTop(state.evmStack));
+        receiver = wordToAddress(stackInd(state.evmStack, 1));
+        value = bigEndianBufToBigint(stackInd(state.evmStack, 2));
+        const argOffset = bigEndianBufToNumber(stackInd(state.evmStack, 3));
+        const argSize = bigEndianBufToNumber(stackInd(state.evmStack, 4));
+        msgData = argSize === 0 ? new Uint8Array() : mustReadMem(argOffset, argSize, state.memory);
+        newMsg = curFrame.msg.call(gas, receiver, value, msgData);
+    } else if (op.opcode === OPCODES.CALLCODE) {
+        gas = bigEndianBufToBigint(stackTop(state.evmStack));
+        receiver = wordToAddress(stackInd(state.evmStack, 1));
+        value = bigEndianBufToBigint(stackInd(state.evmStack, 2));
+        const argOffset = bigEndianBufToNumber(stackInd(state.evmStack, 3));
+        const argSize = bigEndianBufToNumber(stackInd(state.evmStack, 4));
+        msgData = argSize === 0 ? new Uint8Array() : mustReadMem(argOffset, argSize, state.memory);
+        newMsg = curFrame.msg.callcode(gas, receiver, value, msgData);
     } else if (op.opcode === OPCODES.DELEGATECALL) {
-        value = curInfo.value;
+        gas = bigEndianBufToBigint(stackTop(state.evmStack));
+        receiver = wordToAddress(stackInd(state.evmStack, 1));
+        const argOffset = bigEndianBufToNumber(stackInd(state.evmStack, 2));
+        const argSize = bigEndianBufToNumber(stackInd(state.evmStack, 3));
+        msgData = argSize === 0 ? new Uint8Array() : mustReadMem(argOffset, argSize, state.memory);
+        newMsg = curFrame.msg.delegatecall(gas, receiver, msgData);
+        value = curFrame.msg.value;
+    } else {
+        sol.assert(op.opcode === OPCODES.STATICCALL, `NYI Call op {0}`, op.mnemonic);
+        gas = bigEndianBufToBigint(stackTop(state.evmStack));
+        receiver = wordToAddress(stackInd(state.evmStack, 1));
+        value = 0n;
+        const argOffset = bigEndianBufToNumber(stackInd(state.evmStack, 2));
+        const argSize = bigEndianBufToNumber(stackInd(state.evmStack, 3));
+        msgData = argSize === 0 ? new Uint8Array() : mustReadMem(argOffset, argSize, state.memory);
+        newMsg = curFrame.msg.staticcall(gas, receiver, msgData);
     }
 
-    const start = bigEndianBufToNumber(state.evmStack[stackTop - argStackOff]);
-    const size = bigEndianBufToNumber(state.evmStack[stackTop - argSizeStackOff]);
-    const msgData = size === 0 ? new Uint8Array() : mustReadMem(start, size, state.memory);
+    const code = await vm.stateManager.getCode(receiver);
+    const newFrame: CallFrame = {
+        msg: newMsg,
+        code,
+        callOpStepIdx: trace.length,
+        parent: curFrame
+    };
 
-    const isPrecompile = bytesToBigInt(receiverArg.bytes) < PrecomiledAddresses.NUM;
+    ctx.callStack.push(newFrame);
+
     const callerAccount = await vm.stateManager.getAccount(step.address);
     sol.assert(callerAccount !== undefined, ``);
 
-    const sender = op.opcode === OPCODES.DELEGATECALL ? curInfo.sender : step.address;
+    const sender = op.opcode === OPCODES.DELEGATECALL ? curFrame.msg.sender : step.address;
 
     const callInfo: CallInfo = {
-        address,
-        codeAddress,
+        address:
+            op.opcode === OPCODES.DELEGATECALL || op.opcode === OPCODES.CALLCODE
+                ? state.address
+                : receiver,
+        codeAddress: receiver,
         value,
         sender,
         gas,
         msgData,
         nonce: callerAccount.nonce,
-        callToNoCodeAccount: receiverCode.length === 0,
-        isPrecompile
+        callToNoCodeAccount: code.length === 0,
+        isPrecompile: isPrecompile(receiver)
     };
 
     // For calls to no-code accounts and precompiles there is no corresponding return. So don't push a call idx on the stack
     if (callWithNoTrace(callInfo)) {
-        callStack.pop();
+        ctx.callStack.pop();
     }
 
     return {
         ...state,
-        callInfo
+        callInfo,
+        callFrame: curFrame
     };
 }

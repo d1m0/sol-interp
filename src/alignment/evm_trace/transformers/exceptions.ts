@@ -1,7 +1,10 @@
 import { VM } from "@ethereumjs/vm";
 import { BasicStepInfo, bigEndianBufToNumber, mustReadMem, OPCODES, OpInfo } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
-import { isOutOfGas, isNonExceptionTermination } from "../utils";
+import { isOutOfGas } from "../utils";
+import { TracerContext } from "../tracer";
+import { WithCallInfo } from "./call";
+import { WithReturnInfo } from "./return";
 
 export enum ExceptionType {
     Revert = 0,
@@ -26,17 +29,19 @@ export interface WithExceptionInfo {
     exceptionInfo: ExceptionInfo | undefined;
 }
 
+type LowerStep = object & BasicStepInfo & OpInfo & WithCallInfo & WithReturnInfo;
+
 /**
  * If the *previous* step in the trace caused an exception
  */
-export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo>(
+export async function addExceptionInfo<T extends LowerStep>(
     vm: VM,
     step: InterpreterStep,
     state: T,
     trace: Array<T & WithExceptionInfo>,
-    callStack: number[]
+    ctx: TracerContext
 ): Promise<T & WithExceptionInfo> {
-    const correspCallIdx = callStack[callStack.length - 1];
+    const correspCallIdx = state.callFrame.callOpStepIdx;
 
     // Explicit revert
     if (state.op.opcode === OPCODES.REVERT) {
@@ -45,7 +50,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
         const size = bigEndianBufToNumber(state.evmStack[stackTop - 1]);
         const excData = size === 0 ? new Uint8Array() : mustReadMem(start, size, state.memory);
 
-        callStack.pop();
+        ctx.callStack.pop();
         return {
             ...state,
             exceptionInfo: {
@@ -58,7 +63,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     // Explicit invalid excepetion (old-style assert)
     if (!state.op.valid) {
-        callStack.pop();
+        ctx.callStack.pop();
         return {
             ...state,
             exceptionInfo: {
@@ -71,7 +76,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     // Out-of-gas
     if (isOutOfGas(state)) {
-        callStack.pop();
+        ctx.callStack.pop();
         return {
             ...state,
             exceptionInfo: {
@@ -112,7 +117,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
 
     if (
         lastStep.depth <= state.depth ||
-        isNonExceptionTermination(lastStep) ||
+        lastStep.returnInfo !== undefined ||
         lastStep.exceptionInfo !== undefined
     ) {
         return {
@@ -127,7 +132,7 @@ export async function addExceptionInfo<T extends object & BasicStepInfo & OpInfo
         correspCallIdx
     };
 
-    callStack.pop();
+    ctx.callStack.pop();
     return {
         ...state,
         exceptionInfo: undefined
