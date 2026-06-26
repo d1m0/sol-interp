@@ -17,6 +17,7 @@ import { WithExceptionInfo } from "./transformers";
 import { isCall, isCreate } from "./utils";
 import { assert } from "../../utils";
 import { getCommonForBlock, getCommon } from "sol-dbg/dist/debug/tracers/common";
+import { paramsEVM } from "@ethereumjs/evm";
 
 /**
  * Build a `MerkleStateManager` corresponding to the provided `initialState`.
@@ -260,6 +261,7 @@ export async function replayEVM(
 ): Promise<[EVMStep[], RunTxResult, StateManagerInterface, Block, TypedTransaction]> {
     const common: Common =
         forceHardfork !== undefined ? getCommon(forceHardfork) : getCommonForBlock(blockData);
+    common.updateParams(paramsEVM);
     const tx = makeFakeTransaction(txData, sender, common);
 
     const block = createBlock(blockData, { common });

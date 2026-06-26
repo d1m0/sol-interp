@@ -3,7 +3,14 @@
  */
 import { EventDesc } from "sol-dbg";
 import { EVMStep } from "../evm_trace";
-import { CallInfo, CreateInfo, ExceptionInfo, ReturnInfo } from "../evm_trace/transformers";
+import {
+    CallInfo,
+    CreateInfo,
+    ExceptionInfo,
+    ExceptionType,
+    ReturnInfo
+} from "../evm_trace/transformers";
+import { bytesToBigInt } from "@ethereumjs/util";
 
 type EVMPayloadTypes = CallInfo | CreateInfo | ExceptionInfo | ReturnInfo | EventDesc | bigint;
 
@@ -33,6 +40,16 @@ export class EVMReturnNoContractEvent extends EVMEvent<ReturnInfo> {
 
 export class EVMExceptionEvent extends EVMEvent<ExceptionInfo> {}
 
+export class EVMExceptionNoContractEvent extends EVMEvent<ExceptionInfo> {
+    constructor(idx: number, step: EVMStep) {
+        super(idx, step, {
+            excData: new Uint8Array(),
+            type: ExceptionType.Other,
+            correspCallIdx: -1
+        });
+    }
+}
+
 export class EVMEmitEvent extends EVMEvent<EventDesc> {}
 
 /**
@@ -47,8 +64,24 @@ export type EVMObservableEvent =
     | EVMReturnEvent
     | EVMReturnNoContractEvent
     | EVMExceptionEvent
+    | EVMExceptionNoContractEvent
     | EVMEmitEvent
     | EVMGasLeft;
+
+/**
+ * Returns true IFF this step calls one of the precompiles for which we have Solidity-level builtins.
+ * Currently this includes:
+ *  -sha256
+ *  -ripemd160
+ *  -ecrecover
+ */
+function callToSolidityBuiltinPrecompile(step: EVMStep): boolean {
+    return (
+        step.callInfo !== undefined &&
+        step.callInfo.isPrecompile &&
+        bytesToBigInt(step.callInfo.address.bytes) <= 0x3
+    );
+}
 
 export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservableEvent | undefined {
     for (let i = afterIdx; i < trace.length; i++) {
@@ -60,7 +93,7 @@ export function findNextEvent(trace: EVMStep[], afterIdx: number): EVMObservable
             return new EVMCreateEvent(i, step, step.createInfo);
         } else if (step.returnInfo) {
             return new EVMReturnEvent(i, step, step.returnInfo);
-        } else if (step.callInfo && !step.callInfo.isPrecompile) {
+        } else if (step.callInfo && !callToSolidityBuiltinPrecompile(step)) {
             return new EVMCallEvent(i, step, step.callInfo);
         } else if (step.emittedEvent) {
             return new EVMEmitEvent(i, step, step.emittedEvent);

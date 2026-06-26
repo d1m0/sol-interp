@@ -33,6 +33,7 @@ import {
     EVMCreateEvent,
     EVMEmitEvent,
     EVMExceptionEvent,
+    EVMExceptionNoContractEvent,
     EVMGasLeft,
     EVMObservableEvent,
     EVMReturnEvent,
@@ -46,10 +47,11 @@ import {
     SolObservableEvent,
     SolReturnEvent
 } from "./observable_events";
-import { makeCallResultFromStep, makeSolMessageFromCallCreateStep } from "./utils";
+import { isPrecompile, makeCallResultFromStep, makeSolMessageFromCallCreateStep } from "./utils";
 import { AlignedTraces, isMisalignmentPairType, PairTypes } from "./trace_pairs";
 import { bytesToBigInt, bytesToHex } from "@ethereumjs/util";
-import { ExceptionType } from "./evm_trace/transformers";
+import { CallInfo, ExceptionType } from "./evm_trace/transformers";
+import { getActivePrecompiles } from "@ethereumjs/evm";
 
 /**
  * Given a `TypedTxData` `tx` and a `sender` `Address` build the corresponding `SolMessage`.
@@ -251,6 +253,41 @@ export class AlignedTraceBuilder extends BaseEEI {
     }
 
     /**
+     * Run the precompile invoked by `msg`
+     */
+    runPrecompile(msg: SolMessage, gasLimit: bigint): CallResult {
+        const common = this.block.common;
+        const precompileMap = getActivePrecompiles(common);
+        const strAddr = msg.to.toString().slice(2);
+        const precompile = precompileMap.get(strAddr);
+
+        this.expect(precompile !== undefined, `Unknown precompile ${strAddr}`);
+
+        const res = precompile({
+            data: msg.data,
+            gasLimit,
+            common,
+            _EVM: undefined as unknown as any
+        });
+        this.expect(
+            !(res instanceof Promise),
+            `We don't support async precompiles yet (addr: ${strAddr})`
+        );
+
+        if (res.exceptionError !== undefined) {
+            return {
+                reverted: true,
+                data: new Uint8Array()
+            };
+        } else {
+            return {
+                reverted: false,
+                data: res.returnValue
+            };
+        }
+    }
+
+    /**
      * Execute a message. May be called either from:
      * 1) The interpreter - in which case `alreadyAligned` is false, and we first need to align the traces to the next *CALL instruction
      * 2) Recursively by itself - in this case `alreadyAligned` should be true, and the traces already aligned up to the current call
@@ -309,14 +346,30 @@ export class AlignedTraceBuilder extends BaseEEI {
 
             const reverted = fromAccount.balance < msg.value;
 
-            // This should push an empty low-level no-source trace pair and leave currentLLIdx unchanged
-            if (calleeFirstStep > 0) {
-                this.addNoSourceSegment(
-                    new EVMReturnNoContractEvent(
-                        this.currentLLIdx - 1,
-                        this.lowLevelTrace[this.currentLLIdx - 1]
-                    )
-                );
+            // Adds an empty segment corresponding to the executed no contract call
+            this.addNoSourceSegment(
+                reverted
+                    ? new EVMExceptionNoContractEvent(
+                          this.currentLLIdx - 1,
+                          this.lowLevelTrace[this.currentLLIdx - 1]
+                      )
+                    : new EVMReturnNoContractEvent(
+                          this.currentLLIdx - 1,
+                          this.lowLevelTrace[this.currentLLIdx - 1]
+                      )
+            );
+
+            if (reverted) {
+                return {
+                    reverted: true,
+                    data: new Uint8Array()
+                };
+            } else if (calleeFirstStep <= 0) {
+                // Case when the root call is a call to an outside account (e.g. Eth transfer)
+                return {
+                    reverted: false,
+                    data: new Uint8Array()
+                };
             }
 
             // Need to update state from the next step to catch the changed balances
@@ -324,7 +377,12 @@ export class AlignedTraceBuilder extends BaseEEI {
                 this.updateStateFromLLStep(calleeFirstStep);
             }
 
-            return { reverted, data: new Uint8Array() };
+            if (isPrecompile(msg.to)) {
+                const gasLimit = (this.lowLevelTrace[calleeFirstStep - 1].callInfo as CallInfo).gas;
+                return this.runPrecompile(msg, gasLimit);
+            }
+
+            return { reverted: false, data: new Uint8Array() };
         }
 
         // 3. Remember mdoe

@@ -34,6 +34,7 @@
         "@ethereumjs/common": "10.1.2",
         "@ethereumjs/statemanager": "10.1.2",
         "@ethereumjs/vm": "10.1.2",
+        "@ethereumjs/evm": "10.1.2",
         "semver": "^7.6.3",
         "web3-eth-abi": "^4.4.1",
         "src-location": "^1.1.0",
