@@ -19,6 +19,8 @@ import {
     Storage
 } from "sol-dbg";
 import { isCall } from "../utils";
+import { SolMessage } from "../../../interp";
+import { TracerContext } from "../tracer";
 
 export async function getStorage(manager: StateManagerInterface, addr: Address): Promise<Storage> {
     const rawStorage = await (manager as MerkleStateManager).dumpStorage(addr);
@@ -35,6 +37,17 @@ export async function getStorage(manager: StateManagerInterface, addr: Address):
     return ImmMap.fromEntries(storageEntries);
 }
 
+export interface CallFrame {
+    // SolMessage giving rise to the current CallFrame
+    msg: SolMessage;
+    // Code being evaluated in the current CallFrame. Note that for contract creation frames this includes the constructor args.
+    code: Uint8Array;
+    // Index of the CALL/CREATE/CREATE2/DELEGATECALL/STATICCALL/CALLCODE opcode causing this frame.
+    // -1 for the root frame
+    callOpStepIdx: number;
+    parent: CallFrame | undefined;
+}
+
 export interface BasicStepInfo {
     evmStack: Stack;
     memory: Memory;
@@ -47,6 +60,7 @@ export interface BasicStepInfo {
     depth: number;
     address: Address;
     codeAddress: Address;
+    callFrame: CallFrame;
 }
 
 function storageChanged<T extends object & OpInfo>(
@@ -114,7 +128,8 @@ export async function addBasicInfo<T extends LowerStep>(
     vm: VM,
     step: InterpreterStep,
     state: T,
-    trace: Array<T & BasicStepInfo>
+    trace: Array<T & BasicStepInfo>,
+    ctx: TracerContext
 ): Promise<T & BasicStepInfo> {
     const evmStack = step.stack.map((word) => bigIntToBuf(word, 32, "big"));
     const lastStep = trace.length > 0 ? trace[trace.length - 1] : undefined;
@@ -146,6 +161,7 @@ export async function addBasicInfo<T extends LowerStep>(
         gas: step.gasLeft,
         depth: step.depth + 1,
         address: step.address,
-        codeAddress: step.codeAddress
+        codeAddress: step.codeAddress,
+        callFrame: stackTop(ctx.callStack)
     };
 }

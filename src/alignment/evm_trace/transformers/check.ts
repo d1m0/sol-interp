@@ -3,7 +3,6 @@ import { WithCallInfo } from "./call";
 import { WithCreateInfo } from "./create";
 import { WithExceptionInfo } from "./exceptions";
 import { WithReturnInfo } from "./return";
-import { WithMessage } from "./message";
 import { VM } from "@ethereumjs/vm";
 import { InterpreterStep } from "@ethereumjs/evm";
 import { equalsBytes } from "@ethereumjs/util";
@@ -15,8 +14,7 @@ type LowerStepT = object &
     WithCallInfo &
     WithCreateInfo &
     WithReturnInfo &
-    WithExceptionInfo &
-    WithMessage;
+    WithExceptionInfo;
 
 /**
  * Check we are not missing memory or storage. This transformer is only used for debugging sol-interp/sol-dbg itself.

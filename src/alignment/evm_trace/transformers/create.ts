@@ -13,7 +13,7 @@ import {
 import { InterpreterStep } from "@ethereumjs/evm";
 import { assert } from "../../../utils";
 import { TracerContext } from "../tracer";
-import { CallFrame } from "./call";
+import { CallFrame } from "./basic_info";
 
 /**
  * Interface with additional data regarding a CREATE/CREATE2 op
@@ -78,6 +78,7 @@ export async function addCreateInfo<T extends object & BasicStepInfo & OpInfo>(
         callOpStepIdx: trace.length,
         parent: curFrame
     };
+
     ctx.callStack.push(newFrame);
 
     const createInfo: CreateInfo = {

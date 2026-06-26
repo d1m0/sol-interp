@@ -1,7 +1,6 @@
 import { Address } from "@ethereumjs/util";
 import { VM } from "@ethereumjs/vm";
 import {
-    BasicStepInfo,
     bigEndianBufToBigint,
     bigEndianBufToNumber,
     mustReadMem,
@@ -9,8 +8,7 @@ import {
     OpInfo,
     stackInd,
     stackTop,
-    wordToAddress,
-    ZERO_ADDRESS
+    wordToAddress
 } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import * as sol from "solc-typed-ast";
@@ -18,40 +16,8 @@ import { isPrecompile } from "../../utils";
 import { TypedTransaction } from "@ethereumjs/tx";
 import { WithCreateInfo } from "./create";
 import { SolMessage } from "../../../interp";
-import { makeSolMessage } from "../../trace_builder";
-import { StateManagerInterface } from "@ethereumjs/common";
 import { TracerContext } from "../tracer";
-
-export interface CallFrame {
-    // SolMessage giving rise to the current CallFrame
-    msg: SolMessage;
-    // Code being evaluated in the current CallFrame. Note that for contract creation frames this includes the constructor args.
-    code: Uint8Array;
-    // Index of the CALL/CREATE/CREATE2/DELEGATECALL/STATICCALL/CALLCODE opcode causing this frame.
-    // -1 for the root frame
-    callOpStepIdx: number;
-    parent: CallFrame | undefined;
-}
-
-export async function makeRootFrame(
-    tx: TypedTransaction,
-    state: StateManagerInterface
-): Promise<CallFrame> {
-    let code: Uint8Array;
-    if (tx.to === undefined || tx.to.equals(ZERO_ADDRESS)) {
-        // creation
-        code = tx.data;
-    } else {
-        code = await state.getCode(tx.to);
-    }
-
-    return {
-        msg: makeSolMessage(tx),
-        code,
-        callOpStepIdx: -1,
-        parent: undefined
-    };
-}
+import { BasicStepInfo, CallFrame } from "./basic_info";
 
 /**
  * Interface with additional data regarding a *CALL* op
@@ -70,7 +36,6 @@ export interface CallInfo {
 
 export interface WithCallInfo {
     callInfo: CallInfo | undefined;
-    callFrame: CallFrame;
 }
 
 const CALL_OPS = new Set([
@@ -117,13 +82,12 @@ export async function addCallInfo<T extends LowerStepT>(
     }
 
     const op = state.op;
-    const curFrame: CallFrame = stackTop(ctx.callStack);
+    const curFrame = state.callFrame;
 
     if (!CALL_OPS.has(op.opcode)) {
         return {
             ...state,
-            callInfo: undefined,
-            callFrame: curFrame
+            callInfo: undefined
         };
     }
 
@@ -205,7 +169,6 @@ export async function addCallInfo<T extends LowerStepT>(
 
     return {
         ...state,
-        callInfo,
-        callFrame: curFrame
+        callInfo
     };
 }

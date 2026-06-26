@@ -1,6 +1,5 @@
 import { VM } from "@ethereumjs/vm";
 import {
-    BasicStepInfo,
     OpInfo,
     OPCODES,
     bigEndianBufToNumber,
@@ -10,7 +9,7 @@ import {
 import { InterpreterStep } from "@ethereumjs/evm";
 import { Address } from "@ethereumjs/util";
 import { TracerContext } from "../tracer";
-import { WithCallInfo } from "./call";
+import { BasicStepInfo } from "./basic_info";
 
 /**
  * Interface with additional data regarding a RETURN/STOP op
@@ -27,7 +26,7 @@ export interface WithReturnInfo {
     returnInfo: ReturnInfo | undefined;
 }
 
-type LowerStep = object & BasicStepInfo & OpInfo & WithCallInfo;
+type LowerStep = object & BasicStepInfo & OpInfo;
 
 /**
  * Adds return info for steps that are about to return from the current context
@@ -74,9 +73,7 @@ export async function addReturnInfo<T extends LowerStep>(
 
     ctx.callStack.pop();
 
-    if (
-        op.opcode === OPCODES.STOP
-    ) {
+    if (op.opcode === OPCODES.STOP) {
         return {
             ...state,
             returnInfo: {

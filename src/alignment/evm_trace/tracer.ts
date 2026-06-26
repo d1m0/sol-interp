@@ -8,7 +8,8 @@ import {
     TracerOpts,
     FoundryTxResult,
     OPCODES,
-    TxReplayInfo
+    TxReplayInfo,
+    ZERO_ADDRESS
 } from "sol-dbg";
 import {
     addCallInfo,
@@ -21,7 +22,6 @@ import {
     CreateInfo,
     ExceptionInfo,
     ExceptionType,
-    makeRootFrame,
     ReturnInfo
 } from "./transformers";
 import { TypedTransaction } from "@ethereumjs/tx";
@@ -31,6 +31,7 @@ import { StateManagerInterface } from "@ethereumjs/common";
 import { assert } from "../../utils";
 import { isOutOfGas } from "./utils";
 import { addBasicInfo } from "./transformers/basic_info";
+import { makeSolMessage } from "../trace_builder";
 
 /**
  * Annotated evm step struct used for aligning traces.
@@ -48,6 +49,26 @@ export interface EVMStep extends StepVMState {
 export interface TracerContext {
     // Stack of indexes of the current *CALL* instructions
     callStack: CallFrame[];
+}
+
+async function makeRootFrame(
+    tx: TypedTransaction,
+    state: StateManagerInterface
+): Promise<CallFrame> {
+    let code: Uint8Array;
+    if (tx.to === undefined || tx.to.equals(ZERO_ADDRESS)) {
+        // creation
+        code = tx.data;
+    } else {
+        code = await state.getCode(tx.to);
+    }
+
+    return {
+        msg: makeSolMessage(tx),
+        code,
+        callOpStepIdx: -1,
+        parent: undefined
+    };
 }
 
 export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
@@ -96,7 +117,7 @@ export class EVMTracer extends BaseSolTxTracer<EVMStep, TracerContext> {
         ctx: TracerContext
     ): Promise<[EVMStep, TracerContext]> {
         const opInfo = addOpInfo(vm, step, {});
-        const basicInfo = await addBasicInfo(vm, step, opInfo, trace);
+        const basicInfo = await addBasicInfo(vm, step, opInfo, trace, ctx);
         const events = await addEventInfo(vm, step, basicInfo);
         const withCreate = await addCreateInfo(vm, step, events, trace, ctx);
         const withCall = await addCallInfo(vm, step, withCreate, trace, tx, ctx);

@@ -1,10 +1,10 @@
 import { VM } from "@ethereumjs/vm";
-import { BasicStepInfo, bigEndianBufToNumber, mustReadMem, OPCODES, OpInfo } from "sol-dbg";
+import { bigEndianBufToNumber, mustReadMem, OPCODES, OpInfo } from "sol-dbg";
 import { InterpreterStep } from "@ethereumjs/evm";
 import { isOutOfGas } from "../utils";
 import { TracerContext } from "../tracer";
-import { WithCallInfo } from "./call";
 import { WithReturnInfo } from "./return";
+import { BasicStepInfo } from "./basic_info";
 
 export enum ExceptionType {
     Revert = 0,
@@ -29,7 +29,7 @@ export interface WithExceptionInfo {
     exceptionInfo: ExceptionInfo | undefined;
 }
 
-type LowerStep = object & BasicStepInfo & OpInfo & WithCallInfo & WithReturnInfo;
+type LowerStep = object & BasicStepInfo & OpInfo & WithReturnInfo;
 
 /**
  * If the *previous* step in the trace caused an exception
