@@ -25,8 +25,8 @@
     },
     "dependencies": {
         "commander": "14.0.2",
-        "solc-typed-ast": "20.0.8",
-        "sol-dbg": "0.10.13",
+        "solc-typed-ast": "20.0.9",
+        "sol-dbg": "0.10.14",
         "@ethereumjs/util": "10.1.2",
         "@ethereumjs/tx": "10.1.2",
         "@ethereumjs/rlp": "10.1.2",
