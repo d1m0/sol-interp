@@ -26,6 +26,7 @@ import { assert } from "../utils";
 import { keccak256 } from "ethereum-cryptography/keccak";
 import { bigIntToBuf, Storage } from "sol-dbg";
 import { createAddressFromString, hexToBigInt } from "@ethereumjs/util";
+import { Capability, isBlob4844Tx, LegacyTx, TypedTransaction } from "@ethereumjs/tx";
 
 /**
  * Given a map from addresses to contract identifiers of the form `fileName:contractName` and an AccountMap `state`
@@ -213,7 +214,8 @@ export async function replayMainnetTX(
         addrsArtifactInfoAndMainContractId.map(([addr, info, id]) => [addr, [info, id]])
     );
 
-    const interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
+    let interpPreState = tracerStorageToStorageDump(txReplayInfo.preState);
+    interpPreState = subtractTxGasCostFromSender(evmTx, interpPreState);
     addArtifactToAccountMap(interpPreState, addrToArtifactAndContractId);
 
     const prevBlocks = blockManager.getCachedBlocks();
@@ -282,4 +284,22 @@ export async function replayMainnetTX(
     }
 
     return [artifactManager, alignedTraces, addrToArtifactAndContractId];
+}
+
+/**
+ * Tweak the initial state to subtract the TX gas cost from the tx sender's balance before replaying in the interpreter.
+ */
+function subtractTxGasCostFromSender(tx: TypedTransaction, interpPreState: AccountMap): AccountMap {
+    const sender = tx.getSenderAddress();
+    const senderAccount = interpPreState.get(sender.toString());
+    assert(senderAccount !== undefined, `No sender ${sender.toString()}`);
+    assert(!isBlob4844Tx(tx) || tx.numBlobs() === 0, `NYI: blob gas in TX gas cost calculations`);
+    assert(!tx.supports(Capability.EIP1559FeeMarket), `NYI: Computing TX gasPrice for EIP1559`);
+
+    const txGasCost = tx.gasLimit * (tx as LegacyTx).gasPrice;
+
+    return interpPreState.set(sender.toString(), {
+        ...senderAccount,
+        balance: senderAccount.balance - txGasCost
+    });
 }

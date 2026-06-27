@@ -23,7 +23,7 @@ import { concatBytes } from "@ethereumjs/util";
  * Encode a reference-type event argument `v` into bytes suitable for hashing it to a topic.
  * Follows: https://docs.soliditylang.org/en/latest/abi-spec.html#encoding-of-indexed-event-parameters
  */
-export function encodeEventArgToTopic(v: Value, type: BaseInterpType, state: State): Uint8Array {
+function encodeEventArgToTopic(v: Value, type: BaseInterpType, state: State): Uint8Array {
     if (type instanceof PointerType) {
         const toT = type.toType;
 
