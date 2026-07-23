@@ -1,20 +1,8 @@
 Errors:
-- OoG masked by not showing the last instruction (ethereumjs bug https://github.com/ethereumjs/ethereumjs-monorepo/issues/4313)
-    0x9abf371cdbd41c0e2b0dbe9cdf1468785ae87e1fee9e2271f88850fdfb24e2d3
-    0x6547bf47c9fe041eee1ba4d608e2fab969af06d00560daddf0778208e0fe72f4
-    0x258d42d24e3d90a2a0acd3124e9dbc01143fae59f1dae5d49b08dc01d6627ba4
-    0xc9adc7f89d98b01b70030f404fe63747efe4fe604d846813cf7528cf6d9a024f
-    0x822e059534d0f68a31296c863cc6b11e56eb8431ec287a00fca1359fd245ae07
 - #87 Match weird 0.4.x behavior casting return of exterrnal void function to boolean #87
     0x235199dd599fcdef375b03c8adfb8202c32c20db4eaaad147393610615107eea
     0x6fb18698b93913af37e75e16df589d3bc30cfb72be06acee3da04ebd70893ef0
     0x146915aecb5f5f61ae011f1ead182f97dcacc35f09502ce1fdc3ebee88deb105  
-- Mismatch in creation bytecode (maybe #89)
-    0x60661df77835c8beffc2471276979de39818a153af823167c7c80eb4eb197179 
-    0xfb0ea0caaa42814a7a71776e59a95ec99a909580cf33f2df9bdf43fd3315ff10
-    0xdf4a34ddec37d4b62696e1cdecb6f3a5f57378e4cfebb7b80bafca79e0e6565a
-    0x4aa3b9a1d3dc266dd8f09a0f27e969f65644414e7056ece76b5f6571c87ba090
-    0x095586a534ab467fa00e7501487a82460d24ed04cb5e73102d357e1480c95908
 - #119 https://github.com/d1m0/sol-interp/issues/119
     0x722c4f68f4263c81cd70d13f1470c38938f03d16f631be1cdc9aed02ed750af8
 - https://github.com/d1m0/sol-interp/issues/120
@@ -27,11 +15,16 @@ Errors:
 - https://github.com/d1m0/sol-interp/issues/122
     0xefedab22048b44f5f3dd2e763da1ccc0b5f704893125894316a1657238335711
 
+- Static call order
+    0xd0c0adb0f47491dbf73f95a8dfdbf799720f319191276e2c4800a6f36001545d (multiplication order)
+
+- Mising precompile (0x5 - modexp,)
+    0x49435000c266ec3088a174849d61cb1a748eab7ad42cb31560753b50a843004e
 
 Writing ideas:
-    - the design choice of producing a high-level trace opens up the possibilities for establishing bisimulations!!
     - care to match low-level behavior: implemeting the differences between IR and old code-gen
-
+    - KhyberPass.doTrade bug in 0x6fb18698b93913af37e75e16df589d3bc30cfb72be06acee3da04ebd70893ef0
+    - tx 0xa22a77d8dddeec11f23b713e9aea21c615c9dc2d2e94095735874b3dacdf6e0a and the MEV bot calling UniswapV3Pool with a negative amountSpecified and sqrtPriceLimitX96 not cleanly decoding to uint160.
 
 Leftover
 - blobhash
