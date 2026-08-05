@@ -9,7 +9,8 @@
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "bin": {
-        "sol-interp": "dist/bin/cli.js"
+        "sol-interp": "dist/bin/cli.js",
+        "replay": "dist/bin/replay.js"
     },
     "type": "commonjs",
     "scripts": {
