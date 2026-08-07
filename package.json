@@ -22,7 +22,10 @@
         "lint": "eslint src/ test/ --ext=ts",
         "lint:fix": "eslint src/ test/ --ext=ts --fix",
         "test": "jest --coverage",
-        "prepare": "npm run build"
+        "prepare": "npm run build",
+        "docs:render": "typedoc",
+        "docs:clear": "rm -rf docs/",
+        "docs:refresh": "npm run docs:clear && npm run docs:render"
     },
     "dependencies": {
         "commander": "14.0.2",
@@ -63,6 +66,7 @@
         "ts-jest": "29.4.11",
         "ts-node": "10.9.2",
         "typescript": "6.0.3",
+        "typedoc": "0.28.20",
         "peggy": "5.0.6"
     },
     "homepage": "https://github.com/d1m0/sol-interp",
