@@ -1,9 +1,12 @@
 # Intro
 
-`sol-interp` is a full interpreter for the Solidity language. You can use the
-interpreter directly from the CLI to run contracts. You can also use a separate
-CLI tool to replay mainnet transactions with the interpreter, automatically
-fetching any available sources from Etherscan.
+`sol-interp` is a full interpreter for the Solidity language. The interpreter can either be used programmatically, or you can play with it from the CLI.
+This repo includes 2 CLI tools:
+
+- `sol-interp` allows you to interpret any contracts in a mock empty chain, running a sequence of calls and deployments. All contracts are interpreted
+- `replay` allows you to take an existing mainnet transaction(TX), and try to replay any segments of the TX for which there is source code using the interpreter. (sources are automatically fetched from Etherscan)
+
+Additionally the `sol-interp` npm package is build and deployed from this repo. This allows the interpreter to be used programmatically.
 
 # Installation
 
@@ -26,8 +29,7 @@ npm install
 
 ## Interpreting Contracts
 
-To play around with the interpter, all you need is an example contract. For example given the following `fib.sol` file:
-
+To play around with the interpreter, all you need is an example contract. For example given the following `fib.sol` file:
 
 ```solidity
 contract Fib {
@@ -45,7 +47,7 @@ contract Fib {
 }
 ```
 
-You can directly interpret the given file. To run it, you need to specify two steps - (1) how to deploy an instance of `Fib` and (2) what to calling `Fib.fib()` with:
+You can directly interpret the given file. To run it, you need to specify two steps - (1) how to deploy an instance of `Fib` and (2) how to call `Fib.fib()`. E.g.:
 
 ```bash
 sol-interp fib.sol --steps 'deploy:Fib()@$f' 'call:$f.fib(2)'
@@ -94,24 +96,24 @@ succeeded
 [----:--]  return 0x0000000000000000000000000000000000000000000000000000000000000001
 ```
 
-Each line is one step of execution. The first part of the line - `[3:17]` for example - determines the source location of the expression/statatement being evaluated (if any).
-Next we have the step type. We currently have 2 step types. An eval step (e.g. `eval x ->2`) specifies that a given expression evaluated to a value. An exec step (e.g. `exec if (x == 0) {...`) specifies that a statement finished executing.s
+Each line is one step of execution. The first part of the line - `[3:17]` for example - determines the source location of the expression/statement being evaluated (if any).
+Next we have the step type. We currently have 2 step types. An eval step (e.g. `eval x -> 2`) specifies that a given expression evaluated to a value. An exec step (e.g. `exec if (x == 0) {...`) specifies that a statement finished executing.
 
 Its instructive to play around with various solidity samples and the interpreter, to get an understanding of how it evaluates code.
 
 ## Replaying Transactions
 
-Another executable - `replay` (`dist/bin/replay.ts`) provides infrastructure for replaying mainnet transactions (or parts thereof) using the interpreter. To use it, you can for example run:
+Another executable - `replay` (`dist/bin/replay.ts`) provides infrastructure for replaying mainnet TXs (or parts thereof) using the interpreter. Running it requires an Etherscan API key and a Quicknode endpoint. (It might work with other similar endpoints, I haven't tested it though). E.g.:
 
 ```
 node dist/bin/replay.js -e <ETHERSCAN-API-KEY> -q <QUICKNODE-ENDPOINT> -t 0x9abf371cdbd41c0e2b0dbe9cdf1468785ae87e1fee9e2271f88850fdfb24e2d3
 ```
 
-Currently this executable is used mostly for large-scale test runs, so it only emits replay statistics in JSON format for analysis. However it can be a useful starting point for building other TX replay infrastructure.
+Currently this executable is used mostly for large-scale test runs, so it only emits replay statistics in JSON format for analysis. However it can be a useful starting point for building other TX replay infrastructure. Additionally you can replay all TXs in a block by specifying `-b <block-num>` instead of `-t <tx-hash>`.
 
-# Programatic Usage
+# Programmatic Usage
 
-You can directly embed the interpreter in your own projects with just a couple of lines. For example, assuming that we have a Solidity standard JSON artifact in `fib.json`, one can instantiate an interpreter to run TXs using `Fib` as follows:
+You can directly embed the interpreter in your own projects with just a couple of lines. For example, assuming that we have a [Solidity standard JSON artifact](https://docs.soliditylang.org/en/latest/using-the-compiler.html#output-description) in `fib.json`, one can instantiate an interpreter and run TXs against `Fib` as follows:
 
 
 ```typescript
