@@ -16,7 +16,7 @@ import {
 } from "./sol_events";
 import { assert } from "../../utils";
 import { ZERO_ADDRESS, Storage, EventDesc } from "sol-dbg";
-import { bytesToHex, equalsBytes } from "@ethereumjs/util";
+import { equalsBytes } from "@ethereumjs/util";
 import { EVMStep } from "../evm_trace";
 import { AccountInfo } from "../../interp";
 
@@ -36,7 +36,7 @@ function msgDataEq(hlData: Uint8Array, llData: Uint8Array): boolean {
         }
     }
 
-    return isAllZeroes(llData, hlData.length, llData.length)
+    return isAllZeroes(llData, hlData.length, llData.length);
 }
 
 function isAllZeroes(b: Uint8Array, start = 0, end = b.length): boolean {
@@ -57,7 +57,7 @@ function removeZeroValues(m: Map<bigint, Uint8Array>): void {
     }
 }
 
-function storageEq(llStorage: Storage, hlStorage: Storage): boolean {
+export function storageEq(llStorage: Storage, hlStorage: Storage): boolean {
     const llMap = llStorage.collectMap();
     const hlMap = hlStorage.collectMap();
 
@@ -70,9 +70,6 @@ function storageEq(llStorage: Storage, hlStorage: Storage): boolean {
     for (const [key, val] of llMap) {
         const hlVal = hlMap.get(key);
         if (hlVal === undefined || !equalsBytes(val, hlVal)) {
-            console.error(
-                `Diff in key ${key} ll: ${bytesToHex(val)} ${hlVal === undefined ? hlVal : bytesToHex(hlVal)}`
-            );
             return false;
         }
     }
@@ -80,7 +77,7 @@ function storageEq(llStorage: Storage, hlStorage: Storage): boolean {
     return true;
 }
 
-function accountsEq(llAccountInfo: AccountInfo, hlAccountInfo: AccountInfo): boolean {
+export function accountsEq(llAccountInfo: AccountInfo, hlAccountInfo: AccountInfo): boolean {
     return (
         llAccountInfo.balance === hlAccountInfo.balance &&
         //        llAccountInfo.nonce === hlAccountInfo.nonce &&
@@ -109,7 +106,7 @@ function eventsEq(llEvent: EventDesc, hlEvent: EventDesc): boolean {
         return isAllZeroes(extraBytes);
     }
 
-    return equalsBytes(llEvent.payload, hlEvent.payload);
+    return msgDataEq(hlEvent.payload, llEvent.payload);
 }
 
 /**
