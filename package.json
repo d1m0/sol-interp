@@ -23,7 +23,7 @@
         "lint:fix": "eslint src/ test/ --ext=ts --fix",
         "test": "jest --coverage",
         "prepare": "npm run build",
-        "docs:render": "typedoc",
+        "docs:render": "typedoc --plugin typedoc-plugin-missing-exports",
         "docs:clear": "rm -rf docs/",
         "docs:refresh": "npm run docs:clear && npm run docs:render"
     },
@@ -67,6 +67,7 @@
         "ts-node": "10.9.2",
         "typescript": "6.0.3",
         "typedoc": "0.28.20",
+        "typedoc-plugin-missing-exports": "4.1.4",
         "peggy": "5.0.6"
     },
     "homepage": "https://github.com/d1m0/sol-interp",

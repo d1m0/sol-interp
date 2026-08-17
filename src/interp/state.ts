@@ -24,7 +24,7 @@ export interface InternalCallFrame {
 
 /**
  * Interpreter runtime state.
- * 
+ *
  * Contains all the necessary information to invoke a call, deploy a contract, execute a statement, or evaluate an expression by the interpreter.
  */
 export interface State {
@@ -186,8 +186,8 @@ export function takeStateSnapshot(state: State): StateSnapshot {
             state.codeAccount === undefined
                 ? undefined
                 : {
-                    ...state.codeAccount
-                },
+                      ...state.codeAccount
+                  },
         // Note that we need a copy here to show the gradual filling in of immutables during constructor execution
         partialDeployedBytecode:
             state.partialDeployedBytecode === undefined
