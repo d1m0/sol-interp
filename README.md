@@ -1,6 +1,5 @@
 [![Documentation](https://github.com/d1m0/sol-interp/workflows/Deploy%20docs/badge.svg)](https://consensys.github.io/sol-interp/)
 [![npm](https://img.shields.io/npm/v/sol-interp)](https://www.npmjs.com/package/sol-interp)
-[![npm downloads](https://img.shields.io/npm/dm/sol-interp.svg)](https://www.npmjs.com/package/sol-interp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 # Intro

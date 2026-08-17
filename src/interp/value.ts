@@ -125,8 +125,8 @@ export class DefValue extends BaseInterpValue {
             this.def instanceof sol.SourceUnit
                 ? this.def.sourceEntryKey
                 : this.def instanceof sol.ImportDirective
-                  ? this.def.unitAlias
-                  : this.def.name;
+                    ? this.def.unitAlias
+                    : this.def.name;
         return `<${this.def.constructor.name} ${name}>`;
     }
 }
@@ -158,7 +158,7 @@ export class TypeValue extends BaseInterpValue {
  * (Note that this is different from `new T(...)`)
  */
 export class NewCall {
-    constructor(public readonly type: sol.TypeIdentifier) {}
+    constructor(public readonly type: sol.TypeIdentifier) { }
 }
 
 /**
@@ -184,7 +184,7 @@ export class ExternalCallDescription {
             | "transfer"
             | "solidity_call"
             | "contract_deployment"
-    ) {}
+    ) { }
 }
 
 export class CurriedVal {
@@ -198,12 +198,12 @@ export class CurriedVal {
 }
 
 export class SuperVal {
-    constructor(public readonly bases: sol.ContractDefinition[]) {}
+    constructor(public readonly bases: sol.ContractDefinition[]) { }
 }
 
 // Helper value corresponding to the identity fun (x: T) => x.
 // Used to implement UDVT's wrap/unwarp functions.
-export class IdFunVal extends SingletonValue {}
+export class IdFunVal extends SingletonValue { }
 
 /**
  * Class representing the value of Contract.ExternalFun or super.ExternalFun.
@@ -214,7 +214,7 @@ export class ExternalFunDeclValue {
     constructor(public readonly decl: sol.FunctionDefinition | sol.VariableDeclaration) {
         sol.assert(
             decl instanceof sol.FunctionDefinition ||
-                decl.visibility === sol.StateVariableVisibility.Public,
+            decl.visibility === sol.StateVariableVisibility.Public,
             `Unexpected non-public state var {0}`,
             decl.name
         );
@@ -224,6 +224,9 @@ export class ExternalFunDeclValue {
 export const noneVal = new NoneValue();
 export const idFunVal = new IdFunVal();
 
+/**
+ * Interpreter Value
+ */
 export type Value =
     | PrimitiveValue
     | BuiltinFunction
@@ -340,30 +343,30 @@ export type ValueTypeConstructors =
 
 export type TypeConstructorToValueType<V extends ValueTypeConstructors> =
     V extends BigIntConstructor
-        ? bigint
-        : V extends BooleanConstructor
-          ? boolean
-          : V extends Uint8ArrayConstructor
-            ? Uint8Array
-            : V extends AddressConstructor
-              ? Address
-              : V extends ExternalFunRefConstructor
-                ? ExternalFunRef
-                : V extends InternalFunRefConstructor
-                  ? InternalFunRef
-                  : V extends SliceConstructor
-                    ? Slice
-                    : V extends ViewConstructor
-                      ? View
-                      : V extends PoisonConstructor
-                        ? Poison
-                        : V extends BuiltinFunctionConstructor
-                          ? BuiltinFunction
-                          : V extends BuiltinStructConstructor
-                            ? BuiltinStruct
-                            : V extends ArrayConstructor
-                              ? Value[]
-                              : never;
+    ? bigint
+    : V extends BooleanConstructor
+    ? boolean
+    : V extends Uint8ArrayConstructor
+    ? Uint8Array
+    : V extends AddressConstructor
+    ? Address
+    : V extends ExternalFunRefConstructor
+    ? ExternalFunRef
+    : V extends InternalFunRefConstructor
+    ? InternalFunRef
+    : V extends SliceConstructor
+    ? Slice
+    : V extends ViewConstructor
+    ? View
+    : V extends PoisonConstructor
+    ? Poison
+    : V extends BuiltinFunctionConstructor
+    ? BuiltinFunction
+    : V extends BuiltinStructConstructor
+    ? BuiltinStruct
+    : V extends ArrayConstructor
+    ? Value[]
+    : never;
 
 export function match<T extends ValueTypeConstructors>(
     v: Value,

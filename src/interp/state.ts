@@ -22,22 +22,37 @@ export interface InternalCallFrame {
     curModifier: sol.ModifierInvocation | undefined;
 }
 
+/**
+ * Interpreter runtime state.
+ * 
+ * Contains all the necessary information to invoke a call, deploy a contract, execute a statement, or evaluate an expression by the interpreter.
+ */
 export interface State {
-    //Solidity version of the current contract
+    // Account info for the currently executing account
     account: AccountInfo;
-    //Account of actual code executing. May be different from `account`s code for delegate calls
+    // Account info of actual code executing. Is defined only for delegate calls
     codeAccount: AccountInfo | undefined;
-    //Scratch space for the deployed bytecode being created inside the constructor
+    // Scratch space for the deployed bytecode being created inside the constructor
     partialDeployedBytecode: Uint8Array | undefined;
+    // The current memory
     memory: Memory;
+    // The current memory allocator. The default allocator works the same way as Solidity compiled allocation as of 0.8.29
     memAllocator: Allocator;
+    // The `SolMessage` for the current execution context
     msg: SolMessage;
+    // Internal call-stack. Contains the values of all local variables on the call stack
     intCallStack: InternalCallFrame[];
+    // Current  *syntactic* scope being evaluated. Each scope contains a pointer to its parent scope for symbol resolution
     scope: BaseScope | undefined;
+    // Helper map from constant strings/constants vars to their values in memory
     constantsMap: Map<number, BaseMemoryView<BaseValue, rtt.BaseRuntimeType>>;
+    // Flag whether the current context is a STATICCALL (i.e. state is readonly)
     storageReadOnly: boolean;
+    // Current block
     block: Block;
+    // Current root TX
     tx: TypedTransaction;
+    // Whether the current State is built only for a compile-time constant evaluation pass
     isConstantsEval: boolean;
 }
 
@@ -171,8 +186,8 @@ export function takeStateSnapshot(state: State): StateSnapshot {
             state.codeAccount === undefined
                 ? undefined
                 : {
-                      ...state.codeAccount
-                  },
+                    ...state.codeAccount
+                },
         // Note that we need a copy here to show the gradual filling in of immutables during constructor execution
         partialDeployedBytecode:
             state.partialDeployedBytecode === undefined
