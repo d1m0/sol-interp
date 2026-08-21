@@ -26,8 +26,8 @@ import { ArtifactManager } from "./artifactManager";
 import { assert, isBlock04Scope } from "../utils";
 
 /**
- * Identifier scopes.  Note that scopes themselves dont store values - only the
- * state does. They only know where identifiers live in the state.
+ * Identifier scopes. Note that scopes usually don't store values - only the
+ * state does. The only exception here are classes inheriting from `BaseLocalsScope`.
  *
  * At any point in the interpretation we have the following scope stack:
  *
@@ -111,8 +111,7 @@ export abstract class BaseScope {
 }
 
 /**
- * Base class for a Scope that stores data locally. Could be either Solidity stack locals (function args, returns, locals) or
- * interpreter specific temporaries.
+ * Base class for a Scope that stores data locally. Stores Solidity stack locals (function args, returns, locals variables).
  */
 abstract class BaseLocalsScope extends BaseScope {
     protected defs = new Map<sol.VariableDeclaration, Value>();
@@ -184,9 +183,9 @@ type LocalsScopeNodeType =
     | sol.TryCatchClause;
 
 /**
- * Scope corresponding to the current top-level LocalsScope in State.
- * The relationship is fixed at construction, since we store a reference to the
- * underlying map. So if we push more scopes
+ * Scope containing the local variables or args/returns at a given syntactic
+ * scope.  We could have scopes for function/modifier args/returns, basic
+ * blocks, try catch blocks, for statements, etc.
  */
 export class LocalsScope extends BaseLocalsScope {
     constructor(

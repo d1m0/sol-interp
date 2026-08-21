@@ -71,10 +71,13 @@ class MisalignmentError extends Error {
 
 class MatchedInfiniteLoop extends Error {}
 
+/**
+ * Instance of `EthereumEnvInterface` used to find and interpret as much as possible from a given low-level EVM trace
+ */
 export class AlignedTraceBuilder extends BaseEEI {
     highLevelTrace: BaseStep[] = [];
     alignedTraces: AlignedTraces = [];
-    // Map from LL trace indices of starts of new exection context to the LL trace idx right after their corresponding return/revert
+    // Map from LL trace indices of starts of new execution context to the LL trace idx right after their corresponding return/revert
     correspEndIdx = new Map<number, number>();
 
     constructor(
