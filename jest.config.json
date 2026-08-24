@@ -27,7 +27,8 @@
         "/node_modules/",
         "/test/",
         "/coverage/",
-        "/.compiler_cache/"
+        "/.compiler_cache/",
+	"/src/services"
     ],
     "coverageReporters": [
         "text",
