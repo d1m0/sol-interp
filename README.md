@@ -2,6 +2,7 @@
 [![npm](https://img.shields.io/npm/v/sol-interp)](https://www.npmjs.com/package/sol-interp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![NodeJS CI](https://github.com/d1m0/sol-interp/actions/workflows/test.yml/badge.svg)](https://github.com/d1m0/sol-interp/actions/workflows/test.yml)
+![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fgist.githubusercontent.com%2Fd1m0%2F588042d4225f3ba8bca30e2f3a14916d%2Fraw%2Fsol-interp-lcov-coverage.json)]
 
 # Intro
 
