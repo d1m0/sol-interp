@@ -78,7 +78,7 @@ const knownMisalignments: Set<string> = new Set([
     "test/samples/sol2maruir/fun_order.0.6.0.config.json", // https://github.com/d1m0/sol-interp/issues/101
     "test/samples/sol2maruir/fun_order.0.7.0.config.json", // https://github.com/d1m0/sol-interp/issues/101
     "test/samples/sol2maruir/fun_order.0.8.1.config.json", // https://github.com/d1m0/sol-interp/issues/101
-    "test/samples/sol2maruir/lowlevel_calls_04.config.json",// https://github.com/d1m0/sol-interp/issues/125
+    "test/samples/sol2maruir/lowlevel_calls_04.config.json" // https://github.com/d1m0/sol-interp/issues/125
 ]);
 
 export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMReplayDesc> {

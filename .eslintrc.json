@@ -32,6 +32,7 @@
         "src/types/typeStrings/typeString_parser_header.ts",
         "src/types/typeStrings/typeString_parser.ts",
         "src/compile/inference/file_level_definitions_parser_header.ts",
-        "src/compile/inference/file_level_definitions_parser.ts"
+        "src/compile/inference/file_level_definitions_parser.ts",
+	"src/bin/ast/step_parser_gen.d.ts"
     ]
 }
