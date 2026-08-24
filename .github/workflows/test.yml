@@ -19,7 +19,7 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
-    environment:
+    env:
       LATEST_SOLC_VERSION: "0.8.29"
     steps:
       - name: Checkout
