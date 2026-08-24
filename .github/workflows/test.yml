@@ -25,8 +25,14 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
-      - name: Build and test
+      - name: Build
         run: |
           npm install
           npm link
+          npm run lint
+      - name: Pre-download compilers from historical builds archive
+        run: |
+            sol-ast-compile --download-compilers wasm
+      - name: Test
+        run: |
           npm run test
