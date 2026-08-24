@@ -19,10 +19,12 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    environment:
+      LATEST_SOLC_VERSION: "0.8.29"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
       - name: Build
@@ -32,10 +34,10 @@ jobs:
           npm run lint
       - name: Cache downloaded compilers
         id: solc-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
-          path: ~/node_modules/solc-typed-ast/.compiler_cache
-          key: solc-cache
+          path: /node_modules/solc-typed-ast/.compiler_cache
+          key: ${{ runner.os }}-${{ env.LATEST_SOLC_VERSION }}
       - name: Pre-download compilers from historical builds archive
         run: |
             npx sol-ast-compile --download-compilers wasm
@@ -45,5 +47,5 @@ jobs:
       - name: Upload coverage
         uses: gaelgirodon/ci-badges-action@v1
         with:
-          gist-id: gist:588042d4225f3ba8bca30e2f3a14916d
+          gist-id: 588042d4225f3ba8bca30e2f3a14916d
           token: ${{ secrets.GIST_TOKEN }}
