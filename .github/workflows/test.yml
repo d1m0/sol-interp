@@ -32,7 +32,7 @@ jobs:
           npm run lint
       - name: Pre-download compilers from historical builds archive
         run: |
-            sol-ast-compile --download-compilers wasm
+            npx sol-ast-compile --download-compilers wasm
       - name: Test
         run: |
           npm run test
