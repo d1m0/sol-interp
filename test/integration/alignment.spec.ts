@@ -69,6 +69,18 @@ const misalignmentSamples: Array<[string, any]> = [
     ]
 ];
 
+/**
+ * These tests are known to have a misalignment, and its ignored for some reason.
+ * For now, all of the ignored misalignments are due to compiler bugs
+ */
+const knownMisalignments: Set<string> = new Set([
+    "test/samples/sol2maruir/fun_order.0.5.0.config.json", // https://github.com/d1m0/sol-interp/issues/101
+    "test/samples/sol2maruir/fun_order.0.6.0.config.json", // https://github.com/d1m0/sol-interp/issues/101
+    "test/samples/sol2maruir/fun_order.0.7.0.config.json", // https://github.com/d1m0/sol-interp/issues/101
+    "test/samples/sol2maruir/fun_order.0.8.1.config.json", // https://github.com/d1m0/sol-interp/issues/101
+    "test/samples/sol2maruir/lowlevel_calls_04.config.json",// https://github.com/d1m0/sol-interp/issues/125
+]);
+
 export async function scenarioToReplayDesc(scenario: Scenario): Promise<EVMReplayDesc> {
     assert(scenario.steps.length > 0, ``);
     const block = txDescToBlockData(scenario.steps[0]);
@@ -181,7 +193,9 @@ describe("Trace Alignment Tests", () => {
                 expect(
                     alignedTraceWellFormed(alignedTraces, llTrace, artifactManager)
                 ).toBeTruthy();
-                expect(hasMisaligned(alignedTraces)).toEqual(false);
+                if (!knownMisalignments.has(sample)) {
+                    expect(hasMisaligned(alignedTraces)).toEqual(false);
+                }
             }
         });
     }
