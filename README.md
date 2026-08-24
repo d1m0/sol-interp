@@ -203,4 +203,8 @@ for (const step of trace) {
 
 # Documentation
 
-You can find the auto-generated documentation [here](https://d1m0.github.io/sol-interp/). You can find articles describing this work in the [dev blog](https://d1m0.github.io/sol-tooling/).
+You can find the reference documentation [here](https://d1m0.github.io/sol-interp/). You can find articles describing this work in the [dev blog](https://d1m0.github.io/sol-tooling/).
+
+# On AI
+
+All code in this repo is fully and lovingly **human** made. Fuck AI.
