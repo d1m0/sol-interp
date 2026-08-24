@@ -30,6 +30,12 @@ jobs:
           npm install
           npm link
           npm run lint
+      - name: Cache downloaded compilers
+        id: solc-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/node_modules/solc-typed-ast/.compiler_cache
+          key: solc-cache
       - name: Pre-download compilers from historical builds archive
         run: |
             npx sol-ast-compile --download-compilers wasm
